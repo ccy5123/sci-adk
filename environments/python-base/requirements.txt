@@ -1,0 +1,25 @@
+# sci-adk Milestone 1: Python Base Environment
+# Scientific computing stack for T-1 molecular encoding
+
+# Core scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Graph theory (for molecular graphs)
+networkx>=3.0
+
+# Chemistry (for molecular structures - optional, milestone 2+)
+# RDKit is large, defer to actual need
+# rdkit-pypi>=2022.9.0
+
+# Symbolic math (for number theory - optional, milestone 2+)
+# sympy>=1.11
+
+# Data validation (already in sci-adk core)
+pydantic>=1.10.0,<2.0.0
+
+# Development tools (optional, for engineering layer)
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# black>=23.0.0
+# ruff>=0.0.270
