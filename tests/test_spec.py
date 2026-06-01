@@ -20,7 +20,7 @@ Test Categories:
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sci_adk.core.spec import (
     DecisionRule,
@@ -86,9 +86,9 @@ class TestSpecCreation:
         assert spec.amendment_rationale is None
         assert spec.prior_version_id is None
 
-    def test_spec_auto_generates_created_at(self):
+    def test_spec_auto_generates_created_at(self, valid_hypothesis):
         """Test that Spec auto-generates created_at timestamp."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         spec = Spec(
             id="spec-timestamp",
             raw_proposal=RawProposal(
@@ -97,7 +97,7 @@ class TestSpecCreation:
             hypotheses=[valid_hypothesis],
             method=MethodPlan(),
         )
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         assert before <= spec.created_at <= after
 
@@ -115,33 +115,39 @@ class TestInvariantS1_Immutability:
 
     def test_spec_is_frozen(self, valid_spec):
         """Test that Spec instances are frozen (immutable)."""
-        # Pydantic models with frozen=True should raise TypeError on mutation
-        with pytest.raises(TypeError):
+        # Pydantic v2 models with frozen=True raise ValidationError on mutation
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_spec.id = "new-id"
 
     def test_raw_proposal_is_frozen(self, valid_raw_proposal):
         """Test that RawProposal is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_raw_proposal.background = "new background"
 
     def test_hypothesis_is_frozen(self, valid_hypothesis):
         """Test that Hypothesis is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_hypothesis.statement = "new statement"
 
     def test_decision_rule_is_frozen(self, valid_decision_rule):
         """Test that DecisionRule is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_decision_rule.expression = "new expression"
 
     def test_target_claim_is_frozen(self, valid_target_claim):
         """Test that TargetClaim is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_target_claim.statement = "new statement"
 
     def test_method_plan_is_frozen(self, valid_method_plan):
         """Test that MethodPlan is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_method_plan.approaches = ["new"]
 
 

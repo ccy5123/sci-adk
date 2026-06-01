@@ -20,7 +20,7 @@ Test Categories:
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sci_adk.core.evidence import (
     Bearing,
@@ -89,7 +89,7 @@ class TestEvidenceItemCreation:
 
     def test_evidence_item_auto_generates_created_at(self):
         """Test that EvidenceItem auto-generates created_at."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         evidence = EvidenceItem(
             id="evi-timestamp",
             spec_id="spec-001",
@@ -98,7 +98,7 @@ class TestEvidenceItemCreation:
             result=Result(type="qualitative", finding="test"),
             bears_on=[],
         )
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         assert before <= evidence.created_at <= after
 
@@ -117,28 +117,33 @@ class TestInvariantE1_AppendOnly:
 
     def test_evidence_item_is_frozen(self, valid_evidence_item):
         """Test that EvidenceItem instances are frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_evidence_item.id = "new-id"
 
     def test_result_is_frozen(self, valid_quantitative_result):
         """Test that Result is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_quantitative_result.point = 0.5
 
     def test_bearing_is_frozen(self, valid_bearing):
         """Test that Bearing is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_bearing.direction = BearingDirection.REFUTES
 
     def test_provenance_is_frozen(self, valid_provenance):
         """Test that Provenance is frozen."""
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             valid_provenance.seed = 123
 
     def test_cost_is_frozen(self):
         """Test that Cost is frozen."""
+        from pydantic import ValidationError
         cost = Cost(tokens=1000, wallclock_seconds=10.0)
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             cost.tokens = 2000
 
     def test_correction_creates_new_item(self, valid_evidence_item):

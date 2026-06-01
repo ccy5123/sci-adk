@@ -19,7 +19,7 @@ This module uses frozen dataclasses to enforce immutability at the type level.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -82,13 +82,12 @@ class Cost(BaseModel):
         memory_mb: Peak memory usage in MB
     """
 
-    class Config:
-        frozen = True
+    model_config = {"frozen": True}
 
-    tokens: Optional[int] = Field(None, ge=0, description="LLM tokens consumed")
-    wallclock_seconds: Optional[float] = Field(None, ge=0, description="Wall-clock time")
-    cpu_seconds: Optional[float] = Field(None, ge=0, description="CPU time")
-    memory_mb: Optional[float] = Field(None, ge=0, description="Peak memory MB")
+    tokens: Optional[int] = Field(default=None, ge=0, description="LLM tokens consumed")
+    wallclock_seconds: Optional[float] = Field(default=None, ge=0, description="Wall-clock time")
+    cpu_seconds: Optional[float] = Field(default=None, ge=0, description="CPU time")
+    memory_mb: Optional[float] = Field(default=None, ge=0, description="Peak memory MB")
 
 
 class Provenance(BaseModel):
@@ -106,15 +105,16 @@ class Provenance(BaseModel):
         cost: Resource cost telemetry
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
-    code_ref: Optional[str] = Field(None, description="Commit/worktree/script reference")
-    data_ref: Optional[str] = Field(None, description="Dataset id + version")
-    seed: Optional[int] = Field(None, ge=0, description="RNG seed")
-    environment: Optional[str] = Field(None, description="Toolchain/container versions")
-    cost: Optional[Cost] = Field(None, description="Resource cost telemetry")
+    code_ref: Optional[str] = Field(default=None, description="Commit/worktree/script reference")
+    data_ref: Optional[str] = Field(default=None, description="Dataset id + version")
+    seed: Optional[int] = Field(default=None, ge=0, description="RNG seed")
+    environment: Optional[str] = Field(default=None, description="Toolchain/container versions")
+    cost: Optional[Cost] = Field(default=None, description="Resource cost telemetry")
 
     @validator("code_ref", "data_ref", "environment", pre=True, always=True)
     def validate_reproducibility_information(cls, v: Optional[str], values: Dict[str, Any]) -> Optional[str]:
@@ -148,26 +148,27 @@ class Result(BaseModel):
         artifact_ref: Reference to produced figure/table/file (qualitative)
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     type: str = Field(..., description="Result type discriminator")
 
     # Quantitative fields
-    point: Optional[float] = Field(None, description="Point estimate")
-    effect_size: Optional[float] = Field(None, description="Effect size")
+    point: Optional[float] = Field(default=None, description="Point estimate")
+    effect_size: Optional[float] = Field(default=None, description="Effect size")
     ci: Optional[Tuple[float, float]] = Field(
-        None, description="Confidence/credible interval (lower, upper)"
+        default=None, description="Confidence/credible interval (lower, upper)"
     )
-    p_value: Optional[float] = Field(None, ge=0, le=1, description="P-value")
-    posterior: Optional[float] = Field(None, ge=0, le=1, description="Posterior probability")
-    residual: Optional[float] = Field(None, description="Residual")
-    predictive_error: Optional[float] = Field(None, description="Predictive error")
+    p_value: Optional[float] = Field(default=None, ge=0, le=1, description="P-value")
+    posterior: Optional[float] = Field(default=None, ge=0, le=1, description="Posterior probability")
+    residual: Optional[float] = Field(default=None, description="Residual")
+    predictive_error: Optional[float] = Field(default=None, description="Predictive error")
 
     # Qualitative fields
-    finding: Optional[str] = Field(None, description="Qualitative finding text")
-    artifact_ref: Optional[str] = Field(None, description="Reference to produced artifact")
+    finding: Optional[str] = Field(default=None, description="Qualitative finding text")
+    artifact_ref: Optional[str] = Field(default=None, description="Reference to produced artifact")
 
     @validator("type")
     def validate_type(cls, v: str) -> str:
@@ -200,13 +201,14 @@ class Bearing(BaseModel):
         weight: Optional strength/weight of this bearing
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     target_id: Id = Field(..., description="Hypothesis or Claim id this bears on")
     direction: BearingDirection = Field(..., description="Bearing direction")
-    weight: Optional[float] = Field(None, ge=0, description="Optional strength weight")
+    weight: Optional[float] = Field(default=None, ge=0, description="Optional strength weight")
 
     # @MX:NOTE: All bearing directions are first-class outcomes
     # Null results (refutes/inconclusive/neutral) are valid science
@@ -233,14 +235,14 @@ class EvidenceItem(BaseModel):
         supersedes: Optional reference to superseded evidence id (for corrections)
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     id: Id = Field(..., description="Unique evidence identifier")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Creation timestamp (ISO-8601 UTC)",
     )
     spec_id: Id = Field(..., description="Reference to governing Spec")
@@ -251,7 +253,7 @@ class EvidenceItem(BaseModel):
         default_factory=list, description="Relationships to hypotheses/claims"
     )
     supersedes: Optional[Id] = Field(
-        None, description="Supersedes prior evidence id (for corrections)"
+        default=None, description="Supersedes prior evidence id (for corrections)"
     )
 
     # @MX:ANCHOR: Evidence is append-only audit trail
@@ -294,8 +296,8 @@ class EvidenceItem(BaseModel):
             New EvidenceItem with supersedes pointing to this item
         """
         return EvidenceItem(
-            id=f"{self.id}-corr-{int(datetime.utcnow().timestamp())}",
-            created_at=datetime.utcnow(),
+            id=f"{self.id}-corr-{int(datetime.now(timezone.utc).timestamp())}",
+            created_at=datetime.now(timezone.utc),
             spec_id=self.spec_id,
             kind=self.kind,
             provenance=provenance or self.provenance,

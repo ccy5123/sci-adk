@@ -415,7 +415,7 @@ def valid_confidence() -> Confidence:
     return Confidence(
         type=ConfidenceType.CREDENCE,
         value=0.95,
-        basis="Strong experimental support with 99.9% posterior probability",
+        basis="Strong experimental support",
     )
 
 
@@ -566,5 +566,5 @@ def null_result_claim(
         answers=sample_hypothesis_id,
         statement="No evidence for encoding performance improvement with GNNs",
         mode=HypothesisMode.CONFIRMATORY,
-        basis="Tested 1000 variants, no significant difference found (p=0.67)",
+        basis="No evidence found for encoding performance improvement after testing 1000 variants (p=0.67)",
     )

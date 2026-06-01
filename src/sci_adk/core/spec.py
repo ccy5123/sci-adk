@@ -19,7 +19,7 @@ for validation and JSON serialization.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
@@ -78,9 +78,10 @@ class RawProposal(BaseModel):
         expected_output: Anticipated results and contributions
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     background: str = Field(..., min_length=1, description="Research background and context")
     goal: str = Field(..., min_length=1, description="Research goal and objectives")
@@ -112,17 +113,17 @@ class DecisionRule(BaseModel):
         ... )
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     kind: DecisionRuleKind = Field(..., description="Type of decision rule")
     expression: str = Field(
         ..., min_length=1, description="Human-readable rule expression"
     )
     params: Optional[Dict[str, Union[int, float, str, bool]]] = Field(
-        None, description="Machine-usable thresholds where applicable"
+        default=None, description="Machine-usable thresholds where applicable"
     )
 
     @validator("expression")
@@ -175,10 +176,10 @@ class Hypothesis(BaseModel):
         decision_rule: Rule for evaluating evidence against this hypothesis
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
-        use_enum_values = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     id: Id = Field(..., description="Unique hypothesis identifier")
     statement: str = Field(..., min_length=1, description="Hypothesis statement")
@@ -203,13 +204,14 @@ class ToolRef(BaseModel):
         kind: Type of tool (solver, language, dataset, etc.)
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     name: str = Field(..., min_length=1, description="Tool or resource name")
-    version: Optional[str] = Field(None, description="Version constraint")
-    kind: str = Field("tool", description="Type of tool")
+    version: Optional[str] = Field(default=None, description="Version constraint")
+    kind: str = Field(default="tool", description="Type of tool")
 
 
 class MethodPlan(BaseModel):
@@ -224,15 +226,16 @@ class MethodPlan(BaseModel):
         tools: Optional list of expected solvers/languages/datasets
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     approaches: List[str] = Field(
         default_factory=list, description="Planned techniques and approaches"
     )
     tools: Optional[List[ToolRef]] = Field(
-        None, description="Expected solvers, languages, datasets"
+        default=None, description="Expected solvers, languages, datasets"
     )
 
     @validator("approaches", pre=True)
@@ -257,9 +260,10 @@ class TargetClaim(BaseModel):
         answers: Reference to the hypothesis id this target addresses
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     id: Id = Field(..., description="Unique target claim identifier")
     statement: str = Field(..., min_length=1, description="Target claim statement")
@@ -289,17 +293,17 @@ class Spec(BaseModel):
         prior_version_id: Reference to previous version if amended
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     id: Id = Field(..., description="Unique spec identifier")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.utcnow(),
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Creation timestamp (ISO-8601 UTC)",
     )
-    version: int = Field(1, ge=1, description="Version number")
+    version: int = Field(default=1, ge=1, description="Version number")
     raw_proposal: RawProposal = Field(..., description="Original four-pane input")
     hypotheses: List[Hypothesis] = Field(
         default_factory=list, description="Derived hypotheses"
@@ -309,10 +313,10 @@ class Spec(BaseModel):
         default_factory=list, description="Target claims"
     )
     amendment_rationale: Optional[str] = Field(
-        None, description="Rationale for amendment (version > 1)"
+        default=None, description="Rationale for amendment (version > 1)"
     )
     prior_version_id: Optional[Id] = Field(
-        None, description="Previous version id if amended"
+        default=None, description="Previous version id if amended"
     )
 
     # @MX:ANCHOR: Spec is frozen pre-registration contract
@@ -391,7 +395,7 @@ class Spec(BaseModel):
         # Validate that we're not trying to modify frozen fields directly
         return Spec(
             id=self.id,  # Same id, different version
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             version=self.version + 1,
             raw_proposal=raw_proposal or self.raw_proposal,
             hypotheses=hypotheses or self.hypotheses,

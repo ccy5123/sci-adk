@@ -24,7 +24,7 @@ Test Categories:
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sci_adk.core.claim import (
     Claim,
@@ -280,12 +280,12 @@ class TestInvariantC2_AppendOnlyHistory:
 
     def test_status_change_has_timestamp(self, valid_claim, sample_evidence_id):
         """Test that status change records timestamp."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         valid_claim.update_status(
             new_status=ClaimStatus.SUPPORTED,
             triggered_by=sample_evidence_id,
         )
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         change = valid_claim.history[-1]
         assert before <= change.at <= after
@@ -296,14 +296,17 @@ class TestInvariantC3_ConfidenceBasis:
 
     def test_confidence_requires_basis(self):
         """Test that Confidence requires non-empty basis."""
-        with pytest.raises(ValueError, match="basis is required"):
+        from pydantic import ValidationError
+        # Pydantic V2 field validation catches empty string first
+        with pytest.raises(ValidationError, match="String should have at least 1 character"):
             Confidence(
                 type=ConfidenceType.CREDENCE,
                 value=0.9,
                 basis="",  # Empty basis
             )
 
-        with pytest.raises(ValueError, match="must not be empty"):
+        # Pydantic V2 field validation also catches whitespace-only after strip
+        with pytest.raises(ValidationError, match="String should have at least 1 character"):
             Confidence(
                 type=ConfidenceType.CREDENCE,
                 value=0.9,
@@ -627,7 +630,7 @@ class TestStatusChange:
     def test_status_change_note_is_optional(self, sample_evidence_id):
         """Test that note is optional for StatusChange."""
         change = StatusChange(
-            at=datetime.utcnow(),
+            at=datetime.now(timezone.utc),
             from_status=ClaimStatus.PROPOSED,
             to_status=ClaimStatus.SUPPORTED,
             triggered_by=sample_evidence_id,
@@ -637,13 +640,14 @@ class TestStatusChange:
     def test_status_change_is_frozen(self, sample_evidence_id):
         """Test that StatusChange is frozen."""
         change = StatusChange(
-            at=datetime.utcnow(),
+            at=datetime.now(timezone.utc),
             from_status=ClaimStatus.PROPOSED,
             to_status=ClaimStatus.SUPPORTED,
             triggered_by=sample_evidence_id,
         )
 
-        with pytest.raises(TypeError):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
             change.note = "New note"
 
 
@@ -668,12 +672,13 @@ class TestEvidenceLink:
 
     def test_evidence_link_is_frozen(self):
         """Test that EvidenceLink is frozen."""
+        from pydantic import ValidationError
         link = EvidenceLink(
             evidence_id="evi-001",
             role=EvidenceLinkRole.SUPPORTING,
         )
 
-        with pytest.raises(TypeError):
+        with pytest.raises(ValidationError):
             link.role = EvidenceLinkRole.REFUTING
 
 

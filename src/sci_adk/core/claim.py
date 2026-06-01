@@ -23,7 +23,7 @@ append-only history.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -123,16 +123,17 @@ class Confidence(BaseModel):
         basis: Natural-language justification (REQUIRED)
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     type: ConfidenceType = Field(..., description="Type of confidence representation")
     value: Optional[float] = Field(
-        None, ge=0, le=1, description="Numeric confidence [0,1] for credence/posterior"
+        default=None, ge=0, le=1, description="Numeric confidence [0,1] for credence/posterior"
     )
     level: Optional[ConfidenceLevel] = Field(
-        None, description="Qualitative level for graded type"
+        default=None, description="Qualitative level for graded type"
     )
     basis: str = Field(..., min_length=1, description="Natural-language justification (REQUIRED)")
 
@@ -183,9 +184,10 @@ class EvidenceLink(BaseModel):
         role: Whether this evidence supports or refutes the claim
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
 
     evidence_id: Id = Field(..., description="Reference to EvidenceItem")
     role: EvidenceLinkRole = Field(..., description="Supporting or refuting")
@@ -200,25 +202,23 @@ class StatusChange(BaseModel):
 
     Attributes:
         at: Timestamp of the status change
-        from: Previous status
-        to: New status
+        from_status: Previous status
+        to_status: New status
         triggered_by: Evidence id that caused the change
         note: Optional explanation of the change
     """
 
-    class Config:
-        frozen = True
-        anystr_strip_whitespace = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+        "populate_by_name": True,
+    }
 
     at: datetime = Field(..., description="When the status changed")
-    from_status: ClaimStatus = Field(..., description="Previous status", alias="from")
-    to_status: ClaimStatus = Field(..., description="New status", alias="to")
+    from_status: ClaimStatus = Field(..., description="Previous status", serialization_alias="from", validation_alias="from")
+    to_status: ClaimStatus = Field(..., description="New status", serialization_alias="to", validation_alias="to")
     triggered_by: Id = Field(..., description="Evidence id that caused this change")
     note: Optional[str] = Field(None, description="Optional explanation")
-
-    class Config:
-        allow_population_by_field_name = True
 
 
 class Claim(BaseModel):
@@ -245,31 +245,31 @@ class Claim(BaseModel):
         history: Append-only audit of belief movement
     """
 
-    class Config:
-        frozen = False  # Claim is revisable - non-frozen
-        anystr_strip_whitespace = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
-        validate_assignment = True  # Validate on attribute assignment
+    model_config = {
+        "frozen": False,  # Claim is revisable - non-frozen
+        "str_strip_whitespace": True,
+        "validate_assignment": True,  # Validate on attribute assignment
+    }
 
     id: Id = Field(..., description="Unique claim identifier")
     spec_id: Id = Field(..., description="Reference to governing Spec")
     answers: Id = Field(..., description="Hypothesis id this claim addresses")
     statement: str = Field(..., min_length=1, description="Claim statement")
     status: ClaimStatus = Field(
-        ClaimStatus.PROPOSED, description="Current belief status"
+        default=ClaimStatus.PROPOSED, description="Current belief status"
     )
     confidence: Confidence = Field(..., description="Confidence assessment")
     evidence_set: List[EvidenceLink] = Field(
         default_factory=list, description="All evidence (supporting + refuting)"
     )
     scope_limitations: str = Field(
-        "", description="Research limitations text"
+        default="", description="Research limitations text"
     )
     mode: HypothesisMode = Field(
         ..., description="confirmatory or exploratory (inherited from hypothesis)"
     )
     renders_to: Optional[str] = Field(
-        None, description="Paper section/deliverable mapping"
+        default=None, description="Paper section/deliverable mapping"
     )
     history: List[StatusChange] = Field(
         default_factory=list, description="Append-only status change history"
@@ -314,7 +314,7 @@ class Claim(BaseModel):
             triggered_by: Evidence id causing this change
             note: Optional explanation
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Record the change in history (append-only)
         change = StatusChange(
@@ -379,7 +379,12 @@ class Claim(BaseModel):
         new_type = confidence_type or self.confidence.type
         new_value = value if value is not None else self.confidence.value
         new_level = level if level is not None else self.confidence.level
-        new_basis = basis if basis else current_basis
+
+        # Check if basis is being explicitly set (even to empty string)
+        if basis is not None:
+            new_basis = basis
+        else:
+            new_basis = current_basis
 
         if not new_basis or not new_basis.strip():
             raise ValueError("confidence.basis is required")
