@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .spec import HypothesisMode, Id
 
@@ -140,26 +140,23 @@ class Confidence(BaseModel):
     # @MX:ANCHOR: basis is the load-bearing confidence field
     # @MX:REASON: Invariant C3 - prevents arbitrary numeric thresholds from carrying authority
 
-    @validator("value")
-    def validate_fields_match_type(cls, v: Optional[float], values: Dict[str, Any]) -> Optional[float]:
+    @model_validator(mode="after")
+    def validate_fields_match_type(self) -> "Confidence":
         """Ensure confidence fields are appropriate for the declared type."""
-        if "type" in values:
-            conf_type = values["type"]
-            if conf_type in (ConfidenceType.CREDENCE, ConfidenceType.POSTERIOR):
-                if v is None:
-                    raise ValueError(f"{conf_type.value} confidence requires value field")
-        return v
+        if self.type in (ConfidenceType.CREDENCE, ConfidenceType.POSTERIOR):
+            if self.value is None:
+                raise ValueError(f"{self.type.value} confidence requires value field")
+        return self
 
-    @validator("level")
-    def validate_level_for_graded(cls, v: Optional[ConfidenceLevel], values: Dict[str, Any]) -> Optional[ConfidenceLevel]:
+    @model_validator(mode="after")
+    def validate_level_for_graded(self) -> "Confidence":
         """Ensure level is present for graded type."""
-        if "type" in values:
-            conf_type = values["type"]
-            if conf_type == ConfidenceType.GRADED and v is None:
-                raise ValueError("graded confidence requires level field")
-        return v
+        if self.type == ConfidenceType.GRADED and self.level is None:
+            raise ValueError("graded confidence requires level field")
+        return self
 
-    @validator("basis")
+    @field_validator("basis")
+    @classmethod
     def validate_basis_present(cls, v: str) -> str:
         """
         Invariant C3: basis is always required.
@@ -278,14 +275,16 @@ class Claim(BaseModel):
     # @MX:NOTE: Claim is non-frozen - belief state is revisable
     # Only the history log is append-only (Invariant C2)
 
-    @validator("status")
-    def validate_confidence_matches_status(cls, v: ClaimStatus, values: Dict[str, Any]) -> ClaimStatus:
+    @field_validator("status")
+    @classmethod
+    def validate_confidence_matches_status(cls, v: ClaimStatus) -> ClaimStatus:
         """Ensure confidence is consistent with status (informational only)."""
         # Note: We don't raise here because confidence and status can diverge
         # during updates. This is informational validation.
         return v
 
-    @validator("mode", pre=True, always=True)
+    @field_validator("mode", mode="before")
+    @classmethod
     def validate_exploratory_not_presented_as_confirmatory(cls, v: HypothesisMode) -> HypothesisMode:
         """
         Invariant C6: exploratory claims cannot be presented as confirmatory.
@@ -357,7 +356,7 @@ class Claim(BaseModel):
         confidence_type: Optional[ConfidenceType] = None,
         value: Optional[float] = None,
         level: Optional[ConfidenceLevel] = None,
-        basis: str = "",
+        basis: Optional[str] = None,
     ) -> None:
         """
         Update the claim's confidence.
@@ -380,11 +379,11 @@ class Claim(BaseModel):
         new_value = value if value is not None else self.confidence.value
         new_level = level if level is not None else self.confidence.level
 
-        # Check if basis is being explicitly set (even to empty string)
-        if basis is not None:
-            new_basis = basis
-        else:
+        # Check if basis is being explicitly set
+        if basis is None:
             new_basis = current_basis
+        else:
+            new_basis = basis
 
         if not new_basis or not new_basis.strip():
             raise ValueError("confidence.basis is required")

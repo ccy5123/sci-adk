@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Type alias for opaque stable identifiers
 Id = str
@@ -126,7 +126,8 @@ class DecisionRule(BaseModel):
         default=None, description="Machine-usable thresholds where applicable"
     )
 
-    @validator("expression")
+    @field_validator("expression")
+    @classmethod
     def validate_expression_not_binary_only(cls, v: str) -> str:
         """
         Validate that expression does not indicate a purely binary rule.
@@ -144,23 +145,35 @@ class DecisionRule(BaseModel):
                 pass
         return v
 
-    @validator("params")
-    def validate_params_match_kind(
-        cls, v: Optional[Dict[str, Union[int, float, str, bool]]], values: Dict[str, Any]
-    ) -> Optional[Dict[str, Union[int, float, str, bool]]]:
+    @model_validator(mode="after")
+    def validate_params_match_kind(self) -> "DecisionRule":
         """
         Validate that params are appropriate for the rule kind.
 
         Ensures that quantitative rule kinds have appropriate params defined.
         """
-        if "kind" in values:
-            kind = values["kind"]
-            if kind in (DecisionRuleKind.THRESHOLD, DecisionRuleKind.BAYESIAN):
-                if not v:
-                    raise ValueError(
-                        f"{kind.value} rules require params to define thresholds"
-                    )
-        return v
+        kind = self.kind
+        params = self.params
+        if kind in (DecisionRuleKind.THRESHOLD, DecisionRuleKind.BAYESIAN):
+            if not params or params == {}:
+                raise ValueError(
+                    f"{kind.value} rules require params to define thresholds"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def validate_params_required_for_kind(self) -> "DecisionRule":
+        """
+        Model-level validation to ensure params are present for quantitative rules.
+
+        This runs after all field validators and provides a final check.
+        """
+        if self.kind in (DecisionRuleKind.THRESHOLD, DecisionRuleKind.BAYESIAN):
+            if not self.params or self.params == {}:
+                raise ValueError(
+                    f"{self.kind.value} rules require params to define thresholds"
+                )
+        return self
 
 
 class Hypothesis(BaseModel):
@@ -238,7 +251,8 @@ class MethodPlan(BaseModel):
         default=None, description="Expected solvers, languages, datasets"
     )
 
-    @validator("approaches", pre=True)
+    @field_validator("approaches", mode="before")
+    @classmethod
     def validate_approaches_not_empty(cls, v: List[str]) -> List[str]:
         """At least one approach should be specified."""
         if not v or all(a.strip() == "" for a in v):
@@ -322,43 +336,40 @@ class Spec(BaseModel):
     # @MX:ANCHOR: Spec is frozen pre-registration contract
     # @MX:REASON: Invariant S1 - prevents silent HARKing, ensures anti-HARKing guarantee
 
-    @validator("hypotheses")
+    @field_validator("hypotheses")
+    @classmethod
     def validate_hypotheses_not_empty(cls, v: List[Hypothesis]) -> List[Hypothesis]:
         """At least one hypothesis must be defined."""
         if not v:
             raise ValueError("Spec must have at least one hypothesis")
         return v
 
-    @validator("target_claims", pre=True, always=True)
-    def validate_target_claims_reference_hypotheses(
-        cls, v: List[TargetClaim], values: Dict[str, Any]
-    ) -> List[TargetClaim]:
+    @model_validator(mode="after")
+    def validate_target_claims_reference_hypotheses(self) -> "Spec":
         """
         Invariant S4: TargetClaim.answers must reference an existing Hypothesis.id.
 
         This ensures that every target claim is about a known hypothesis.
         """
-        if "hypotheses" in values:
-            hypothesis_ids = {h.id for h in values["hypotheses"]}
-            for claim in v:
+        if self.hypotheses:
+            hypothesis_ids = {h.id for h in self.hypotheses}
+            for claim in self.target_claims:
                 if claim.answers not in hypothesis_ids:
                     raise ValueError(
                         f"TargetClaim '{claim.id}' references unknown hypothesis '{claim.answers}'"
                     )
-        return v
+        return self
 
-    @validator("amendment_rationale", "prior_version_id", pre=True, always=True)
-    def validate_amendment_has_rationale(
-        cls, v: Optional[str], values: Dict[str, Any]
-    ) -> Optional[str]:
+    @model_validator(mode="before")
+    def validate_amendment_has_rationale(self) -> "Spec":
         """
         Validate that amended specs have required documentation.
         """
-        if "version" in values and values["version"] > 1:
-            # Note: This validator runs separately for each field
+        if hasattr(self, 'version') and self.version is not None and self.version > 1:
+            # Note: This validator runs before model validation
             # Full validation happens in model post-init
             pass
-        return v
+        return self
 
     def amend(
         self,
@@ -397,10 +408,10 @@ class Spec(BaseModel):
             id=self.id,  # Same id, different version
             created_at=datetime.now(timezone.utc),
             version=self.version + 1,
-            raw_proposal=raw_proposal or self.raw_proposal,
-            hypotheses=hypotheses or self.hypotheses,
-            method=method or self.method,
-            target_claims=target_claims or self.target_claims,
+            raw_proposal=raw_proposal if raw_proposal is not None else self.raw_proposal,
+            hypotheses=hypotheses if hypotheses is not None else self.hypotheses,
+            method=method if method is not None else self.method,
+            target_claims=target_claims if target_claims is not None else self.target_claims,
             amendment_rationale=rationale,
             prior_version_id=str(self.created_at.timestamp()),
         )

@@ -21,9 +21,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .spec import Id
 
@@ -116,8 +116,8 @@ class Provenance(BaseModel):
     environment: Optional[str] = Field(default=None, description="Toolchain/container versions")
     cost: Optional[Cost] = Field(default=None, description="Resource cost telemetry")
 
-    @validator("code_ref", "data_ref", "environment", pre=True, always=True)
-    def validate_reproducibility_information(cls, v: Optional[str], values: Dict[str, Any]) -> Optional[str]:
+    @model_validator(mode="before")
+    def validate_reproducibility_information(self) -> "EvidenceItem":
         """
         Invariant E3: Validate that sufficient provenance is recorded.
 
@@ -125,7 +125,7 @@ class Provenance(BaseModel):
         """
         # Note: This is a simplified check - full validation would check all fields
         # We don't raise to allow purely observational evidence
-        return v
+        return self
 
 
 class Result(BaseModel):
@@ -158,7 +158,7 @@ class Result(BaseModel):
     # Quantitative fields
     point: Optional[float] = Field(default=None, description="Point estimate")
     effect_size: Optional[float] = Field(default=None, description="Effect size")
-    ci: Optional[Tuple[float, float]] = Field(
+    ci: Optional[List[float]] = Field(
         default=None, description="Confidence/credible interval (lower, upper)"
     )
     p_value: Optional[float] = Field(default=None, ge=0, le=1, description="P-value")
@@ -170,7 +170,8 @@ class Result(BaseModel):
     finding: Optional[str] = Field(default=None, description="Qualitative finding text")
     artifact_ref: Optional[str] = Field(default=None, description="Reference to produced artifact")
 
-    @validator("type")
+    @field_validator("type")
+    @classmethod
     def validate_type(cls, v: str) -> str:
         """Ensure type is one of the allowed values."""
         allowed = {"quantitative", "qualitative"}
@@ -178,10 +179,13 @@ class Result(BaseModel):
             raise ValueError(f"type must be one of {allowed}, got '{v}'")
         return v
 
-    @validator("ci")
-    def validate_ci_interval(cls, v: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+    @field_validator("ci")
+    @classmethod
+    def validate_ci_interval(cls, v: Optional[List[float]]) -> Optional[List[float]]:
         """Validate confidence interval ordering."""
         if v:
+            if len(v) != 2:
+                raise ValueError(f"CI must have exactly 2 values, got {len(v)}")
             lower, upper = v
             if lower > upper:
                 raise ValueError(f"CI lower bound ({lower}) exceeds upper ({upper})")
@@ -259,19 +263,17 @@ class EvidenceItem(BaseModel):
     # @MX:ANCHOR: Evidence is append-only audit trail
     # @MX:REASON: Invariant E1 - enforces monotone scientific record
 
-    @validator("bears_on")
-    def validate_bears_on_not_empty(cls, v: List[Bearing], values: Dict[str, Any]) -> List[Bearing]:
+    @model_validator(mode="before")
+    def validate_bears_on_not_empty(self) -> "EvidenceItem":
         """
         Validate that at least one bearing is specified for non-observational evidence.
 
         Evidence should relate to at least one hypothesis or claim.
         """
-        if "kind" in values:
-            kind = values["kind"]
-            if kind != EvidenceKind.OBSERVATION and not v:
-                # We don't raise to allow flexible evidence entry
-                pass
-        return v
+        if hasattr(self, 'kind') and self.kind != EvidenceKind.OBSERVATION and not self.bears_on:
+            # We don't raise to allow flexible evidence entry
+            pass
+        return self
 
     def with_correction(
         self,

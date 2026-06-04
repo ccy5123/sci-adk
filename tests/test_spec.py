@@ -249,7 +249,7 @@ class TestInvariantS4_TargetClaimReferences:
         hypothesis_ids = {h.id for h in valid_spec.hypotheses}
         assert target_claim.answers in hypothesis_ids
 
-    def test_invalid_target_claim_reference_raises(self):
+    def test_invalid_target_claim_reference_raises(self, valid_threshold_decision_rule):
         """Test that invalid TargetClaim reference raises ValueError."""
         with pytest.raises(ValueError, match="unknown hypothesis"):
             Spec(
@@ -295,7 +295,7 @@ class TestInvariantS4_TargetClaimReferences:
 class TestInvariantS5_AmendmentRequirements:
     """Tests for Invariant S5: Amending Spec requires human checkpoint."""
 
-    def test_amend_creates_new_version(self, valid_spec):
+    def test_amend_creates_new_version(self, valid_spec, valid_threshold_decision_rule):
         """Test that amend() creates a new Spec with incremented version."""
         amended = valid_spec.amend(
             hypotheses=[
@@ -306,6 +306,7 @@ class TestInvariantS5_AmendmentRequirements:
                     decision_rule=valid_threshold_decision_rule,
                 )
             ],
+            target_claims=[],  # Clear existing claims that reference old hypotheses
             rationale="Test amendment",
         )
 
@@ -346,7 +347,7 @@ class TestInvariantS5_AmendmentRequirements:
         # Method should be new
         assert amended.method.approaches == ["new approach"]
 
-    def test_amend_all_components(self, valid_spec):
+    def test_amend_all_components(self, valid_spec, valid_threshold_decision_rule):
         """Test amending all components at once."""
         new_proposal = RawProposal(
             background="Updated background",
@@ -485,7 +486,7 @@ class TestEdgeCases:
                 method=MethodPlan(),
             )
 
-    def test_empty_target_claims_allowed(self):
+    def test_empty_target_claims_allowed(self, valid_hypothesis):
         """Test that empty target_claims list is allowed."""
         spec = Spec(
             id="spec-no-claims",
@@ -498,7 +499,7 @@ class TestEdgeCases:
         )
         assert len(spec.target_claims) == 0
 
-    def test_empty_method_approaches_allowed(self):
+    def test_empty_method_approaches_allowed(self, valid_hypothesis):
         """Test that empty method approaches is allowed."""
         spec = Spec(
             id="spec-no-approaches",

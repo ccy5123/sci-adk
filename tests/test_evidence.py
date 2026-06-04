@@ -354,7 +354,7 @@ class TestResultTypes:
             type="quantitative",
             ci=(0.0, 1.0),
         )
-        assert result.ci == (0.0, 1.0)
+        assert result.ci == [0.0, 1.0]
 
         # Invalid CI (lower > upper)
         with pytest.raises(ValueError, match="lower bound.*exceeds upper"):

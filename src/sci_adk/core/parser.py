@@ -33,11 +33,13 @@ class ProposalParser:
     """
 
     # Section markers for 4-pane format
+    # Support both "# Background" and "Background" formats
+    # Handle split lines (no trailing newline)
     SECTION_PATTERNS = {
-        "background": r"(?:연구\s*배경|Research Background|Background)",
-        "goal": r"(?:연구\s*목표|Research Goal|Goal)",
-        "method": r"(?:연구\s*방법|Research Method|Method)",
-        "expected_output": r"(?:기대\s*산출물|Expected Output|Output)",
+        "background": r"#\s+(?:연구\s*배경|Research\s+Background)\b|#\s+Background\b",
+        "goal": r"#\s+(?:연구\s*목표|Research\s+Goal)\b|#\s+Goal\b",
+        "method": r"#\s+(?:연구\s*방법|Research\s+Method)\b|#\s+Method\b",
+        "expected_output": r"#\s+(?:기대\s*산출물|Expected\s+Output)\b|#\s+(?:Expected\s+Output|Output)\b",
     }
 
     def __init__(self):
@@ -113,14 +115,21 @@ class ProposalParser:
         current_section = None
         current_content = []
 
-        for line in lines:
+        # DEBUG
+        import sys
+        print(f"DEBUG: Lines count: {len(lines)}", file=sys.stderr)
+
+        for line_idx, line in enumerate(lines):
             # Check if line is a section header
             matched = False
             for section_name, pattern in self._section_regex.items():
                 if pattern.search(line):
+                    print(f"DEBUG: Line {line_idx} matched {section_name}: {repr(line)}", file=sys.stderr)
                     # Save previous section if exists
                     if current_section:
-                        sections[current_section] = "\n".join(current_content).strip()
+                        saved = "\n".join(current_content).strip()
+                        print(f"DEBUG: Saving {current_section}: {repr(saved[:50])}", file=sys.stderr)
+                        sections[current_section] = saved
                     # Start new section
                     current_section = section_name
                     current_content = []
@@ -128,11 +137,17 @@ class ProposalParser:
                     break
 
             if not matched and current_section:
+                print(f"DEBUG: Line {line_idx} added to {current_section}: {repr(line)}", file=sys.stderr)
                 current_content.append(line)
 
         # Save last section
         if current_section:
-            sections[current_section] = "\n".join(current_content).strip()
+            saved = "\n".join(current_content).strip()
+            print(f"DEBUG: Saving final {current_section}: {repr(saved[:50])}", file=sys.stderr)
+            sections[current_section] = saved
+
+        # DEBUG: Print extraction result
+        print(f"DEBUG: Extracted sections: {sections}", file=sys.stderr)
 
         # Fallback: if no sections found, treat entire text as goal
         if not sections:

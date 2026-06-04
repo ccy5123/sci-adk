@@ -1,8 +1,8 @@
 # Milestone 1: Minimal Viable T-1
 
-> Status: Draft for user approval
-> Reference: Session 1 handoff (Deliverable #4)
-> Last Updated: 2026-05-26
+> Status: CONFIRMED (Session 2 approved, 2026-06-04)
+> Reference: Session 1 handoff (Deliverable #4) + Session 2 confirmation
+> Last Updated: 2026-06-04
 
 ## Goal
 
@@ -250,6 +250,7 @@ interval - "effect-size 95% CI excludes 0 => support; includes 0 => null"
 
 ---
 
-Version: 0.1 (Draft)
-Status: Pending user approval
-Source: Session 1 handoff Deliverable #4
+Version: 1.0 (CONFIRMED)
+Status: Approved for implementation
+Source: Session 1 handoff Deliverable #4 + Session 2 confirmation
+Confirmed: 2026-06-04
