@@ -2,7 +2,15 @@
 Claim updater for sci-adk research loop.
 
 Evaluates Evidence against Spec DecisionRules and updates Claims.
-Reference: design/directory-structure.md (loop/)
+Reference: design/directory-structure.md (loop/), design/decision-engine.md §4.
+
+Phase D4 (design/decision-engine.md §4): ``ClaimUpdater`` no longer counts
+``SUPPORTS``/``REFUTES`` bearings. It DELEGATES belief computation to the
+``DecisionEngine`` -- the per-Spec ``DecisionRule`` is now the sole authority for
+direction and confidence (D1) -- and only *assembles / persists* the resulting
+``Claim``. It also supports non-monotone updates: re-running over an appended,
+append-only record can demote a Claim, recording every move in the Claim's
+append-only history (Decision 8, C1/C2).
 """
 
 import json
@@ -10,24 +18,44 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from src.sci_adk.core.claim import (
+from sci_adk.core.claim import (
     Claim,
     ClaimStatus,
-    Confidence,
     EvidenceLink,
-    EvidenceRole,
+    EvidenceLinkRole,
     StatusChange,
 )
-from src.sci_adk.core.evidence import EvidenceItem, BearingDirection
-from src.sci_adk.core.spec import Spec
+from sci_adk.core.evidence import EvidenceItem, BearingDirection
+from sci_adk.core.spec import Spec
+
+from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
+
+
+# Decision 8 (design/decision-engine.md §3): how an engine ``Verdict.direction``
+# maps to a ``ClaimStatus``. ``supports``->SUPPORTED, ``refutes``->REFUTED,
+# ``neutral``/``inconclusive``->PROPOSED. CONTESTED is NOT in this table: the
+# engine aggregates to ONE direction and cannot itself signal "mixed evidence",
+# so CONTESTED is decided separately from the RAW bearings (see
+# ``_status_for_verdict``). ``retracted`` is reserved for provenance failure
+# and is never emitted here.
+_DIRECTION_TO_STATUS: dict[BearingDirection, ClaimStatus] = {
+    BearingDirection.SUPPORTS: ClaimStatus.SUPPORTED,
+    BearingDirection.REFUTES: ClaimStatus.REFUTED,
+    BearingDirection.NEUTRAL: ClaimStatus.PROPOSED,
+    BearingDirection.INCONCLUSIVE: ClaimStatus.PROPOSED,
+}
 
 
 class ClaimUpdater:
     """
-    Update Claims based on Evidence.
+    Update Claims based on Evidence by delegating belief to the DecisionEngine.
 
-    Evaluates Evidence against Spec DecisionRules and updates Claim confidence.
-    Milestone 1: Basic evaluation without full DecisionRule engine.
+    The updater pre-filters the Evidence log to the bearings on each hypothesis,
+    hands the hypothesis's frozen ``DecisionRule`` + those bearings to
+    ``DecisionEngine.evaluate``, maps the returned ``Verdict`` to a Claim status
+    (Decision 8), and persists the Claim. Belief computation lives entirely in the
+    engine (D1); the updater owns only record-keeping and the non-monotone
+    load-or-create + ``update_status`` mechanics.
     """
 
     def __init__(
@@ -46,6 +74,8 @@ class ClaimUpdater:
         self.workspace_dir = workspace_dir or Path.cwd()
         self.claims_dir = self.workspace_dir / "runs" / spec.id / "claims"
         self.claims_dir.mkdir(parents=True, exist_ok=True)
+        # The engine holds no state and no constants (D1); one instance suffices.
+        self.engine = DecisionEngine()
 
     def update_claims_from_evidence(
         self,
@@ -86,97 +116,217 @@ class ClaimUpdater:
         evidence_items: List[EvidenceItem],
     ) -> Claim:
         """
-        Evaluate hypothesis against evidence.
+        Evaluate a hypothesis by DELEGATING belief to the DecisionEngine, then
+        assemble (or non-monotonically update) the Claim (design/decision-engine.md §4).
 
-        Milestone 1: Simple support/refute counting.
-        Full DecisionRule evaluation deferred to milestone 2+.
+        The verdict is recomputed over the FULL append-only set of bearings on the
+        hypothesis every time (record is monotone; belief is recomputed), so a
+        previously ``SUPPORTED`` Claim can be demoted as refuting Evidence arrives
+        (Decision 8). The engine supplies the kind-correct ``Confidence`` (with a
+        required basis) directly -- no hardcoded ``credence``.
 
         Args:
-            hypothesis: Hypothesis to evaluate
-            evidence_items: Relevant EvidenceItems
+            hypothesis: Hypothesis to evaluate (carries the frozen DecisionRule)
+            evidence_items: EvidenceItems already pre-filtered to this hypothesis
 
         Returns:
-            Claim with updated confidence
+            A freshly created Claim, or the loaded Claim mutated in place.
         """
-        # Count supporting vs refuting evidence
-        support_count = 0
-        refute_count = 0
-        total_weight = 0.0
-
-        for evidence in evidence_items:
-            for bearing in evidence.bears_on:
-                if bearing.target_id == hypothesis.id:
-                    total_weight += bearing.weight or 1.0
-                    if bearing.direction == BearingDirection.SUPPORTS:
-                        support_count += 1
-                    elif bearing.direction == BearingDirection.REFUTES:
-                        refute_count += 1
-
-        # Determine status
-        if support_count > 0 and refute_count == 0:
-            status = ClaimStatus.SUPPORTED
-        elif refute_count > 0 and support_count == 0:
-            status = ClaimStatus.REFUTED
-        elif support_count > 0 and refute_count > 0:
-            status = ClaimStatus.CONTESTED
-        else:
-            status = ClaimStatus.PROPOSED
-
-        # Calculate confidence (simple heuristic)
-        if support_count + refute_count > 0:
-            confidence_value = support_count / (support_count + refute_count)
-        else:
-            confidence_value = 0.0
-
-        # Create basis text
-        basis = (
-            f"Based on {len(evidence_items)} evidence items: "
-            f"{support_count} supporting, {refute_count} refuting."
+        # Build the engine's pre-filtered view: every (EvidenceItem, Bearing) pair
+        # whose bearing targets this hypothesis (the pre-filter from line 67-71 stays).
+        results = EvidenceForHypothesis(
+            pairs=[
+                (ev, b)
+                for ev in evidence_items
+                for b in ev.bears_on
+                if b.target_id == hypothesis.id
+            ]
         )
 
-        # Create claim
-        claim = Claim(
+        # Delegate: the per-Spec DecisionRule is the sole authority for direction
+        # and confidence (D1). The vote-count is gone.
+        verdict = self.engine.evaluate(hypothesis.decision_rule, results)
+        raw_directions = {b.direction for _, b in results.pairs}
+        status = self._status_for_verdict(verdict, raw_directions)
+        confidence = verdict.confidence  # kind-correct type + required basis (Decision 5/C3)
+
+        # The triggering evidence for any status move is the latest-arriving one.
+        triggering_id = self._latest_evidence_id(evidence_items)
+
+        # Record-keeping (C5): supporting vs refuting links per bearing direction.
+        # This is the RECORD, not the belief -- it stays even though the status is
+        # now decided by the engine verdict.
+        evidence_links = [
+            EvidenceLink(
+                evidence_id=ev.id,
+                role=EvidenceLinkRole.SUPPORTING
+                if any(
+                    b.target_id == hypothesis.id
+                    and b.direction == BearingDirection.SUPPORTS
+                    for b in ev.bears_on
+                )
+                else EvidenceLinkRole.REFUTING,
+            )
+            for ev in evidence_items
+        ]
+
+        existing = self._load_claim(hypothesis)
+        if existing is not None:
+            return self._apply_update(existing, status, confidence, evidence_links, triggering_id)
+        return self._create_claim(hypothesis, status, confidence, evidence_links, triggering_id)
+
+    @staticmethod
+    def _status_for_verdict(verdict, raw_directions: set) -> ClaimStatus:
+        """
+        Map an engine ``Verdict`` to a ``ClaimStatus`` (Decision 8), with the one
+        judgment call: the CONTESTED override.
+
+        @MX:NOTE: [AUTO] CONTESTED override is the single judgment call in Phase D4
+            (FLAGGED for orchestrator review). The engine aggregates the bearings to
+            ONE direction, so it cannot by itself report "mixed evidence". To NOT
+            regress the contested capability the old vote-count had, the updater sets
+            CONTESTED whenever the RAW bearings on this hypothesis contain BOTH a
+            ``SUPPORTS`` and a ``REFUTES`` (support and refutation coexist -- matching
+            ``ClaimStatus.CONTESTED`` "mixed evidence; support and refutation coexist"
+            and C5). The confidence still comes from the engine verdict (the caller
+            passes ``verdict.confidence`` regardless of this status). Otherwise the
+            direction maps via ``_DIRECTION_TO_STATUS``. ``retracted`` is reserved
+            for provenance failure and is never emitted here.
+
+        Args:
+            verdict: the engine's ``Verdict`` (its ``direction`` drives the mapping).
+            raw_directions: the set of RAW ``BearingDirection`` values across the
+                bearings on this hypothesis (used only for the CONTESTED override).
+        """
+        if (
+            BearingDirection.SUPPORTS in raw_directions
+            and BearingDirection.REFUTES in raw_directions
+        ):
+            return ClaimStatus.CONTESTED
+        return _DIRECTION_TO_STATUS[verdict.direction]
+
+    @staticmethod
+    def _latest_evidence_id(evidence_items: List[EvidenceItem]) -> str:
+        """
+        Return the id of the latest-arriving EvidenceItem (the one that triggers a
+        status move, Decision 8). Latest is by ``created_at``, breaking ties toward
+        the later position in the supplied (append/arrival) order so the choice is
+        deterministic. Empty input yields ``""`` (parity with the prior behavior).
+        """
+        if not evidence_items:
+            return ""
+        latest = max(
+            enumerate(evidence_items),
+            key=lambda pair: (pair[1].created_at, pair[0]),
+        )[1]
+        return latest.id
+
+    def _load_claim(self, hypothesis) -> Optional[Claim]:
+        """
+        Load the persisted Claim for this hypothesis if one exists (Decision 8
+        load-or-create), else return ``None``.
+
+        The Claim id is stable (``claim-<hyp.id>``), so the on-disk JSON is the
+        record of prior belief; loading it lets ``update_status`` append to the
+        existing append-only history rather than overwriting it (C2).
+        """
+        filepath = self.claims_dir / f"{self._generate_claim_id(hypothesis)}.json"
+        if not filepath.exists():
+            return None
+        with open(filepath, "r", encoding="utf-8") as f:
+            return Claim.model_validate(json.load(f))
+
+    def _apply_update(
+        self,
+        claim: Claim,
+        status: ClaimStatus,
+        confidence,
+        evidence_links: List[EvidenceLink],
+        triggering_id: str,
+    ) -> Claim:
+        """
+        Non-monotonically update an existing Claim (Decision 8).
+
+        Refreshes the evidence_set (record-keeping, C5), then -- only if the newly
+        computed status DIFFERS from the current one -- threads the move through
+        ``Claim.update_status`` (which appends a ``StatusChange``, satisfying C1
+        non-monotone movement and C2 append-only history). Confidence is always
+        refreshed from the engine verdict (basis remains required, C3). A
+        ``SUPPORTED -> CONTESTED -> REFUTED`` path is legal and expected, not a
+        regression. No spurious StatusChange is appended when the status is stable
+        (D5: only NEW evidence that moves the verdict moves the history).
+        """
+        claim.evidence_set = self._merge_links(claim.evidence_set, evidence_links)
+
+        if claim.status != status:
+            claim.update_status(
+                status,
+                triggered_by=triggering_id,
+                note=f"Re-evaluation moved status to {status.value}",
+            )
+
+        claim.update_confidence(
+            confidence_type=confidence.type,
+            value=confidence.value,
+            level=confidence.level,
+            basis=confidence.basis,
+        )
+        return claim
+
+    def _create_claim(
+        self,
+        hypothesis,
+        status: ClaimStatus,
+        confidence,
+        evidence_links: List[EvidenceLink],
+        triggering_id: str,
+    ) -> Claim:
+        """
+        Create a fresh Claim with one initial ``StatusChange`` (Milestone-1 parity
+        with the prior first-evaluation behavior, Decision 8 / §4 item 3).
+        """
+        return Claim(
             id=self._generate_claim_id(hypothesis),
             spec_id=self.spec.id,
             answers=hypothesis.id,
             statement=hypothesis.statement,
             status=status,
-            confidence=Confidence(
-                type="credence",
-                value=confidence_value,
-                basis=basis,
-            ),
-            evidence_set=[
-                EvidenceLink(
-                    evidence_id=ev.id,
-                    role=EvidenceRole.SUPPORTING
-                    if any(
-                        b.target_id == hypothesis.id
-                        and b.direction == BearingDirection.SUPPORTS
-                        for b in ev.bears_on
-                    )
-                    else EvidenceRole.REFUTING,
-                )
-                for ev in evidence_items
-            ],
-            scope_limitations="Milestone 1: Limited to T-1 test molecules. Small sample size.",
+            confidence=confidence,
+            evidence_set=evidence_links,
             mode=hypothesis.mode,
-            renders_to=None,  # Milestone 1: no paper rendering
+            renders_to=None,
             history=[
                 StatusChange(
-                    at=datetime.now(timezone.utc).isoformat(),
+                    at=datetime.now(timezone.utc),
                     from_status=ClaimStatus.PROPOSED,
                     to_status=status,
-                    triggered_by=evidence_items[0].id if evidence_items else "",
-                    note=f"Initial evaluation based on {len(evidence_items)} evidence items",
+                    triggered_by=triggering_id,
+                    note="Initial evaluation via DecisionEngine",
                 )
             ],
         )
 
-        return claim
+    @staticmethod
+    def _merge_links(
+        existing: List[EvidenceLink],
+        new_links: List[EvidenceLink],
+    ) -> List[EvidenceLink]:
+        """
+        Merge new evidence links into the existing set without duplicating
+        (evidence_id, role) pairs. Order is preserved: existing links first, then
+        any genuinely new ones (the Evidence log is append-only, so links only grow).
+        """
+        seen = {(link.evidence_id, link.role) for link in existing}
+        merged = list(existing)
+        for link in new_links:
+            key = (link.evidence_id, link.role)
+            if key not in seen:
+                seen.add(key)
+                merged.append(link)
+        return merged
 
     def _generate_claim_id(self, hypothesis) -> str:
-        """Generate Claim ID for hypothesis."""
+        """Generate Claim ID for hypothesis (stable per hypothesis)."""
         return f"claim-{hypothesis.id}"
 
     def _save_claim(self, claim: Claim) -> None:

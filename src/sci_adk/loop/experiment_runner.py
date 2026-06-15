@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.sci_adk.core.evidence import (
+from sci_adk.core.evidence import (
     EvidenceItem,
     Provenance,
     Result,
@@ -18,8 +18,8 @@ from src.sci_adk.core.evidence import (
     EvidenceKind,
     BearingDirection,
 )
-from src.sci_adk.core.spec import Spec
-from src.sci_adk.runner.docker_executor import DockerExecutor, execute_t1_molecule_encoding
+from sci_adk.core.spec import Spec
+from sci_adk.runner.docker_executor import DockerExecutor, execute_t1_molecule_encoding
 
 
 class ExperimentRunner:

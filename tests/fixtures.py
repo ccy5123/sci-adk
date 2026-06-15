@@ -109,11 +109,17 @@ def valid_threshold_decision_rule() -> DecisionRule:
 
 @pytest.fixture
 def valid_interval_decision_rule() -> DecisionRule:
-    """Valid interval-based decision rule."""
+    """Valid interval-based decision rule.
+
+    Decision 3 (design/decision-engine.md): interval rules carry the null value
+    and support side in params so the DecisionEngine can evaluate the CI against
+    a machine-readable null (never a hardcoded 0). params are now REQUIRED for
+    INTERVAL, the same as THRESHOLD/BAYESIAN.
+    """
     return DecisionRule(
         kind=DecisionRuleKind.INTERVAL,
         expression="95% CI excludes 0 => support",
-        params={"confidence_level": 0.95},
+        params={"null_value": 0.0, "support_side": "excludes", "confidence_level": 0.95},
     )
 
 

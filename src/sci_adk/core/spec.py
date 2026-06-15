@@ -103,13 +103,19 @@ class DecisionRule(BaseModel):
     Attributes:
         kind: The type of decision rule (threshold, bayesian, interval, proof, qualitative)
         expression: Human-readable rule description
-        params: Optional machine-usable thresholds where applicable
+        params: Machine-usable thresholds. REQUIRED for the numeric kinds
+            (threshold, bayesian, interval); optional for proof/qualitative.
 
     Example:
         >>> bayesian_rule = DecisionRule(
         ...     kind=DecisionRuleKind.BAYESIAN,
         ...     expression="posterior odds > 10 => support",
         ...     params={"min_odds": 10.0}
+        ... )
+        >>> interval_rule = DecisionRule(
+        ...     kind=DecisionRuleKind.INTERVAL,
+        ...     expression="95% CI excludes 0 => support",
+        ...     params={"null_value": 0.0, "support_side": "excludes"}
         ... )
     """
 
@@ -126,49 +132,42 @@ class DecisionRule(BaseModel):
         default=None, description="Machine-usable thresholds where applicable"
     )
 
-    @field_validator("expression")
-    @classmethod
-    def validate_expression_not_binary_only(cls, v: str) -> str:
-        """
-        Validate that expression does not indicate a purely binary rule.
-
-        Invariant S3: A purely binary pass/fail rule is a smell.
-        This validator warns but does not reject, as some cases are legitimate.
-        """
-        # Check for obviously binary expressions
-        binary_patterns = ["pass/fail", "binary", "either succeed or fail"]
-        v_lower = v.lower()
-        for pattern in binary_patterns:
-            if pattern in v_lower:
-                # We don't reject, but the expression should justify
-                # why a binary rule is appropriate for this research
-                pass
-        return v
-
-    @model_validator(mode="after")
-    def validate_params_match_kind(self) -> "DecisionRule":
-        """
-        Validate that params are appropriate for the rule kind.
-
-        Ensures that quantitative rule kinds have appropriate params defined.
-        """
-        kind = self.kind
-        params = self.params
-        if kind in (DecisionRuleKind.THRESHOLD, DecisionRuleKind.BAYESIAN):
-            if not params or params == {}:
-                raise ValueError(
-                    f"{kind.value} rules require params to define thresholds"
-                )
-        return self
+    # Invariant S3 (documentation): a purely binary pass/fail rule is a smell, but
+    # it is not invalid -- some research legitimately reduces to a binary outcome,
+    # and S3 cannot reject it (design/decision-engine.md §5 item 1). The earlier
+    # ``validate_expression_not_binary_only`` validator looped over binary patterns
+    # and ``pass``ed on every match, enforcing nothing; it was removed as dead code.
+    # The numeric rule kinds carry their continuous mapping in ``params`` (consumed
+    # by the DecisionEngine), which is where S3's "continuous => outcome" intent is
+    # actually honored.
 
     @model_validator(mode="after")
     def validate_params_required_for_kind(self) -> "DecisionRule":
         """
-        Model-level validation to ensure params are present for quantitative rules.
+        Validate that params are present for the quantitative rule kinds.
 
-        This runs after all field validators and provides a final check.
+        The numeric kinds carry their machine-usable thresholds in ``params``
+        (consumed by the DecisionEngine, never a hardcoded constant), so they MUST
+        be present:
+
+        - ``threshold``: comparison statistic/op/value
+        - ``bayesian``: ``min_odds``
+        - ``interval``: ``null_value`` + ``support_side`` (Decision 3,
+          design/decision-engine.md §0/§5/Decision 3 -- INTERVAL was added to this
+          set so an interval rule's null value is machine-readable, never assumed 0)
+
+        ``proof`` and ``qualitative`` are non-numeric and do not require params.
+
+        This is the single surviving params validator -- it collapses the former
+        duplicate pair (``validate_params_match_kind`` /
+        ``validate_params_required_for_kind``), which were the same check
+        (design/decision-engine.md §5 item 2).
         """
-        if self.kind in (DecisionRuleKind.THRESHOLD, DecisionRuleKind.BAYESIAN):
+        if self.kind in (
+            DecisionRuleKind.THRESHOLD,
+            DecisionRuleKind.BAYESIAN,
+            DecisionRuleKind.INTERVAL,
+        ):
             if not self.params or self.params == {}:
                 raise ValueError(
                     f"{self.kind.value} rules require params to define thresholds"

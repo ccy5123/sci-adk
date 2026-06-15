@@ -539,11 +539,18 @@ class TestEdgeCases:
             DecisionRuleKind.QUALITATIVE,
         ]
 
+        # Decision 3 (design/decision-engine.md): INTERVAL now requires params
+        # too (null_value + support side), alongside THRESHOLD and BAYESIAN.
+        params_required = (
+            DecisionRuleKind.THRESHOLD,
+            DecisionRuleKind.BAYESIAN,
+            DecisionRuleKind.INTERVAL,
+        )
         for kind in kinds:
             rule = DecisionRule(
                 kind=kind,
                 expression=f"Expression for {kind}",
-                params={"test": 1.0} if kind in (DecisionRuleKind.THRESHOLD, DecisionRuleKind.BAYESIAN) else None,
+                params={"test": 1.0} if kind in params_required else None,
             )
             assert rule.kind == kind
 

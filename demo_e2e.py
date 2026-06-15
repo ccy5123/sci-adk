@@ -6,12 +6,12 @@ Demonstrates full pipeline: 4-pane proposal → Spec → Evidence → Claims
 """
 
 import sys
-sys.path.insert(0, '/home/cyjoe/sci-adk')
-
 from pathlib import Path
-from src.sci_adk.core.parser import parse_proposal
-from src.sci_adk.loop.experiment_runner import run_t1_experiments
-from src.sci_adk.loop.claim_updater import update_claims
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+from sci_adk.core.parser import parse_proposal
+from sci_adk.loop.experiment_runner import run_t1_experiments
+from sci_adk.loop.claim_updater import update_claims
 
 
 def main():

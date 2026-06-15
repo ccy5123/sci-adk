@@ -7,8 +7,8 @@
 ### 상태 확인 (3분)
 
 ```bash
-# Core types working?
-python3 -c "from src.sci_adk.core.spec import Spec; print('✅ OK')"
+# Core types working? (sci_adk importable after `pip install -e .` or with PYTHONPATH=src)
+PYTHONPATH=src python3 -c "from sci_adk.core.spec import Spec; print('✅ OK')"
 
 # Git clean?
 git status

@@ -109,8 +109,10 @@ sci-adk/
 
 ### Parse a Proposal
 
+> The `sci_adk` package is importable after `pip install -e .` (or with `PYTHONPATH=src`).
+
 ```python
-from src.sci_adk.core.parser import parse_proposal
+from sci_adk.core.parser import parse_proposal
 
 proposal = """
 연구 배경: 연구 배경 텍스트...
@@ -127,7 +129,7 @@ print(f"Hypotheses: {len(spec.hypotheses)}")
 ### Run Experiments
 
 ```python
-from src.sci_adk.loop.experiment_runner import run_t1_experiments
+from sci_adk.loop.experiment_runner import run_t1_experiments
 
 spec = ...  # from parse_proposal()
 molecules = ["H2O", "CO2", "CH4"]
@@ -137,7 +139,7 @@ evidence_items = run_t1_experiments(spec, molecules)
 ### Update Claims
 
 ```python
-from src.sci_adk.loop.claim_updater import update_claims
+from sci_adk.loop.claim_updater import update_claims
 
 spec = ...  # from parse_proposal()
 evidence_items = ...  # from run_t1_experiments()

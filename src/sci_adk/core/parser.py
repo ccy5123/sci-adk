@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from src.sci_adk.core.spec import (
+from sci_adk.core.spec import (
     Spec,
     RawProposal,
     Hypothesis,
