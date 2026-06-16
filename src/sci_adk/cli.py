@@ -2,7 +2,8 @@
 sci-adk command-line interface.
 
     sci-adk run <proposal.md> [-o OUTPUT] [--spec-id ID]
-    sci-adk run --t1-demo [-o OUTPUT] [--spec-id ID]   # run the built-in T-1 capability
+    sci-adk run --capability <id> [-o OUTPUT] [--spec-id ID]  # run a capability's demo
+    sci-adk run --t1-demo [-o OUTPUT] [--spec-id ID]   # alias for --capability t1-molecular-godel
     sci-adk resolve <run-dir>                          # drive the checkpoint loop
     sci-adk verify <run-dir>                           # headless read-only belief audit
     sci-adk prior-work <run-dir> --searched <dois...>  # record a prior-work decision
@@ -13,9 +14,13 @@ claims/, paper/draft.md). The numeric path runs autonomously at zero LLM cost;
 proof/qualitative hypotheses are surfaced as agent checkpoints (resolved
 in-session, never via an autonomous claude -p / API call).
 
-The T-1 molecular Gödel-encoding experiment is provided by the capability adapter
-(``sci_adk.adapter``), not the kernel (design/rigor-shell-architecture.md §3.3).
-``--t1-demo`` runs that capability over its designed molecule test set using the
+Experiment capabilities are served by the capability adapter (``sci_adk.adapter``),
+NOT the kernel (design/rigor-shell-architecture.md §3.2/§3.3, F3/F4). ``--capability
+<id>`` resolves an ``ExperimentFn`` provider from the adapter registry at runtime
+(capability is HOW, not WHAT -- resolved outside the frozen Spec, recorded only in
+Evidence provenance). With no proposal it runs that capability's built-in demo.
+``--t1-demo`` is an alias for ``--capability t1-molecular-godel``: it runs the T-1
+molecular Gödel-encoding capability over its designed molecule test set using the
 adapter's real T-1 Spec (a numeric injectivity threshold rule), producing an
 autonomous supported/refuted verdict via the DecisionEngine -- no judge needed.
 
@@ -62,9 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
                      help="workspace root that holds runs/ (default: cwd)")
     run.add_argument("--spec-id", default=None, help="explicit Spec id")
     run.add_argument(
+        "--capability", default=None, metavar="ID",
+        help="select an adapter-served experiment capability by id (e.g. "
+             "'t1-molecular-godel'); with no proposal, runs that capability's built-in "
+             "demo Spec + options. Capability is resolved at runtime, outside the "
+             "frozen Spec (it travels only in Evidence provenance)",
+    )
+    run.add_argument(
         "--t1-demo", action="store_true",
-        help="run the built-in T-1 molecular Gödel-encoding capability (adapter) "
-             "over its designed test set; yields an autonomous injectivity verdict",
+        help="alias for --capability t1-molecular-godel (demo mode): run the built-in "
+             "T-1 molecular Gödel-encoding capability over its designed test set; "
+             "yields an autonomous injectivity verdict",
     )
 
     resolve = sub.add_parser(
@@ -112,24 +125,67 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    # The T-1 capability lives in the adapter (kernel stays domain-free). Imported
-    # here, in the CLI, so the kernel never depends on it.
+    # Capabilities live in the adapter (kernel stays domain-free). The CLI is the
+    # composition root and MAY import the adapter; the kernel may not (design §3.3, F4).
+    # Importing the registry registers the built-in capabilities (T-1 first).
     proposal_text = ""
     spec = None
     experiment = None
 
+    # --t1-demo is an alias for --capability t1-molecular-godel (demo mode). Passing an
+    # explicit --capability alongside --t1-demo is contradictory: reject rather than
+    # silently pick one. The alias target is the adapter's own constant (imported here,
+    # in the composition root) -- no duplicated magic string.
+    capability_id = args.capability
     if args.t1_demo:
-        from sci_adk.adapter.t1_capability import (
-            build_t1_demo_molecules,
-            build_t1_spec,
-            t1_experiment,
-        )
+        from sci_adk.adapter.t1_capability import T1_CAPABILITY_ID as _t1_id
 
-        spec = build_t1_spec(spec_id=args.spec_id or "t1-godel")
-        experiment = t1_experiment(build_t1_demo_molecules())
+        if capability_id is not None and capability_id != _t1_id:
+            print(
+                f"error: --t1-demo is an alias for --capability {_t1_id}; "
+                f"it conflicts with --capability {capability_id} (choose one)",
+                file=sys.stderr,
+            )
+            return 2
+        capability_id = _t1_id
+
+    if capability_id is not None:
+        from sci_adk.adapter.registry import resolve
+
+        try:
+            provider = resolve(capability_id)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+
+        # Minimal scope: a selected capability runs its built-in DEMO (Spec + options),
+        # i.e. the no-proposal path. Authoring an experiment FROM an arbitrary proposal
+        # is the agent-authored capability path (design §3.2) -- not built here, and not
+        # the same as feeding demo data to a proposal's Spec. So proposal + capability is
+        # rejected rather than silently substituting demo molecules.
+        if args.proposal:
+            print(
+                f"error: --capability {capability_id} runs the capability's built-in "
+                f"demo; it cannot be combined with a proposal path yet (proposal-driven "
+                f"experiment authoring is not implemented)",
+                file=sys.stderr,
+            )
+            return 2
+        if not provider.supports_demo:
+            print(
+                f"error: capability '{capability_id}' has no built-in demo; "
+                f"nothing to run without a proposal",
+                file=sys.stderr,
+            )
+            return 2
+        spec = provider.demo_spec(args.spec_id or "t1-godel")
+        experiment = provider.experiment_fn(**provider.demo_options())
     else:
         if not args.proposal:
-            print("error: provide a proposal path or use --t1-demo", file=sys.stderr)
+            print(
+                "error: provide a proposal path, --t1-demo, or --capability <id>",
+                file=sys.stderr,
+            )
             return 2
         proposal_path = Path(args.proposal)
         if not proposal_path.exists():
