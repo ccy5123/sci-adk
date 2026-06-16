@@ -6,6 +6,7 @@ Reference: design/directory-structure.md (loop/)
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -87,9 +88,14 @@ class ExperimentRunner:
         return evidence
 
     def _generate_evidence_id(self) -> str:
-        """Generate unique Evidence ID."""
+        """Generate a unique Evidence ID.
+
+        The timestamp gives human-readable ordering; the short uuid suffix
+        guarantees uniqueness even when several items are created within the same
+        wall-clock second (a second-resolution timestamp alone collides).
+        """
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        return f"evi-{timestamp}"
+        return f"evi-{timestamp}-{uuid.uuid4().hex[:8]}"
 
     def _capture_environment(self, provenance: Dict[str, Any]) -> str:
         """Capture environment description."""

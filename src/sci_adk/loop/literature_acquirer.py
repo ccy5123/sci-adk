@@ -32,6 +32,7 @@ Reference: design/directory-structure.md (loop/), design/abstractions.md (Eviden
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -285,8 +286,10 @@ class LiteratureAcquirer:
 
     @staticmethod
     def _generate_evidence_id() -> str:
+        # Timestamp for human-readable ordering + a short uuid suffix so IDs are
+        # unique even when several are created within the same second.
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        return f"evi-lit-{timestamp}"
+        return f"evi-lit-{timestamp}-{uuid.uuid4().hex[:8]}"
 
     def _save_evidence(self, evidence: EvidenceItem) -> None:
         """Persist the EvidenceItem as JSON in the run's evidence log."""
