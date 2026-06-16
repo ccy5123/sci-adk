@@ -115,20 +115,14 @@ class ProposalParser:
         current_section = None
         current_content = []
 
-        # DEBUG
-        import sys
-        print(f"DEBUG: Lines count: {len(lines)}", file=sys.stderr)
-
-        for line_idx, line in enumerate(lines):
+        for line in lines:
             # Check if line is a section header
             matched = False
             for section_name, pattern in self._section_regex.items():
                 if pattern.search(line):
-                    print(f"DEBUG: Line {line_idx} matched {section_name}: {repr(line)}", file=sys.stderr)
                     # Save previous section if exists
                     if current_section:
                         saved = "\n".join(current_content).strip()
-                        print(f"DEBUG: Saving {current_section}: {repr(saved[:50])}", file=sys.stderr)
                         sections[current_section] = saved
                     # Start new section
                     current_section = section_name
@@ -137,17 +131,12 @@ class ProposalParser:
                     break
 
             if not matched and current_section:
-                print(f"DEBUG: Line {line_idx} added to {current_section}: {repr(line)}", file=sys.stderr)
                 current_content.append(line)
 
         # Save last section
         if current_section:
             saved = "\n".join(current_content).strip()
-            print(f"DEBUG: Saving final {current_section}: {repr(saved[:50])}", file=sys.stderr)
             sections[current_section] = saved
-
-        # DEBUG: Print extraction result
-        print(f"DEBUG: Extracted sections: {sections}", file=sys.stderr)
 
         # Fallback: if no sections found, treat entire text as goal
         if not sections:
