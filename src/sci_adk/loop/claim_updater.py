@@ -37,14 +37,56 @@ from sci_adk.loop.judge import Judge
 # ``neutral``/``inconclusive``->PROPOSED. CONTESTED is NOT in this table: the
 # engine aggregates to ONE direction and cannot itself signal "mixed evidence",
 # so CONTESTED is decided separately from the RAW bearings (see
-# ``_status_for_verdict``). ``retracted`` is reserved for provenance failure
+# ``status_for_verdict``). ``retracted`` is reserved for provenance failure
 # and is never emitted here.
-_DIRECTION_TO_STATUS: dict[BearingDirection, ClaimStatus] = {
+#
+# PUBLIC (Fix 1): this is the SINGLE source of truth for the verdict -> ClaimStatus
+# derivation. Both the persister (``ClaimUpdater``) and the read-only audit
+# (``loop/verify.py``) MUST use ``DIRECTION_TO_STATUS`` + ``status_for_verdict`` --
+# never a private copy or a replayed contested rule -- so the two cannot drift.
+DIRECTION_TO_STATUS: dict[BearingDirection, ClaimStatus] = {
     BearingDirection.SUPPORTS: ClaimStatus.SUPPORTED,
     BearingDirection.REFUTES: ClaimStatus.REFUTED,
     BearingDirection.NEUTRAL: ClaimStatus.PROPOSED,
     BearingDirection.INCONCLUSIVE: ClaimStatus.PROPOSED,
 }
+
+
+def status_for_verdict(verdict, raw_directions: set) -> ClaimStatus:
+    """Map an engine ``Verdict`` to a ``ClaimStatus`` (Decision 8) -- the one public
+    source of truth, mapping + the CONTESTED override.
+
+    The engine aggregates the bearings to ONE direction, so it cannot by itself report
+    "mixed evidence". The single judgment call (FLAGGED for orchestrator review in
+    Phase D4) is the CONTESTED override: whenever the RAW bearings on this hypothesis
+    contain BOTH a ``SUPPORTS`` and a ``REFUTES`` (support and refutation coexist --
+    matching ``ClaimStatus.CONTESTED`` "mixed evidence; support and refutation
+    coexist", C5), the status is CONTESTED regardless of the engine's single direction.
+    Otherwise the direction maps via ``DIRECTION_TO_STATUS``. ``retracted`` is reserved
+    for provenance failure and is never emitted here.
+
+    Both the persister (``ClaimUpdater._apply_update`` / ``_create_claim``) and the
+    read-only audit (``loop/verify.py``) call THIS function, so a faithful record
+    re-derives exactly the status the updater persisted -- there is no second copy of
+    this logic to drift out of sync.
+
+    Args:
+        verdict: the engine's ``Verdict`` (its ``direction`` drives the mapping).
+        raw_directions: the set of RAW ``BearingDirection`` values across the bearings
+            on this hypothesis (used only for the CONTESTED override).
+    """
+    # @MX:ANCHOR: [AUTO] the single public verdict->ClaimStatus derivation (Decision 8).
+    # @MX:REASON: [AUTO] ClaimUpdater (persist) and loop/verify.py (audit) both call this;
+    #   it is the one place the mapping + CONTESTED override live. A private copy in
+    #   either caller would let the audit tool disagree with what was persisted -- the
+    #   exact drift hazard Fix 1 removes. Changing the contested rule here moves both
+    #   persisted belief AND its re-derivation in lockstep.
+    if (
+        BearingDirection.SUPPORTS in raw_directions
+        and BearingDirection.REFUTES in raw_directions
+    ):
+        return ClaimStatus.CONTESTED
+    return DIRECTION_TO_STATUS[verdict.direction]
 
 
 class ClaimUpdater:
@@ -183,33 +225,15 @@ class ClaimUpdater:
 
     @staticmethod
     def _status_for_verdict(verdict, raw_directions: set) -> ClaimStatus:
-        """
-        Map an engine ``Verdict`` to a ``ClaimStatus`` (Decision 8), with the one
-        judgment call: the CONTESTED override.
+        """Thin delegate to the public :func:`status_for_verdict` (Fix 1).
 
-        @MX:NOTE: [AUTO] CONTESTED override is the single judgment call in Phase D4
-            (FLAGGED for orchestrator review). The engine aggregates the bearings to
-            ONE direction, so it cannot by itself report "mixed evidence". To NOT
-            regress the contested capability the old vote-count had, the updater sets
-            CONTESTED whenever the RAW bearings on this hypothesis contain BOTH a
-            ``SUPPORTS`` and a ``REFUTES`` (support and refutation coexist -- matching
-            ``ClaimStatus.CONTESTED`` "mixed evidence; support and refutation coexist"
-            and C5). The confidence still comes from the engine verdict (the caller
-            passes ``verdict.confidence`` regardless of this status). Otherwise the
-            direction maps via ``_DIRECTION_TO_STATUS``. ``retracted`` is reserved
-            for provenance failure and is never emitted here.
-
-        Args:
-            verdict: the engine's ``Verdict`` (its ``direction`` drives the mapping).
-            raw_directions: the set of RAW ``BearingDirection`` values across the
-                bearings on this hypothesis (used only for the CONTESTED override).
+        The verdict -> ClaimStatus derivation (mapping + CONTESTED override) now lives
+        in ONE public place so the persister and the read-only audit share it. This
+        method is retained for its existing internal call site and stays
+        behavior-identical; the confidence still comes from the engine verdict (the
+        caller passes ``verdict.confidence`` regardless of this status).
         """
-        if (
-            BearingDirection.SUPPORTS in raw_directions
-            and BearingDirection.REFUTES in raw_directions
-        ):
-            return ClaimStatus.CONTESTED
-        return _DIRECTION_TO_STATUS[verdict.direction]
+        return status_for_verdict(verdict, raw_directions)
 
     @staticmethod
     def _latest_evidence_id(evidence_items: List[EvidenceItem]) -> str:
@@ -362,3 +386,11 @@ def update_claims(
     """
     updater = ClaimUpdater(spec, workspace_dir)
     return updater.update_claims_from_evidence(evidence_items)
+
+
+__all__ = [
+    "DIRECTION_TO_STATUS",
+    "status_for_verdict",
+    "ClaimUpdater",
+    "update_claims",
+]

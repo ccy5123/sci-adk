@@ -4,6 +4,7 @@ sci-adk command-line interface.
     sci-adk run <proposal.md> [-o OUTPUT] [--spec-id ID]
     sci-adk run --t1-demo [-o OUTPUT] [--spec-id ID]   # run the built-in T-1 capability
     sci-adk resolve <run-dir>                          # drive the checkpoint loop
+    sci-adk verify <run-dir>                           # headless read-only belief audit
     sci-adk prior-work <run-dir> --searched <dois...>  # record a prior-work decision
     sci-adk prior-work <run-dir> --skip --reason "..." #   (searched or skipped)
 
@@ -23,6 +24,15 @@ checkpoint loop over an EXISTING run dir: it recompiles the recorded run with a
 ``RecordedJudge`` (reading any ``verdicts/<hyp-id>.json`` the in-session agent
 authored), then reports which checkpoints are still unresolved and which Claims the
 recorded verdicts resolved. No LLM is invoked.
+
+``verify`` (design/rigor-shell-architecture.md §6.2/§7.1, §8 F6) is the headless,
+READ-ONLY belief audit: it re-applies the frozen ``DecisionRule`` to the RECORDED
+Evidence (numeric autonomously; non-numeric via a ``RecordedJudge`` re-reading the
+recorded trails + the F2 gate -- still no LLM) and reports, per recorded Claim,
+REPRODUCED / DIVERGED / UNRESOLVED. It re-runs no experiment, calls no LLM/capability,
+and overwrites no recorded file. It also prints the record digest (tamper-evidence).
+Exit 0 iff every recorded claim is reproduced -- CI-style re-verification a third
+party can run without Claude Code.
 """
 
 from __future__ import annotations
@@ -63,6 +73,15 @@ def build_parser() -> argparse.ArgumentParser:
              "recorded verdicts; report unresolved checkpoints + resolved claims)",
     )
     resolve.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+
+    verify = sub.add_parser(
+        "verify",
+        help="headless read-only belief audit: re-apply the frozen rules to the "
+             "recorded Evidence + verdict trails (no re-run, no LLM); report "
+             "REPRODUCED/DIVERGED/UNRESOLVED + the record digest. Exit 0 iff all "
+             "recorded claims reproduce",
+    )
+    verify.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
 
     prior_work = sub.add_parser(
         "prior-work",
@@ -175,6 +194,48 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_verify(args: argparse.Namespace) -> int:
+    """Headless read-only belief audit over an existing run dir (design §6.2/§7.1, F6).
+
+    Re-derives belief from the RECORDED run (numeric autonomously; non-numeric via a
+    RecordedJudge re-reading the recorded trails -- no LLM) and reports, per recorded
+    Claim, whether it REPRODUCED / DIVERGED / UNRESOLVED, plus the record digest. Exit
+    0 iff every recorded claim reproduces. Nothing on disk is modified.
+    """
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    # A recorded artifact (spec/evidence/claim/verdict) may be malformed, or two
+    # hypotheses may share a rule expression; the kernel raises a clear ValueError in
+    # those cases. Surface it as a friendly stderr message rather than a raw traceback
+    # (a third party may be auditing a hand-edited run).
+    from sci_adk.loop.verify import verify_run
+
+    try:
+        report = verify_run(run_dir)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    print(f"verified run '{report.spec_id}' -> {run_dir}")
+    print(f"  record digest (sha256): {report.digest}")
+    if not report.outcomes:
+        print("  no recorded claims to verify")
+    for o in report.outcomes:
+        rederived = o.rederived_status.value if o.rederived_status is not None else "n/a"
+        print(f"    - {o.hypothesis_id}: {o.result}  "
+              f"(recorded={o.recorded_status.value}, re-derived={rederived})")
+    if report.all_reproduced:
+        print("  all recorded claims reproduced from the record")
+        return 0
+    print("  NOT reproduced: at least one claim DIVERGED or is UNRESOLVED "
+          "(see above)", file=sys.stderr)
+    return 1
+
+
 def _cmd_prior_work(args: argparse.Namespace) -> int:
     """Record the Spec-time prior-work decision into the single Evidence log.
 
@@ -233,6 +294,8 @@ def main(argv=None) -> int:
         return _cmd_run(args)
     if args.command == "resolve":
         return _cmd_resolve(args)
+    if args.command == "verify":
+        return _cmd_verify(args)
     if args.command == "prior-work":
         return _cmd_prior_work(args)
     return 1

@@ -496,16 +496,31 @@ OQ-9 is resolved in Step 3; here is how the two modes realize against §2's inte
     via `EvidenceItem.model_validate`). No `ExperimentFn` is invoked unless re-running
     is explicitly requested (and even then only deterministic execution, never
     agent-authoring).
-  - Judge: `judge=None`. Per the existing code, proof/qualitative then return
-    `inconclusive` and surface as checkpoints (`decision_engine.py:473-478, 517-522`)
-    — i.e. headless mode **cannot resolve** non-numeric rules; it can only re-verify
-    numeric ones and *report* the unresolved qualitative/proof checkpoints. This is
-    correct and honest: headless = "the deterministic spine," exactly Step-3's OQ-9.
+  - Judge: there are two headless sub-modes, both LLM-free, split by whether a
+    recorded verdict trail exists:
+    - **Fresh headless compile (no trails): `judge=None`.** With no
+      `verdicts/*.json` yet, proof/qualitative return `inconclusive` and surface as
+      checkpoints (`decision_engine.py:473-478, 517-522`) — headless **cannot
+      author** a non-numeric verdict, only *report* the open checkpoint.
+    - **Re-verification of a resolved run (`sci-adk verify`): inject
+      `RecordedJudge(run_dir)`.** This was written before `RecordedJudge` existed.
+      Once the in-session agent has authored `verdicts/<hyp-id>.json`, the headless
+      audit injects a `RecordedJudge` (kernel-side, deterministic, pure JSON
+      deserialization — **still no LLM, no capability**, `recorded_judge.py`). The
+      engine re-reads the recorded chief-over-N trail and re-applies the frozen rule
+      **plus the F2 trail gate**, so **non-numeric belief IS audited**, not merely
+      reported as open. A non-numeric hypothesis whose trail is **absent** still
+      yields `inconclusive` (F2) and is reported as unresolved / not reproducible
+      from the record. The seam holds: the kernel re-reads the trail, it never
+      re-judges.
   - Verifier: fully live (it never needed an LLM).
 - **Use:** CI-style re-verification that a recorded run still holds under its frozen
-  numeric rules (replay), and provenance/reproducibility audits. It is the
-  re-runnable proof that the *record* and the *numeric belief* are reproducible
-  without any intelligence in the loop.
+  rules — **numeric** belief by autonomous re-evaluation, **non-numeric** belief by
+  re-reading the recorded verdict trails via `RecordedJudge` (`sci-adk verify`,
+  §7.1, F6) — plus provenance/reproducibility audits (a record digest over
+  spec + evidence + verdict trails). It is the re-runnable proof that the *record*
+  and the *belief derived from it* are reproducible without any intelligence in the
+  loop — so a third party can audit the verdicts without Claude Code.
 
 This makes the in-session vs headless split fall exactly on the A/B/C boundary: A is
 always available; B-execution is available headless but B-authoring is not; C is
