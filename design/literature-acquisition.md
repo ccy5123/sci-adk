@@ -1,7 +1,9 @@
 # sci-adk Literature Acquisition
 
-> Status: v0.1 (2026-06-16). How sci-adk surveys and acquires prior work.
+> Status: v0.2 (2026-06-16). How sci-adk surveys and acquires prior work.
 > Discovery = Claude's web_search (allowed tool); acquisition = paperforge.
+> v0.2 adds the discovery **trigger model** (graded triggers + a recorded
+> search/skip decision + an F7 link); decision adopted, implementation deferred.
 
 sci-adk acquires the literature the way a researcher does: when starting, when
 unsure, or when checking whether something has already been done, you *search*
@@ -94,6 +96,64 @@ Both halts are first-class "ask the human" gates, consistent with sci-adk's
 human-checkpoint discipline: when the autonomous flow hits a wall (a paper it
 cannot get, or data that lives only in the SI), it surfaces rather than guesses.
 
+## Discovery trigger model -- graded triggers + a decision record
+
+Discovery stays **agent on-demand** (the "Two halves" model): Claude calls
+`web_search` when its judgment says prior work matters. We deliberately do **not**
+add a periodic "check literature?" flag on every loop iteration -- that would
+reverse the tool-policy conservatism above and is mostly noise (discovery is not
+loop-bound; it matters at a few research-meaningful moments, not every compile).
+
+What we **do** add closes a real gap: today the *decision* to check prior work is
+invisible. Acquisition is fully recorded (a `LITERATURE` EvidenceItem, provenance,
+halts), but the front-half decision leaves no trace -- if the agent never searches,
+nothing in the record shows whether prior work was even considered. In a system
+whose spine is record!=belief and "null results are results" (Invariant E2),
+**not searching is itself a recorded null**: the discovery decision must be in the
+record, or rigor breaks exactly at the trigger.
+
+So at the trigger moments below, the agent surfaces a **recording-type checkpoint**
+capturing the decision -- *searched* (which flows into the existing acquisition +
+`LITERATURE` Evidence) or *skipped, with a reason* (a recorded null). This records
+a decision, not a belief; it asserts no support/refute direction.
+
+### The triggers are NOT equal weight
+
+| Trigger | Fires | Why it matters | Weight |
+|---------|-------|----------------|--------|
+| **Spec creation** (prior-art) | before any result exists | pre-registration canonical; zero post-hoc risk -- the cleanest, most important check ("has this been done?") | **Primary anchor** |
+| Before a **novelty / priority** claim | when asserting "new / first" | underwrites the *validity* of the claim | High |
+| Claim -> **contested** | after evidence conflicts | here the rigor is **recording, not searching**: a timestamp so literature that arrived *after* the conflict stays visible (anti post-hoc-rationalization -- no hunting for favorable papers once the result is known) | Medium |
+| Before **paper render** | at output | related-work *completeness*, not claim validity -- weakest and latest | Low |
+
+**Minimal, highest-value first bite:** the **Spec-time prior-art check + a skip
+record (with reason)**. The other three triggers are **incremental** -- added
+later, never pegged at the same priority as the Spec anchor.
+
+### When found literature touches a frozen element -> Spec amendment (F7)
+
+Recording the *decision* is not enough. If newly found prior work means a
+**frozen** element must change -- a baseline, a `DecisionRule` criterion, or a
+novelty claim -- it must **not** be edited silently. It goes through the
+human-only Spec amendment path (F7, `checkpoints/<spec>.amend.json`: logged with a
+rationale, prior Spec + its Evidence preserved; see
+`design/rigor-shell-architecture.md` Sec.7.2 / Sec.8 F7). The **contested** trigger
+frequently meets this case (you find work that undercuts a frozen baseline).
+Rule: **a search result that touches frozen ==> F7, never a silent edit.**
+
+### Relationship to the halt gates, and to implementation
+
+This decision checkpoint is **proactive** (recorded at a trigger, before/around
+discovery); the "Halt gates" above are **reactive** (raised after an acquisition
+attempt -- an OA miss, or SI needed). They are complementary surfaces, not the
+same mechanism.
+
+**Implementation is deferred -- this section is design only.** When built, the
+recording-type checkpoint **reuses the judge rail's `Checkpoint` surface** (the
+typed `checkpoints/*.json` contract from `design/rigor-shell-architecture.md`
+Sec.4, now on master): a recording-only checkpoint is that same surface with no
+verdict trail, so the marginal cost is low.
+
 ## Code map
 
 - `src/sci_adk/search/paperforge_adapter.py` -- `PaperforgeAdapter` (subprocess
@@ -104,6 +164,6 @@ cannot get, or data that lives only in the SI), it surfaces rather than guesses.
 
 ---
 
-Version: 0.1.0
-Source: paperforge tool integration (2026-06-16)
+Version: 0.2.0
+Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only -- implementation deferred)
 Last Updated: 2026-06-16
