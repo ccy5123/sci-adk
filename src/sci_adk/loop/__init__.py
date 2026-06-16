@@ -24,6 +24,15 @@ from sci_adk.loop.compiler import (
     CompileResult,
     ResearchCompiler,
 )
+from sci_adk.loop.verdict import (
+    CheckpointModel,
+    ChiefVerdict,
+    PanelVerdict,
+    VerdictProvenance,
+    VerdictTrail,
+)
+from sci_adk.loop.recorded_judge import RecordedJudge
+from sci_adk.loop.checkpoint_loop import LoopResult, run_checkpoint_loop
 from sci_adk.loop.literature_acquirer import (
     AcquisitionHalt,
     AcquisitionOutcome,
@@ -52,4 +61,12 @@ __all__ = [
     "ResearchCompiler",
     "CompileResult",
     "Checkpoint",
+    "CheckpointModel",
+    "ChiefVerdict",
+    "PanelVerdict",
+    "VerdictProvenance",
+    "VerdictTrail",
+    "RecordedJudge",
+    "LoopResult",
+    "run_checkpoint_loop",
 ]

@@ -452,15 +452,19 @@ class DecisionEngine:
 
     def _eval_proof(self, rule: DecisionRule, results: EvidenceForHypothesis) -> Verdict:
         """
-        Evaluate a ``proof`` rule (Decision 4, with the §0 override).
+        Evaluate a ``proof`` rule (Decision 4, with the §0 override + F2 trail gate).
 
         - A COUNTEREXAMPLE in the record refutes decisively -- no judge needed,
           and not outvoted by supportive runs (Decision 7 proof asymmetry).
         - Otherwise route to the judge, which MUST attempt a counterexample
-          search. A judge-found counterexample -> refutes. A confident "verified"
-          verdict does NOT become ``supports`` here: the override requires a human
-          spot-check first, so the engine returns ``inconclusive`` with a basis
-          flagging the pending spot-check (D8). Low confidence -> escalate.
+          search. A judge-found counterexample -> refutes (a decisive safety
+          refutation, EXEMPT from the trail gate). A confident "verified" verdict
+          does NOT become ``supports`` here: first it must arrive with a
+          well-formed ``VerdictTrail`` (F2 gate, §2.3) -- a binding "verified"
+          without a trail is refused for the missing trail; then, even with a
+          trail, the §0 override requires a human spot-check, so the engine returns
+          ``inconclusive`` flagging the pending spot-check (D8). Low confidence ->
+          escalate.
         - With no judge, returns ``inconclusive`` requesting a judge/checkpoint.
         """
         if self._has_counterexample(results):
@@ -484,17 +488,30 @@ class DecisionEngine:
             self._evidence_kinds(results),
             rule.params or {},
         )
-        if verdict.counterexample or verdict.direction == BearingDirection.REFUTES:
+        # A judge counterexample refutes decisively -- exempt from the trail gate.
+        if verdict.counterexample:
             level = (verdict.level if verdict.level != ConfidenceLevel.NONE
                      else ConfidenceLevel.STRONG)
             return self._graded_verdict(
                 BearingDirection.REFUTES, level,
                 f"{rule.kind.value} judge found a counterexample: {verdict.basis}")
+        # A plain (non-counterexample) REFUTES would bind -> requires a trail (F2).
+        if verdict.direction == BearingDirection.REFUTES:
+            gate = self._trail_problem(verdict, rule)
+            if gate is not None:
+                return self._inconclusive(rule, gate)
+            return self._graded_verdict(
+                BearingDirection.REFUTES, verdict.level,
+                f"{rule.kind.value} judge refutes (trailed): {verdict.basis}")
         if (verdict.direction == BearingDirection.SUPPORTS
                 and verdict.level in (ConfidenceLevel.STRONG,
                                       ConfidenceLevel.MODERATE)):
-            # Override: a confident "verified" still needs a human spot-check
-            # before a Claim can be supported -- so do NOT emit supports here.
+            # A confident "verified" would act -> first require the F2 trail, then
+            # (even with one) the §0 override forces a human spot-check before a
+            # Claim can be supported -- so the engine never emits supports here.
+            gate = self._trail_problem(verdict, rule)
+            if gate is not None:
+                return self._inconclusive(rule, gate)
             return self._inconclusive(
                 rule,
                 f"judge verified ({verdict.level.value} confidence) but a human "
@@ -507,12 +524,16 @@ class DecisionEngine:
 
     def _eval_qualitative(self, rule: DecisionRule, results: EvidenceForHypothesis) -> Verdict:
         """
-        Evaluate a ``qualitative`` rule by routing to the LLM-judge (Decision 4).
+        Evaluate a ``qualitative`` rule by routing to the LLM-judge (Decision 4),
+        with the F2 trail gate (§2.3).
 
         The judge applies the rule's OWN prose criterion (``rule.expression``),
-        never a global rubric (D1). A confident judgment maps straight to the
-        judge's direction + graded level; a low-confidence judgment (WEAK/NONE)
-        escalates to a human (D8). With no judge, returns ``inconclusive``.
+        never a global rubric (D1). A low-confidence judgment (WEAK/NONE) escalates
+        to a human (D8). A confident BINDING judgment (SUPPORTS/REFUTES) maps to the
+        judge's direction + graded level ONLY when it arrives with a well-formed
+        ``VerdictTrail`` (the chief-over-N audit, F2); a missing/malformed trail ->
+        ``inconclusive`` naming the problem. NEUTRAL is not binding and passes
+        through. With no judge, returns ``inconclusive``.
         """
         if self._judge is None:
             return self._inconclusive(
@@ -528,6 +549,10 @@ class DecisionEngine:
                 rule,
                 f"judge low-confidence ({verdict.level.value}) -> escalate to "
                 f"human: {verdict.basis}")
+        if verdict.direction in (BearingDirection.SUPPORTS, BearingDirection.REFUTES):
+            gate = self._trail_problem(verdict, rule)
+            if gate is not None:
+                return self._inconclusive(rule, gate)
         return self._graded_verdict(
             verdict.direction, verdict.level,
             f"{rule.kind.value} judge: {verdict.basis}")
@@ -729,6 +754,48 @@ class DecisionEngine:
                 basis=basis,
             ),
         )
+
+    @staticmethod
+    def _trail_problem(verdict: JudgeVerdict, rule: DecisionRule) -> Optional[str]:
+        """
+        F2 trail gate (design/rigor-shell-architecture.md §2.3): return ``None`` when
+        the binding verdict carries a well-formed ``VerdictTrail``, else a string
+        naming the problem (the caller turns it into an ``inconclusive`` basis).
+
+        The check is STRUCTURAL only -- presence + required fields + the verdict
+        judged THIS rule (``rubric_expression == rule.expression``). It NEVER
+        inspects ``N`` or the chief's combination policy, so the kernel stays
+        unaware of how the chief aggregates (the seam holds). The presence checks
+        below are belt-and-suspenders: the ``VerdictTrail`` model already enforces a
+        non-empty panel / rubric / chief basis, but the engine does not assume a
+        well-typed trail -- it verifies the contract it depends on at its own
+        boundary.
+        """
+        # @MX:ANCHOR: [AUTO] the single F2 enforcement point -- both _eval_proof and
+        #   _eval_qualitative gate every BINDING non-numeric verdict through here.
+        # @MX:REASON: [AUTO] this is the "agents propose, the engine judges" guard for
+        #   the qualitative/proof rail: a SUPPORTS/REFUTES is refused unless it carries
+        #   an auditable chief-over-N trail that judged THIS rule. Weakening it (e.g.
+        #   dropping the rubric-match check) would let a verdict for a different rule,
+        #   or a trail-less say-so, silently move a Claim -- the exact self-certification
+        #   the rail exists to prevent.
+        trail = verdict.trail
+        if trail is None:
+            return ("binding verdict refused: no verdict trail "
+                    "(verdicts/<hyp-id>.json) -- a SUPPORTS/REFUTES needs the "
+                    "chief-over-N audit (F2)")
+        if not trail.panel:
+            return "verdict trail malformed: empty panel (need N>=1 opinions)"
+        if not (trail.rubric_expression or "").strip():
+            return "verdict trail malformed: missing rubric_expression (R) for replay"
+        if not (trail.chief.basis or "").strip():
+            return "verdict trail malformed: chief.basis is empty (must name the decisive reasoning under R)"
+        if trail.rubric_expression != rule.expression:
+            return (
+                "verdict trail rubric mismatch: the trail judged a different rule "
+                "(trail R != rule.expression); refusing to bind"
+            )
+        return None
 
     @staticmethod
     def _has_counterexample(results: EvidenceForHypothesis) -> bool:

@@ -31,7 +31,7 @@ design/directory-structure.md (loop/), design/decision-engine.md.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
@@ -41,6 +41,7 @@ from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.loop.claim_updater import ClaimUpdater
 from sci_adk.loop.judge import Judge
+from sci_adk.loop.verdict import CheckpointModel
 from sci_adk.render.paper import render_paper
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
@@ -52,12 +53,27 @@ _NON_NUMERIC = {DecisionRuleKind.PROOF, DecisionRuleKind.QUALITATIVE}
 
 @dataclass(frozen=True)
 class Checkpoint:
-    """A hypothesis awaiting an in-session agent verdict (no autonomous LLM)."""
+    """A hypothesis awaiting an in-session agent verdict (no autonomous LLM).
+
+    ``spec_version`` is carried so the typed ``checkpoints/<hyp-id>.json`` is
+    self-describing for replay (design/rigor-shell-architecture.md §4.3).
+    """
 
     hypothesis_id: str
-    kind: str          # "proof" | "qualitative"
-    expression: str    # the rule's prose criterion
-    finding: str = ""  # evidence finding(s) the agent should judge, if any
+    kind: str             # "proof" | "qualitative"
+    expression: str       # the rule's prose criterion
+    finding: str = ""     # evidence finding(s) the agent should judge, if any
+    spec_version: int = 1  # the Spec version this checkpoint was raised against
+
+    def to_model(self) -> CheckpointModel:
+        """The typed contract behind ``checkpoints/<hyp-id>.json`` (F1)."""
+        return CheckpointModel(
+            hypothesis_id=self.hypothesis_id,
+            kind=self.kind,
+            expression=self.expression,
+            finding=self.finding,
+            spec_version=self.spec_version,
+        )
 
 
 @dataclass
@@ -187,6 +203,7 @@ class ResearchCompiler:
                     kind=h.decision_rule.kind.value,
                     expression=h.decision_rule.expression,
                     finding="\n".join(findings),
+                    spec_version=spec.version,
                 )
             )
         return checkpoints
@@ -200,14 +217,41 @@ class ResearchCompiler:
 
     @staticmethod
     def _save_checkpoints(checkpoints: Sequence[Checkpoint], run_dir: Path) -> None:
-        lines = ["# Agent judgment checkpoints", ""]
-        lines.append("proof/qualitative hypotheses awaiting an in-session agent "
-                     "verdict (no autonomous LLM call). Resolve each, then "
-                     "recompile with an injected judge.")
-        lines.append("")
+        """Persist checkpoints as typed JSON (the contract) AND a Markdown view.
+
+        F1 (design/rigor-shell-architecture.md §4.3): ``checkpoints/<hyp-id>.json``
+        is the round-trippable contract; ``checkpoints.md`` is rendered *from* it as
+        a human-facing prompt (the inverse of the milestone-1 prose-primary layout).
+        """
+        cp_dir = run_dir / "checkpoints"
+        cp_dir.mkdir(parents=True, exist_ok=True)
         for c in checkpoints:
-            lines.append(f"## {c.hypothesis_id} ({c.kind})")
-            lines.append(f"- Criterion: {c.expression}")
-            lines.append(f"- Finding: {c.finding or '_(no experiment finding yet)_'}")
-            lines.append("")
-        (run_dir / "checkpoints.md").write_text("\n".join(lines), encoding="utf-8")
+            model = c.to_model()
+            (cp_dir / f"{c.hypothesis_id}.json").write_text(
+                json.dumps(model.model_dump(mode="json"), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        (run_dir / "checkpoints.md").write_text(
+            _render_checkpoints_view(checkpoints), encoding="utf-8"
+        )
+
+
+def _render_checkpoints_view(checkpoints: Sequence[Checkpoint]) -> str:
+    """Render the human-facing ``checkpoints.md`` view from typed checkpoints (F1).
+
+    The typed ``checkpoints/<hyp-id>.json`` files are the contract; this prose is a
+    generated prompt for the in-session agent that authors the matching
+    ``verdicts/<hyp-id>.json`` (no autonomous LLM call).
+    """
+    lines = ["# Agent judgment checkpoints", ""]
+    lines.append("proof/qualitative hypotheses awaiting an in-session agent "
+                 "verdict (no autonomous LLM call). For each, author "
+                 "verdicts/<hyp-id>.json with the chief-over-N trail, then "
+                 "re-enter the loop (sci-adk resolve <run-dir>).")
+    lines.append("")
+    for c in checkpoints:
+        lines.append(f"## {c.hypothesis_id} ({c.kind})")
+        lines.append(f"- Criterion: {c.expression}")
+        lines.append(f"- Finding: {c.finding or '_(no experiment finding yet)_'}")
+        lines.append("")
+    return "\n".join(lines)

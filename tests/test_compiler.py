@@ -10,7 +10,6 @@ judged autonomously).
 """
 
 import json
-from pathlib import Path
 
 from sci_adk.core.evidence import (
     Bearing,
@@ -111,3 +110,22 @@ def test_paper_draft_renders_status_when_claims_exist(tmp_path):
     paper = result.paper_path.read_text(encoding="utf-8")
     # qualitative + no judge -> PROPOSED (inconclusive), shown in the draft.
     assert "Status: proposed" in paper
+
+
+def test_compile_writes_typed_checkpoint_json_alongside_markdown(tmp_path):
+    # Unit 3: the compiler now writes typed checkpoints/<hyp-id>.json (the contract)
+    # AND keeps checkpoints.md as a generated human view (F1).
+    from sci_adk.loop.verdict import CheckpointModel
+
+    result = ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-typed-cp", experiment=_fake_experiment)
+    run_dir = tmp_path / "runs" / "t-typed-cp"
+    cp_dir = run_dir / "checkpoints"
+    assert cp_dir.is_dir()
+    files = sorted(cp_dir.glob("*.json"))
+    assert len(files) == len(result.checkpoints) >= 1
+    cp = CheckpointModel.model_validate(json.loads(files[0].read_text()))
+    assert cp.kind == "qualitative"
+    assert cp.spec_version == result.spec.version
+    # The Markdown view still exists.
+    assert (run_dir / "checkpoints.md").exists()

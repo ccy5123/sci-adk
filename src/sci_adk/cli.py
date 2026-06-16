@@ -3,6 +3,7 @@ sci-adk command-line interface.
 
     sci-adk run <proposal.md> [-o OUTPUT] [--spec-id ID]
     sci-adk run --t1-demo [-o OUTPUT] [--spec-id ID]   # run the built-in T-1 capability
+    sci-adk resolve <run-dir>                          # drive the checkpoint loop
 
 Compiles a four-pane proposal into ``runs/<spec.id>/`` (spec.json, evidence/,
 claims/, paper/draft.md). The numeric path runs autonomously at zero LLM cost;
@@ -14,14 +15,23 @@ The T-1 molecular Gödel-encoding experiment is provided by the capability adapt
 ``--t1-demo`` runs that capability over its designed molecule test set using the
 adapter's real T-1 Spec (a numeric injectivity threshold rule), producing an
 autonomous supported/refuted verdict via the DecisionEngine -- no judge needed.
+
+``resolve`` (design/rigor-shell-architecture.md §7.1) drives the §5 turnkey
+checkpoint loop over an EXISTING run dir: it recompiles the recorded run with a
+``RecordedJudge`` (reading any ``verdicts/<hyp-id>.json`` the in-session agent
+authored), then reports which checkpoints are still unresolved and which Claims the
+recorded verdicts resolved. No LLM is invoked.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
+from sci_adk.core.spec import Spec
+from sci_adk.loop.checkpoint_loop import run_checkpoint_loop
 from sci_adk.loop.compiler import ResearchCompiler
 
 
@@ -44,6 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="run the built-in T-1 molecular Gödel-encoding capability (adapter) "
              "over its designed test set; yields an autonomous injectivity verdict",
     )
+
+    resolve = sub.add_parser(
+        "resolve",
+        help="drive the checkpoint loop over an existing run dir (re-enter with "
+             "recorded verdicts; report unresolved checkpoints + resolved claims)",
+    )
+    resolve.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
     return parser
 
 
@@ -91,10 +108,51 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    """Drive the checkpoint loop over an existing run dir (design §7.1)."""
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+    # No experiment is passed: resolve operates on the RECORDED run, reusing the
+    # Evidence already on disk (F5). The loop injects a RecordedJudge so any
+    # agent-authored verdicts/<hyp-id>.json move the Claims.
+    #
+    # A hand-authored verdict file may be malformed (truncated / typo / wrong schema)
+    # or two hypotheses may share a rule expression; RecordedJudge raises a clear
+    # ValueError in those cases. Surface it as a friendly stderr message naming the
+    # offending file rather than a raw traceback (a third party authors these files).
+    try:
+        result = run_checkpoint_loop(run_dir=run_dir, spec=spec)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    print(f"resolved run '{result.spec.id}' ({result.iterations} iteration(s)) "
+          f"-> {result.run_dir}")
+    print(f"  claims: {len(result.claims)}")
+    for claim in result.claims:
+        print(f"    - {claim.answers}: {claim.status.value}  "
+              f"({claim.confidence.basis[:70]})")
+    if result.unresolved:
+        print(f"  unresolved checkpoints ({len(result.unresolved)}) -- author "
+              f"verdicts/<hyp-id>.json for each, then resolve again:")
+        for hyp_id in result.unresolved:
+            print(f"    - {hyp_id}")
+    else:
+        print("  all checkpoints resolved")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
         return _cmd_run(args)
+    if args.command == "resolve":
+        return _cmd_resolve(args)
     return 1
 
 

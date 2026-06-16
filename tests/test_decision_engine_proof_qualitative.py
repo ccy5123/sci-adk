@@ -9,9 +9,13 @@ override rails:
     routes to a human spot-check (inconclusive) before a Claim can be supported;
   - low-confidence judgments escalate to a human;
   - with no judge, proof/qualitative return inconclusive (never fabricated).
-"""
 
-import pytest
+Updated for the F2 trail gate (design/rigor-shell-architecture.md §2.3): a BINDING
+(SUPPORTS/REFUTES) non-numeric verdict now must arrive with a well-formed
+``VerdictTrail``. Tests that exercise a confident binding outcome therefore attach a
+trail (see ``_trail``); the trail-absent / rubric-mismatch refusals are covered in
+tests/test_decision_engine_trail_gate.py.
+"""
 
 from sci_adk.core.claim import ConfidenceLevel, ConfidenceType
 from sci_adk.core.evidence import (
@@ -25,6 +29,12 @@ from sci_adk.core.evidence import (
 from sci_adk.core.spec import DecisionRule, DecisionRuleKind
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.judge import JudgeVerdict
+from sci_adk.loop.verdict import (
+    ChiefVerdict,
+    PanelVerdict,
+    VerdictProvenance,
+    VerdictTrail,
+)
 
 PROOF_RULE = DecisionRule(
     kind=DecisionRuleKind.PROOF,
@@ -34,6 +44,25 @@ QUAL_RULE = DecisionRule(
     kind=DecisionRuleKind.QUALITATIVE,
     expression="the finding is clear, well-organized, and on-topic",
 )
+
+
+def _trail(rule: DecisionRule, direction=BearingDirection.SUPPORTS,
+           level=ConfidenceLevel.STRONG):
+    """A well-formed chief-over-N trail that judged ``rule`` (F2 gate input)."""
+    return VerdictTrail(
+        hypothesis_id="hyp-1",
+        rule_kind=rule.kind.value,
+        rubric_expression=rule.expression,
+        rubric_params=rule.params,
+        panel=[
+            PanelVerdict(direction=direction, level=level, basis="panelist A"),
+            PanelVerdict(direction=direction, level=ConfidenceLevel.MODERATE,
+                         basis="panelist B"),
+        ],
+        chief=ChiefVerdict(direction=direction, level=level,
+                           basis="panelist A reasoning is decisive under R"),
+        provenance=VerdictProvenance(spec_version=1, timestamp="2026-06-16T00:00:00Z"),
+    )
 
 
 class FakeJudge:
@@ -76,8 +105,9 @@ def _results(*items):
 # -- qualitative -------------------------------------------------------------
 
 def test_qualitative_confident_judgment_maps_to_direction_and_level():
+    # A confident BINDING judgment now requires a well-formed trail (F2 gate).
     jv = JudgeVerdict(BearingDirection.SUPPORTS, ConfidenceLevel.STRONG,
-                      "criterion clearly met")
+                      "criterion clearly met", trail=_trail(QUAL_RULE))
     engine = DecisionEngine(judge=FakeJudge(qualitative=jv))
     v = engine.evaluate(QUAL_RULE, _results(_ev(finding="clear and organized")))
     assert v.direction == BearingDirection.SUPPORTS
@@ -131,10 +161,12 @@ def test_proof_judge_found_counterexample_refutes():
 
 
 def test_proof_confident_verified_pends_human_spotcheck_not_supports():
-    # OVERRIDE: a confident "verified" still needs a human spot-check before a
-    # Claim can be supported -- the engine must NOT emit supports.
+    # OVERRIDE: even WITH a well-formed trail, a confident "verified" still needs a
+    # human spot-check before a Claim can be supported -- the engine must NOT emit
+    # supports. (Trail-absent confident verified is refused for the trail instead;
+    # see tests/test_decision_engine_trail_gate.py.)
     jv = JudgeVerdict(BearingDirection.SUPPORTS, ConfidenceLevel.STRONG,
-                      "derivation verified")
+                      "derivation verified", trail=_trail(PROOF_RULE))
     engine = DecisionEngine(judge=FakeJudge(proof=jv))
     v = engine.evaluate(PROOF_RULE, _results(_ev(finding="proof body")))
     assert v.direction == BearingDirection.INCONCLUSIVE

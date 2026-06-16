@@ -27,6 +27,7 @@ from typing import Optional, Protocol, Sequence, runtime_checkable
 
 from sci_adk.core.claim import ConfidenceLevel
 from sci_adk.core.evidence import BearingDirection
+from sci_adk.loop.verdict import VerdictTrail
 
 
 @dataclass(frozen=True)
@@ -41,12 +42,19 @@ class JudgeVerdict:
         basis: the judge's reasoning (becomes part of the Verdict basis, C3/D2).
         counterexample: proof-specific -- the judge found a counterexample
             (decisive refutation), regardless of ``direction``.
+        trail: the chief-over-N provenance trail behind this verdict
+            (``verdicts/<hyp-id>.json``). Additive (default None) so the Judge
+            Protocol signatures are unchanged and existing callers stay
+            backward-constructible. The engine's F2 gate accepts a BINDING
+            (SUPPORTS/REFUTES) non-numeric verdict only when a well-formed trail is
+            present (design/rigor-shell-architecture.md §2.3, F2).
     """
 
     direction: BearingDirection
     level: ConfidenceLevel
     basis: str
     counterexample: bool = False
+    trail: Optional[VerdictTrail] = None
 
 
 @runtime_checkable
