@@ -4,6 +4,8 @@ sci-adk command-line interface.
     sci-adk run <proposal.md> [-o OUTPUT] [--spec-id ID]
     sci-adk run --t1-demo [-o OUTPUT] [--spec-id ID]   # run the built-in T-1 capability
     sci-adk resolve <run-dir>                          # drive the checkpoint loop
+    sci-adk prior-work <run-dir> --searched <dois...>  # record a prior-work decision
+    sci-adk prior-work <run-dir> --skip --reason "..." #   (searched or skipped)
 
 Compiles a four-pane proposal into ``runs/<spec.id>/`` (spec.json, evidence/,
 claims/, paper/draft.md). The numeric path runs autonomously at zero LLM cost;
@@ -61,6 +63,32 @@ def build_parser() -> argparse.ArgumentParser:
              "recorded verdicts; report unresolved checkpoints + resolved claims)",
     )
     resolve.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+
+    prior_work = sub.add_parser(
+        "prior-work",
+        help="record the Spec-time prior-work decision into the Evidence log "
+             "(searched -> LITERATURE, or skipped -> a recorded null)",
+    )
+    prior_work.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    group = prior_work.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--searched", nargs="+", metavar="DOI",
+        help="prior work WAS searched: acquire these DOIs (discovery via the agent's "
+             "web_search is upstream) -> a LITERATURE EvidenceItem",
+    )
+    group.add_argument(
+        "--skip", action="store_true",
+        help="prior work was NOT searched: record a PRIOR_WORK_DECISION null "
+             "(requires --reason)",
+    )
+    prior_work.add_argument(
+        "--reason", default=None,
+        help="why prior-art search was skipped (required with --skip)",
+    )
+    prior_work.add_argument(
+        "--target-id", default=None,
+        help="optional Hypothesis/Claim id the survey relates to (searched path)",
+    )
     return parser
 
 
@@ -147,12 +175,66 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_prior_work(args: argparse.Namespace) -> int:
+    """Record the Spec-time prior-work decision into the single Evidence log.
+
+    Reads the recorded Spec (no LLM); for ``--searched`` it drives the existing
+    acquirer (a LITERATURE item), for ``--skip`` it records a PRIOR_WORK_DECISION
+    null with the given reason. Either closes the prior_work checkpoint.
+    """
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+    # workspace root holds runs/ (run_dir is <workspace>/runs/<spec.id>).
+    workspace = run_dir.parent.parent
+
+    # Imported here so the kernel CLI stays thin and the import cost is paid only
+    # when this verb runs.
+    from sci_adk.loop.prior_work import (
+        record_prior_work_searched,
+        record_prior_work_skip,
+    )
+
+    if args.skip:
+        if not args.reason or not args.reason.strip():
+            print("error: --skip requires a non-empty --reason (a skipped "
+                  "prior-work search is a recorded null; the record must say why)",
+                  file=sys.stderr)
+            return 2
+        item = record_prior_work_skip(spec, workspace, reason=args.reason)
+        print(f"recorded prior-work decision (skipped) for Spec '{spec.id}' "
+              f"-> {item.kind.value} evidence {item.id}")
+        print(f"  reason: {args.reason.strip()}")
+        return 0
+
+    # searched path: discovery (DOIs) is upstream; acquire + record LITERATURE.
+    outcome = record_prior_work_searched(
+        spec, workspace, dois=args.searched, target_id=args.target_id)
+    ev = outcome.evidence
+    print(f"recorded prior-work decision (searched) for Spec '{spec.id}' "
+          f"-> {ev.kind.value} evidence {ev.id}")
+    print(f"  acquired: {len(outcome.result.succeeded)} | "
+          f"failed: {len(outcome.result.failed)}")
+    if outcome.should_halt:
+        # Some DOIs had no OA PDF: surface the halt feedback (the orchestrator would
+        # present this to the human). The decision is still recorded.
+        print("  halt (human input needed):", file=sys.stderr)
+        print(outcome.halt.feedback(), file=sys.stderr)
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
         return _cmd_run(args)
     if args.command == "resolve":
         return _cmd_resolve(args)
+    if args.command == "prior-work":
+        return _cmd_prior_work(args)
     return 1
 
 

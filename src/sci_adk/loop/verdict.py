@@ -28,9 +28,9 @@ that reads it). Round-trippable via Pydantic v2.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Discriminator, Field, Tag, field_validator
 
 from sci_adk.core.claim import ConfidenceLevel
 from sci_adk.core.evidence import BearingDirection
@@ -41,14 +41,20 @@ from sci_adk.core.evidence import BearingDirection
 _NON_NUMERIC_KINDS = ("proof", "qualitative")
 
 
-class CheckpointModel(BaseModel):
-    """Typed contract behind ``checkpoints/<hyp-id>.json`` (§4.3).
+class JudgeCheckpoint(BaseModel):
+    """Typed contract behind a judge ``checkpoints/<hyp-id>.json`` (§4.3).
 
     The machine-readable form of a proof/qualitative hypothesis awaiting an
     in-session agent verdict. ``checkpoints.md`` is rendered *from* these (the
     inverse of the milestone-1 layout, where the prose was primary).
 
+    This is the ``"judge"`` arm of the :data:`Checkpoint` discriminated union. The
+    ``checkpoint_type`` discriminator defaults to ``"judge"`` (additive: the prior
+    on-disk shape is preserved -- older judge files without the key still load,
+    new ones gain a single defaulted field).
+
     Attributes:
+        checkpoint_type: the union tag (always ``"judge"`` here).
         hypothesis_id: the hypothesis this checkpoint is for.
         kind: ``"proof"`` | ``"qualitative"`` (numeric kinds are never checkpoints).
         expression: the rule's prose criterion (``rule.expression``).
@@ -58,6 +64,9 @@ class CheckpointModel(BaseModel):
 
     model_config = {"frozen": True, "str_strip_whitespace": True}
 
+    checkpoint_type: Literal["judge"] = Field(
+        default="judge", description="Discriminator for the Checkpoint union"
+    )
     hypothesis_id: str = Field(..., min_length=1, description="Hypothesis id")
     kind: str = Field(..., description="proof | qualitative")
     expression: str = Field(..., min_length=1, description="The rule's prose criterion")
@@ -72,6 +81,82 @@ class CheckpointModel(BaseModel):
                 f"checkpoint kind must be one of {_NON_NUMERIC_KINDS}, got {v!r}"
             )
         return v
+
+
+# Backwards-compatible name: the historical ``CheckpointModel`` IS the judge arm.
+CheckpointModel = JudgeCheckpoint
+
+
+class PriorWorkCheckpoint(BaseModel):
+    """Typed contract behind ``checkpoints/prior_work.json`` -- the prior_work arm.
+
+    A *recording-type* reminder emitted at Spec creation so prior art is not
+    forgotten (design/literature-acquisition.md §"Discovery trigger model"). It is
+    NOT a judgment: it carries no verdict trail and is NOT hypothesis-bound. It
+    stays "open" until a prior-work decision is recorded in the single Evidence log
+    (a LITERATURE item for *searched*, or a PRIOR_WORK_DECISION item for
+    *not searched*).
+
+    ``model_config.extra = "forbid"`` keeps the union type-safe: a payload that
+    carries judge-only keys (``hypothesis_id`` / ``expression``) is rejected here,
+    not silently coerced -- the discriminator does the routing, this guards against
+    a mis-tagged blob.
+
+    Attributes:
+        checkpoint_type: the union tag (always ``"prior_work"`` here).
+        spec_id: the Spec this prior-work check is for (not a hypothesis).
+        trigger: the firing trigger -- only ``"spec_creation"`` exists now; the
+            contested / novelty / paper-render triggers are deferred (graded as
+            incremental, never pegged at the Spec anchor's priority).
+        spec_version: the Spec version this was raised against (replay).
+        prompt: the human/agent-facing reminder text.
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+        "extra": "forbid",
+    }
+
+    checkpoint_type: Literal["prior_work"] = Field(
+        default="prior_work", description="Discriminator for the Checkpoint union"
+    )
+    spec_id: str = Field(..., min_length=1, description="Spec id this check is for")
+    trigger: Literal["spec_creation"] = Field(
+        default="spec_creation",
+        description="Firing trigger (only spec_creation now; others deferred)",
+    )
+    spec_version: int = Field(..., ge=1, description="Spec version this was raised against")
+    prompt: str = Field(..., min_length=1, description="Reminder text for the agent")
+
+
+def _checkpoint_tag(value: Any) -> str:
+    """Discriminator callable for the :data:`Checkpoint` union.
+
+    Maps a raw payload (dict or model instance) to its union tag. A payload with NO
+    ``checkpoint_type`` key defaults to ``"judge"`` -- this is what lets legacy judge
+    ``checkpoints/<hyp-id>.json`` files (written before the discriminator existed)
+    still load through ``TypeAdapter(Checkpoint)``. Newer files carry the key
+    explicitly. The judge on-disk shape is unchanged -- this only widens what the
+    union accepts on the way in.
+    """
+    if isinstance(value, dict):
+        return value.get("checkpoint_type", "judge")
+    return getattr(value, "checkpoint_type", "judge")
+
+
+# The on-disk Checkpoint contract is a discriminated union tagged by
+# ``checkpoint_type``: judge checkpoints (per hypothesis) vs the single prior_work
+# checkpoint (per Spec). Use ``pydantic.TypeAdapter(Checkpoint)`` to load either --
+# including legacy judge files that predate the ``checkpoint_type`` key (a missing
+# tag defaults to ``"judge"`` via :func:`_checkpoint_tag`).
+Checkpoint = Annotated[
+    Union[
+        Annotated[JudgeCheckpoint, Tag("judge")],
+        Annotated[PriorWorkCheckpoint, Tag("prior_work")],
+    ],
+    Discriminator(_checkpoint_tag),
+]
 
 
 class PanelVerdict(BaseModel):
@@ -169,6 +254,9 @@ class VerdictTrail(BaseModel):
 
 __all__ = [
     "CheckpointModel",
+    "JudgeCheckpoint",
+    "PriorWorkCheckpoint",
+    "Checkpoint",
     "PanelVerdict",
     "ChiefVerdict",
     "VerdictProvenance",

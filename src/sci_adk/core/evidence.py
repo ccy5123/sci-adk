@@ -40,6 +40,12 @@ class EvidenceKind(str, Enum):
         literature: A finding from the literature review
         counterexample: A counterexample to a claim
         observation: A general observation or note
+        prior_work_decision: A recorded Spec-time prior-work decision. Used for the
+            *not-searched* outcome of the discovery trigger: a recorded null (the
+            reason for skipping prior-art search). The *searched* outcome is a
+            LITERATURE item, not this. Kept distinct so the decision is never
+            confused with an acquisition in the single append-only log
+            (design/literature-acquisition.md, Invariant E2).
     """
 
     EXPERIMENT_RUN = "experiment_run"
@@ -47,6 +53,7 @@ class EvidenceKind(str, Enum):
     LITERATURE = "literature"
     COUNTEREXAMPLE = "counterexample"
     OBSERVATION = "observation"
+    PRIOR_WORK_DECISION = "prior_work_decision"
 
 
 class BearingDirection(str, Enum):

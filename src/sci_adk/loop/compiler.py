@@ -41,7 +41,8 @@ from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.loop.claim_updater import ClaimUpdater
 from sci_adk.loop.judge import Judge
-from sci_adk.loop.verdict import CheckpointModel
+from sci_adk.loop.prior_work import prior_work_checkpoint
+from sci_adk.loop.verdict import CheckpointModel, PriorWorkCheckpoint
 from sci_adk.render.paper import render_paper
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
@@ -86,6 +87,7 @@ class CompileResult:
     checkpoints: List[Checkpoint]
     run_dir: Path
     paper_path: Path
+    prior_work_checkpoint: Optional[PriorWorkCheckpoint] = None
 
     @property
     def needs_agent(self) -> bool:
@@ -145,6 +147,14 @@ class ResearchCompiler:
         run_dir.mkdir(parents=True, exist_ok=True)
         self._save_spec(spec, run_dir)
 
+        # Spec-time prior-work trigger (design/literature-acquisition.md): emit a
+        # recording-type reminder so prior art is not forgotten. It is NOT a
+        # judgment (no verdict trail, not hypothesis-bound); it stays open until a
+        # prior-work decision (searched -> LITERATURE / skipped -> PRIOR_WORK_DECISION)
+        # is recorded in the single Evidence log.
+        pw_checkpoint = prior_work_checkpoint(spec)
+        self._save_prior_work_checkpoint(pw_checkpoint, run_dir)
+
         evidence: List[EvidenceItem] = []
         if experiment is not None:
             produced = experiment(spec, self.workspace_dir)
@@ -176,6 +186,7 @@ class ResearchCompiler:
             checkpoints=checkpoints,
             run_dir=run_dir,
             paper_path=paper_path,
+            prior_work_checkpoint=pw_checkpoint,
         )
 
     # -- helpers -----------------------------------------------------------
@@ -212,6 +223,24 @@ class ResearchCompiler:
     def _save_spec(spec: Spec, run_dir: Path) -> None:
         (run_dir / "spec.json").write_text(
             json.dumps(spec.model_dump(mode="json"), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _save_prior_work_checkpoint(
+        checkpoint: PriorWorkCheckpoint, run_dir: Path
+    ) -> None:
+        """Persist the prior_work checkpoint as ``checkpoints/prior_work.json``.
+
+        It shares the ``checkpoints/`` directory with the judge ``<hyp-id>.json``
+        files but is distinguishable on disk by its ``checkpoint_type`` discriminator
+        (and by the fixed ``prior_work.json`` name) -- decision vs judgment never
+        get confused (the discriminated-union contract in loop/verdict.py).
+        """
+        cp_dir = run_dir / "checkpoints"
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        (cp_dir / "prior_work.json").write_text(
+            json.dumps(checkpoint.model_dump(mode="json"), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
