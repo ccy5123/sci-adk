@@ -558,12 +558,14 @@ Phases are ordered by dependency; no time estimates (per project convention).
 - **Phase D4 — Updater delegation.** Refactor `ClaimUpdater._evaluate_hypothesis`
   to delegate (§4), including load-or-create + non-monotone `update_status`
   (Decision 8). Remove dead `total_weight` (§5 item 3).
-- **Phase D5 — Verification on the record.** Re-run the T-1 fixture
-  (`milestone-1.md`) end to end; confirm the interval rule now drives the verdict
-  (not a vote), confirm a synthetic refuting Evidence demotes a `supported` Claim
-  to `contested`/`refuted` with a new `StatusChange`. Engineering-layer tests
-  (`tests/`) are appropriate here — this is the build harness's domain, distinct
-  from the science-layer Evidence/Claim verification.
+- **Phase D5 — Verification on the record.** [IMPLEMENTED 2026-06-16]
+  `tests/test_t1_end_to_end.py`: (1) a real Docker T-1 run → Evidence → engine →
+  Claim, where a threshold rule on the encoding count drives the SUPPORTED
+  verdict (basis quotes the rule, not a vote); (2) the canonical T-1 interval
+  rule drives the verdict from a CI, and a synthetic refuting Evidence (CI below
+  null, arriving later) demotes the SUPPORTED Claim to REFUTED with a new
+  `StatusChange` (non-monotone, C1/C2). Engineering-layer tests; the Docker test
+  skips when the docker CLI is absent.
 
 ---
 
@@ -583,10 +585,12 @@ Phases are ordered by dependency; no time estimates (per project convention).
 ---
 
 Status: CONFIRMED (2026-06-15) — D3/D4/D7 resolved (D4 by user override); D1/D2/D5/D6/D8 accepted as recommended
-Implementation (2026-06-16, on master): D1-D4 done. D2 numeric kinds, D3
-proof/qualitative judge routing (engine-side; live ClaudeJudge deferred), D4
-ClaimUpdater delegation + non-monotone updates. D5 (T-1 end-to-end) remains,
-blocked on Docker.
+Implementation (2026-06-16, on master): **D1-D5 all done** (Milestone-2
+complete). D2 numeric kinds; D3 proof/qualitative judge routing (engine-side;
+live ClaudeJudge deferred); D4 ClaimUpdater delegation + non-monotone updates;
+D5 T-1 end-to-end (real Docker → Claim + interval-rule non-monotone demotion),
+Docker now available. Follow-ups: live ClaudeJudge backend; the human-spot-check
+step that promotes a pending-verified proof to `supported`.
 Source: gap between `DecisionRule` (spec.py:94-205) and the vote-count
 placeholder (claim_updater.py:83-176); interface named in abstractions.md:280-307
 Last Updated: 2026-06-16
