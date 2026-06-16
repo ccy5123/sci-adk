@@ -312,7 +312,7 @@ def acquire_literature(
     """
     Convenience wrapper: acquire ``dois`` for ``spec`` and return the outcome.
 
-    Mirrors ``run_t1_experiments`` -- a one-call entry for the common case.
+    A one-call entry for the common case.
     Inspect ``outcome.should_halt`` / ``outcome.halt`` to decide whether to feed
     back to the human and stop the loop.
     """

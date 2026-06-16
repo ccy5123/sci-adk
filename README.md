@@ -129,11 +129,17 @@ print(f"Hypotheses: {len(spec.hypotheses)}")
 ### Run Experiments
 
 ```python
-from sci_adk.loop.experiment_runner import run_t1_experiments
+from pathlib import Path
+from sci_adk.adapter.t1_capability import (
+    build_t1_spec,
+    build_t1_demo_molecules,
+    t1_experiment,
+)
 
-spec = ...  # from parse_proposal()
-molecules = ["H2O", "CO2", "CH4"]
-evidence_items = run_t1_experiments(spec, molecules)
+spec = build_t1_spec()
+molecules = build_t1_demo_molecules()
+experiment_fn = t1_experiment(molecules)
+evidence_items = experiment_fn(spec, Path("runs"))
 ```
 
 ### Update Claims
@@ -142,7 +148,7 @@ evidence_items = run_t1_experiments(spec, molecules)
 from sci_adk.loop.claim_updater import update_claims
 
 spec = ...  # from parse_proposal()
-evidence_items = ...  # from run_t1_experiments()
+evidence_items = ...  # from the T-1 experiment fn
 claims = update_claims(spec, evidence_items)
 
 for claim in claims:

@@ -7,7 +7,6 @@ Reference: design/directory-structure.md (runner/)
 Milestone 1: Basic container execution for T-1 molecular encoding.
 """
 
-import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -198,79 +197,3 @@ class DockerExecutor:
         except Exception:
             pass
         return None
-
-
-def execute_t1_molecule_encoding(
-    molecules: List[str],
-    executor: Optional[DockerExecutor] = None,
-) -> Dict[str, Any]:
-    """
-    Execute T-1 molecular encoding experiment (Milestone 1).
-
-    Simplified encoding: assign primes to atoms and encode structure.
-    Milestone 1: Basic demonstration without full graph encoding.
-
-    Args:
-        molecules: List of SMILES or molecular formulas
-        executor: Optional DockerExecutor instance
-
-    Returns:
-        Execution result with encodings and provenance
-    """
-    if executor is None:
-        executor = DockerExecutor()
-
-    # Simple encoding script (milestone 1)
-    script = """
-import sys
-import json
-
-# Simple prime assignment (milestone 1)
-PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
-ATOM_MAP = {'H': 0, 'C': 1, 'O': 2, 'N': 3}
-
-def encode_molecule(formula):
-    '''Simple encoding for milestone 1.'''
-    result = 1
-    for atom in formula:
-        if atom in ATOM_MAP:
-            prime = PRIMES[ATOM_MAP[atom]]
-            result *= prime
-    return result
-
-# Read molecules from command line
-molecules = sys.argv[1:]
-results = {}
-
-for mol in molecules:
-    try:
-        encoded = encode_molecule(mol)
-        results[mol] = {
-            'encoding': encoded,
-            'status': 'success'
-        }
-    except Exception as e:
-        results[mol] = {
-            'encoding': None,
-            'status': f'error: {e}'
-        }
-
-print(json.dumps(results, indent=2))
-"""
-
-    # Execute
-    result = executor.execute_python(script, script_args=molecules)
-
-    # Parse output
-    encodings = {}
-    if result["success"] and result["stdout"]:
-        try:
-            encodings = json.loads(result["stdout"])
-        except json.JSONDecodeError:
-            encodings = {"error": "Failed to parse output"}
-
-    return {
-        "encodings": encodings,
-        "provenance": result["provenance"],
-        "success": result["success"],
-    }
