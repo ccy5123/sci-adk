@@ -17,6 +17,10 @@ from sci_adk.loop.decision_engine import (
     EvidenceForHypothesis,
     Verdict,
 )
+from sci_adk.loop.literature_acquirer import (
+    LiteratureAcquirer,
+    acquire_literature,
+)
 
 __all__ = [
     "ExperimentRunner",
@@ -26,4 +30,6 @@ __all__ = [
     "DecisionEngine",
     "EvidenceForHypothesis",
     "Verdict",
+    "LiteratureAcquirer",
+    "acquire_literature",
 ]

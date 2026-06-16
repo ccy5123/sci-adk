@@ -95,3 +95,50 @@ So `moai-lsp` in `.mcp.json` is a build-time coding aid, not a policy violation.
 
 위 4개로 T-1의 *축소판*이 돌아가는 게 첫 마일스톤. 나머지 도구(Lean, SageMath,
 DVC, tmux 등)는 *필요해진 시점에* 추가.
+
+---
+
+## 추가 도구 기록 (Addendum)
+
+> 위 본문(2026-05-26 사용자 진술)은 verbatim 보존한다. 본 섹션은 그 이후
+> "추가 시 규칙"(4단계)에 따라 도입된 도구를 시간순으로 기록한다.
+
+### paperforge — DOI → Open Access PDF 취득 (2026-06-16, 사용자 승인됨)
+
+`ccy5123/paperforge` (private). DOI 목록을 받아 OA 폴백 체인(arXiv → Unpaywall
+→ OpenAlex → Europe PMC → Semantic Scholar)으로 full-text PDF를 내려받고,
+`%PDF-` 매직바이트로 검증한 뒤 재개가능 `manifest.csv` + 메타데이터 sidecar를
+남긴다.
+
+추가 시 규칙(4단계) 검토:
+
+1. **왜 필요한가**: 학술 *검색*(arXiv/S2/CrossRef MCP)이 찾은 DOI를 실제
+   full-text OA PDF로 *취득*해 sci-adk가 읽게 한다. 검색=메타데이터,
+   paperforge=취득(acquisition). 둘은 별개 단계다.
+2. **배제 목록으로 대체 가능?** 불가. LSP/ast-grep/Conventional Commits/Coverage
+   는 모두 무관(SW 워크플로우 도구).
+3. **허용 도구로 대체 가능?** 부분만. arXiv/S2/CrossRef MCP는 메타데이터 검색·
+   DOI 해석이지, OA 폴백 다운로드 + PDF 검증 + 재개가능 manifest가 아니다.
+   paperforge가 그 갭(Unpaywall/OpenAlex/Europe PMC OA 발견 + PDF 취득)을 메운다.
+4. **사용자 승인**: 받음 (2026-06-16).
+
+도입에 따른 시스템 표면 증가(보수성 원칙 명시):
+
+- **신규 외부 서비스**: Unpaywall, OpenAlex, Europe PMC (read-only OA 발견 API).
+  arXiv·Semantic Scholar·CrossRef는 이미 허용 목록에 있음.
+- **신규 외부 작용**: 네트워크 PDF 다운로드(읽기성 취득).
+
+통합 방식:
+
+- 형태: 서브프로세스/CLI 어댑터 — `src/sci_adk/search/paperforge_adapter.py`가
+  `paperforge` CLI를 호출(runner/docker_executor 패턴). 두 파이썬 환경 격리 +
+  provenance(핀 SHA·명령·버전) 기록.
+- 핀: `ccy5123/paperforge @ 60fefedacb7349c755c29b2c2f26873464158c12`
+  (pyproject.toml `[project.optional-dependencies].tools`,
+  `pip install -e ".[tools]"`).
+- 출력: `runs/<proposal>/` 하위에 취득물 저장(연구 루프 배선 시).
+
+**Discovery front-end (신규 도구 아님)**: paperforge에 넘길 DOI는 Claude의 native
+`web_search`(이미 허용 목록)로 찾는다 — 연구자가 선행연구를 훑듯 on-demand로.
+discovery(주제→주요 논문→DOI)는 코드 모듈이 아니라 에이전트 행위이고, paperforge가
+그 DOI를 취득한다. 전체 흐름·진입점은 `design/literature-acquisition.md` 참조.

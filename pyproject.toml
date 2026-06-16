@@ -12,6 +12,16 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
+[project.optional-dependencies]
+# Acquisition tooling invoked as a subprocess, not imported (see
+# src/sci_adk/search/paperforge_adapter.py). Pinned to a git SHA for
+# reproducibility; recorded in design/tool-policy.md (addendum 2026-06-16).
+# Private repo -- installing this group needs access to ccy5123/paperforge.
+#   pip install -e ".[tools]"
+tools = [
+    "paperforge @ git+https://github.com/ccy5123/paperforge.git@60fefedacb7349c755c29b2c2f26873464158c12",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
