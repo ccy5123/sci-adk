@@ -1,0 +1,33 @@
+{
+  "id": "evi-t1-20260616-111516-ddcad848",
+  "created_at": "2026-06-16T11:15:16.824442Z",
+  "spec_id": "t1-godel",
+  "kind": "experiment_run",
+  "provenance": {
+    "code_ref": "6800c510f53eb912fcc1a459059d9ac633db2d11",
+    "data_ref": null,
+    "seed": null,
+    "environment": "capability:t1-molecular-godel, docker:sci-adk-python-base, image_id:f4b2801533cb",
+    "cost": null
+  },
+  "result": {
+    "type": "quantitative",
+    "point": 0.0,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "{\"statistic\": \"collision_count\", \"collision_count\": 0, \"round_trip_ok\": true, \"n_molecules\": 6, \"capability\": \"t1-molecular-godel\"}",
+    "artifact_ref": null
+  },
+  "bears_on": [
+    {
+      "target_id": "hyp-t1",
+      "direction": "supports",
+      "weight": null
+    }
+  ],
+  "supersedes": null
+}

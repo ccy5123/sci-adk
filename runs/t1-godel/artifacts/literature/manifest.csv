@@ -1,0 +1,4 @@
+index,doi,status,source,license,filename,origin,error
+1,10.1021/c160017a018,failed,,,,cli,no OA PDF
+2,10.48550/arXiv.1301.1493,success,arxiv,,McKay2013.pdf,cli,
+3,10.1186/s13321-020-00453-4,success,unpaywall,cc-by,Krotko2020.pdf,cli,

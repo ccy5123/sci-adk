@@ -1,0 +1,42 @@
+{
+  "id": "t1-godel",
+  "created_at": "2026-06-16T11:15:16.242915Z",
+  "version": 1,
+  "raw_proposal": {
+    "background": "Molecular graphs can be serialized to integers. A Gödel-style prime encoding promises an injective, recoverable mapping.",
+    "goal": "Demonstrate an injective Gödel-style encoding of molecular graphs on a designed test set (unique integer per non-isomorphic molecule).",
+    "method": "Canonically label each graph (Morgan-style refinement), encode atoms and bonds as prime-power products packed into one integer, and verify zero collisions plus exact round-trip decode over the test set.",
+    "expected_output": "A unique integer per non-isomorphic molecule and a decode that recovers the canonical graph (injectivity on the tested sample)."
+  },
+  "hypotheses": [
+    {
+      "id": "hyp-t1",
+      "statement": "Molecule graphs admit an injective Gödel-style encoding on the tested set",
+      "mode": "exploratory",
+      "decision_rule": {
+        "kind": "threshold",
+        "expression": "collision_count == 0 over the test set => support (injective on the tested set); collision_count > 0 => refute",
+        "params": {
+          "statistic": "collision_count",
+          "op": "==",
+          "value": 0.0
+        }
+      }
+    }
+  ],
+  "method": {
+    "approaches": [
+      "prime-Gödel graph encoding"
+    ],
+    "tools": []
+  },
+  "target_claims": [
+    {
+      "id": "tc-t1",
+      "statement": "An injective encoding exists on the tested set",
+      "answers": "hyp-t1"
+    }
+  ],
+  "amendment_rationale": null,
+  "prior_version_id": null
+}

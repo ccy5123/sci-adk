@@ -1,0 +1,31 @@
+{
+  "id": "claim-hyp-t1",
+  "spec_id": "t1-godel",
+  "answers": "hyp-t1",
+  "statement": "Molecule graphs admit an injective Gödel-style encoding on the tested set",
+  "status": "supported",
+  "confidence": {
+    "type": "credence",
+    "value": 0.0,
+    "level": null,
+    "basis": "threshold rule: statistic 'point'=0 == 0 is met (combine='latest', margin=0)"
+  },
+  "evidence_set": [
+    {
+      "evidence_id": "evi-t1-20260616-111516-ddcad848",
+      "role": "supporting"
+    }
+  ],
+  "scope_limitations": "",
+  "mode": "exploratory",
+  "renders_to": null,
+  "history": [
+    {
+      "at": "2026-06-16T11:15:16.825232Z",
+      "from_status": "proposed",
+      "to_status": "supported",
+      "triggered_by": "evi-t1-20260616-111516-ddcad848",
+      "note": "Initial evaluation via DecisionEngine"
+    }
+  ]
+}

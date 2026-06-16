@@ -26,7 +26,6 @@ from sci_adk.loop.compiler import (
     Checkpoint,
     CompileResult,
     ResearchCompiler,
-    t1_molecular_experiment,
 )
 from sci_adk.loop.literature_acquirer import (
     AcquisitionHalt,
@@ -57,5 +56,4 @@ __all__ = [
     "ResearchCompiler",
     "CompileResult",
     "Checkpoint",
-    "t1_molecular_experiment",
 ]

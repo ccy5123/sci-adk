@@ -17,12 +17,15 @@ run is recompiled with an injected ``judge``. The compiler never spawns
 ``claude -p`` and never calls an API.
 
 Experiment execution is a pluggable hook: ``compile(experiment=fn)`` where
-``fn(spec, workspace_dir) -> [EvidenceItem]``. The built-in
-``t1_molecular_experiment`` wires the milestone-1 Docker experiment; other
-domains supply their own (or run experiments as an agent step).
+``fn(spec, workspace_dir) -> [EvidenceItem]``. The kernel keeps only the
+``ExperimentFn`` *type*; concrete experiment factories live in the capability
+adapter (``sci_adk.adapter``), never here -- the kernel stays domain-free
+(design/rigor-shell-architecture.md §2.4/§3.3, F4). A capability may also supply a
+pre-built ``Spec`` via ``compile(spec=...)`` when the free-text parser cannot infer
+the precise ``DecisionRule`` (e.g. a numeric threshold rule).
 
-Reference: design/directory-structure.md (loop/), design/decision-engine.md,
-design/literature-acquisition.md.
+Reference: design/rigor-shell-architecture.md (kernel/adapter seam),
+design/directory-structure.md (loop/), design/decision-engine.md.
 """
 
 from __future__ import annotations
@@ -96,14 +99,21 @@ class ResearchCompiler:
         proposal_text: str,
         *,
         spec_id: Optional[str] = None,
+        spec: Optional[Spec] = None,
         experiment: Optional[ExperimentFn] = None,
     ) -> CompileResult:
         """
-        Compile ``proposal_text`` end to end into ``runs/<spec.id>/``.
+        Compile a proposal end to end into ``runs/<spec.id>/``.
 
         Args:
-            proposal_text: the four-pane proposal.
-            spec_id: optional explicit Spec id (else derived by the parser).
+            proposal_text: the four-pane proposal. Ignored when ``spec`` is given.
+            spec_id: optional explicit Spec id (else derived by the parser). Ignored
+                when ``spec`` is given.
+            spec: an optional pre-built ``Spec`` supplied by a capability adapter.
+                When present it is used verbatim (the heuristic parser is bypassed),
+                letting a capability carry a precise ``DecisionRule`` the free-text
+                parser cannot infer -- e.g. a numeric threshold rule. The kernel
+                stays domain-free: it accepts a frozen ``Spec``, never the domain.
             experiment: optional ``fn(spec, workspace_dir) -> [EvidenceItem]``
                 that produces Evidence (e.g. a Docker run). When absent, the
                 compile still emits the Spec + a proposal-only draft + any
@@ -112,7 +122,9 @@ class ResearchCompiler:
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
         """
-        spec = ProposalParser().parse(proposal_text, spec_id=spec_id)
+        spec = spec if spec is not None else ProposalParser().parse(
+            proposal_text, spec_id=spec_id
+        )
         run_dir = self.workspace_dir / "runs" / spec.id
         run_dir.mkdir(parents=True, exist_ok=True)
         self._save_spec(spec, run_dir)
@@ -199,20 +211,3 @@ class ResearchCompiler:
             lines.append(f"- Finding: {c.finding or '_(no experiment finding yet)_'}")
             lines.append("")
         (run_dir / "checkpoints.md").write_text("\n".join(lines), encoding="utf-8")
-
-
-def t1_molecular_experiment(molecules: Sequence[str]) -> ExperimentFn:
-    """Built-in experiment hook: run the milestone-1 T-1 Docker encoding.
-
-    Returns an ``ExperimentFn`` so the compiler stays domain-agnostic; other
-    domains provide their own hook (or run experiments as an agent step).
-    """
-
-    def _run(spec: Spec, workspace_dir: Path) -> List[EvidenceItem]:
-        # Imported lazily so the compiler module does not require Docker at import.
-        from sci_adk.loop.experiment_runner import ExperimentRunner
-
-        runner = ExperimentRunner(spec, workspace_dir=workspace_dir)
-        return [runner.run_t1_molecular_encoding(list(molecules))]
-
-    return _run

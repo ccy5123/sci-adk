@@ -1,0 +1,28 @@
+{
+  "doi": "10.1186/s13321-020-00453-4",
+  "title": "Atomic ring invariant and Modified CANON extended connectivity algorithm for symmetry perception in molecular graphs and rigorous canonicalization of SMILES",
+  "author": "Krotko",
+  "year": "2020",
+  "resolution": {
+    "doi": "10.1186/s13321-020-00453-4",
+    "source": "unpaywall",
+    "pdf_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-020-00453-4",
+    "landing_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-020-00453-4",
+    "license": "cc-by",
+    "version": "publishedVersion",
+    "host_type": "publisher",
+    "is_oa": true
+  },
+  "attempts": [
+    {
+      "doi": "10.1186/s13321-020-00453-4",
+      "source": "unpaywall",
+      "pdf_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-020-00453-4",
+      "landing_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-020-00453-4",
+      "license": "cc-by",
+      "version": "publishedVersion",
+      "host_type": "publisher",
+      "is_oa": true
+    }
+  ]
+}

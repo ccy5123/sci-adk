@@ -1,0 +1,28 @@
+{
+  "doi": "10.48550/arXiv.1301.1493",
+  "title": "Practical graph isomorphism, II",
+  "author": "McKay",
+  "year": "2013",
+  "resolution": {
+    "doi": "10.48550/arXiv.1301.1493",
+    "source": "arxiv",
+    "pdf_url": "https://arxiv.org/pdf/1301.1493",
+    "landing_url": "https://arxiv.org/abs/1301.1493",
+    "license": null,
+    "version": "submittedVersion",
+    "host_type": "repository",
+    "is_oa": true
+  },
+  "attempts": [
+    {
+      "doi": "10.48550/arXiv.1301.1493",
+      "source": "arxiv",
+      "pdf_url": "https://arxiv.org/pdf/1301.1493",
+      "landing_url": "https://arxiv.org/abs/1301.1493",
+      "license": null,
+      "version": "submittedVersion",
+      "host_type": "repository",
+      "is_oa": true
+    }
+  ]
+}
