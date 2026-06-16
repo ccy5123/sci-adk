@@ -18,6 +18,10 @@ from sci_adk.loop.decision_engine import (
     Verdict,
 )
 from sci_adk.loop.literature_acquirer import (
+    AcquisitionHalt,
+    AcquisitionOutcome,
+    HaltItem,
+    HaltReason,
     LiteratureAcquirer,
     acquire_literature,
 )
@@ -32,4 +36,8 @@ __all__ = [
     "Verdict",
     "LiteratureAcquirer",
     "acquire_literature",
+    "AcquisitionOutcome",
+    "AcquisitionHalt",
+    "HaltItem",
+    "HaltReason",
 ]

@@ -63,6 +63,37 @@ acquisition is record, not belief (design/abstractions.md).
 A failed DOI (no downloadable OA PDF) is a valid outcome recorded in the
 finding, not an error (Invariant E2: null results are results).
 
+## Halt gates (hand back to the human)
+
+Acquisition can stop the loop and ask the human, returning a structured
+`AcquisitionHalt` (the orchestrator surfaces it via AskUserQuestion and halts --
+sci-adk runtime code never prompts the user directly). Two conditions:
+
+1. **Unacquired papers (mechanical).** The whole DOI batch is still attempted
+   and recorded, then if *any* DOI had no downloadable OA PDF,
+   `acquire(...)` returns an `AcquisitionOutcome` whose `halt`
+   (`reason=UNACQUIRED_PAPERS`) lists the misses with their reasons. The
+   orchestrator feeds that list back to the user and stops -- it does not
+   silently proceed on a partial corpus.
+2. **Supporting Information needed (agent-judged).** After Claude reads a main
+   text and judges the paper's **SI** (Supporting Information) is required, it
+   builds `AcquisitionHalt.for_supporting_info([...])` and halts. This is a
+   judgment, not a mechanical check -- paperforge fetches the main OA PDF, not
+   the SI -- so the agent raises it; this module only provides the halt type.
+
+```
+outcome = acquire_literature(spec, dois, ...)
+if outcome.should_halt:          # condition 1: some DOIs unacquired
+    feed back outcome.halt.feedback() to the user; STOP the loop
+# ... Claude reads main texts ...
+if SI is required (agent judgment):   # condition 2
+    halt = AcquisitionHalt.for_supporting_info([...]); feed back; STOP
+```
+
+Both halts are first-class "ask the human" gates, consistent with sci-adk's
+human-checkpoint discipline: when the autonomous flow hits a wall (a paper it
+cannot get, or data that lives only in the SI), it surfaces rather than guesses.
+
 ## Code map
 
 - `src/sci_adk/search/paperforge_adapter.py` -- `PaperforgeAdapter` (subprocess
