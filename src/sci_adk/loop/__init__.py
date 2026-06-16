@@ -17,6 +17,11 @@ from sci_adk.loop.decision_engine import (
     EvidenceForHypothesis,
     Verdict,
 )
+from sci_adk.loop.judge import (
+    ClaudeJudge,
+    Judge,
+    JudgeVerdict,
+)
 from sci_adk.loop.literature_acquirer import (
     AcquisitionHalt,
     AcquisitionOutcome,
@@ -40,4 +45,7 @@ __all__ = [
     "AcquisitionHalt",
     "HaltItem",
     "HaltReason",
+    "Judge",
+    "JudgeVerdict",
+    "ClaudeJudge",
 ]

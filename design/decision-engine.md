@@ -545,8 +545,16 @@ Phases are ordered by dependency; no time estimates (per project convention).
 - **Phase D2 — Numeric kinds.** Implement `threshold`, `bayesian`, `interval`
   per Decisions 2, 3, 5, 6, 7. Extend the Spec validator for `interval` params
   (Decision 3) and do cleanup items 1-2 (§5).
-- **Phase D3 — Non-numeric kinds.** Implement `proof` (human checkpoint) and
-  `qualitative` (LLM-judge via the allowed Claude backend) per Decision 4 and D8.
+- **Phase D3 — Non-numeric kinds.** [IMPLEMENTED 2026-06-16, engine-side]
+  Both `proof` and `qualitative` route to an injected `Judge` (Decision 4 + §0
+  override) — `loop/judge.py` defines the `Judge` Protocol + `JudgeVerdict`;
+  `DecisionEngine(judge=...)` consumes it. Rails enforced in the engine: a
+  counterexample (in the record or judge-found) refutes decisively; a confident
+  proof "verified" verdict does NOT become `supports` — it returns `inconclusive`
+  pending a human spot-check; low confidence escalates; with no judge it returns
+  `inconclusive` (never fabricated, D8). The live Claude-backed `Judge` adapter
+  (`ClaudeJudge`) is **deferred** — the runtime Claude-invocation is a separate
+  infra decision; tests inject a fake `Judge`.
 - **Phase D4 — Updater delegation.** Refactor `ClaimUpdater._evaluate_hypothesis`
   to delegate (§4), including load-or-create + non-monotone `update_status`
   (Decision 8). Remove dead `total_weight` (§5 item 3).
@@ -575,6 +583,10 @@ Phases are ordered by dependency; no time estimates (per project convention).
 ---
 
 Status: CONFIRMED (2026-06-15) — D3/D4/D7 resolved (D4 by user override); D1/D2/D5/D6/D8 accepted as recommended
+Implementation (2026-06-16, on master): D1-D4 done. D2 numeric kinds, D3
+proof/qualitative judge routing (engine-side; live ClaudeJudge deferred), D4
+ClaimUpdater delegation + non-monotone updates. D5 (T-1 end-to-end) remains,
+blocked on Docker.
 Source: gap between `DecisionRule` (spec.py:94-205) and the vote-count
 placeholder (claim_updater.py:83-176); interface named in abstractions.md:280-307
-Last Updated: 2026-06-15
+Last Updated: 2026-06-16

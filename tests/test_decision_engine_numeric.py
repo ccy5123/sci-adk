@@ -525,13 +525,14 @@ class TestCrossCutting:
 
 
 # ===========================================================================
-# proof / qualitative are NOT implemented in Phase D2: they remain stubs that
-# return INCONCLUSIVE with a basis marking the stub state. Guard that D2 did not
-# accidentally implement them.
+# proof / qualitative route to an injected judge (Phase D3, Decision 4). With no
+# judge and no decisive counterexample they return INCONCLUSIVE requesting a
+# judge -- a real verdict, not a fabricated one (D8). The numeric kinds never
+# consult a judge; this guards that separation.
 # ===========================================================================
 
-class TestNonNumericRemainStubs:
-    def test_proof_remains_stub(self, engine):
+class TestNonNumericRouteWithoutJudge:
+    def test_proof_without_judge_is_inconclusive(self, engine):
         rule = DecisionRule(
             kind=DecisionRuleKind.PROOF,
             expression="verified derivation => support; counterexample => refute",
@@ -541,9 +542,9 @@ class TestNonNumericRemainStubs:
         assert verdict.confidence.type == ConfidenceType.GRADED
         assert verdict.confidence.level == ConfidenceLevel.NONE
         basis = verdict.confidence.basis.lower()
-        assert "stub" in basis or "not yet implemented" in basis
+        assert "judge" in basis and "stub" not in basis
 
-    def test_qualitative_remains_stub(self, engine):
+    def test_qualitative_without_judge_is_inconclusive(self, engine):
         rule = DecisionRule(
             kind=DecisionRuleKind.QUALITATIVE,
             expression="reviewer judges the construction novel and correct => support",
@@ -553,4 +554,4 @@ class TestNonNumericRemainStubs:
         assert verdict.confidence.type == ConfidenceType.GRADED
         assert verdict.confidence.level == ConfidenceLevel.NONE
         basis = verdict.confidence.basis.lower()
-        assert "stub" in basis or "not yet implemented" in basis
+        assert "judge" in basis and "stub" not in basis

@@ -249,9 +249,10 @@ def test_mixed_raw_bearings_map_to_contested(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_proof_rule_stub_maps_to_proposed(tmp_path: Path):
-    """A proof rule hits the engine's Phase-D1 stub (inconclusive) -> PROPOSED
-    with the stub's inconclusive (GRADED/NONE) confidence carried through."""
+def test_proof_rule_without_judge_maps_to_proposed(tmp_path: Path):
+    """A proof rule with no judge injected (and no counterexample) yields the
+    engine's inconclusive verdict (Phase D3 routing) -> PROPOSED, carrying the
+    GRADED/NONE confidence (no fabricated number, D8)."""
     rule = DecisionRule(
         kind=DecisionRuleKind.PROOF,
         expression="Verified derivation or counterexample exists",
@@ -269,13 +270,13 @@ def test_proof_rule_stub_maps_to_proposed(tmp_path: Path):
 
     claim = claims[0]
     assert claim.status == ClaimStatus.PROPOSED
-    # Stub confidence is GRADED/NONE per the engine (no fabricated number, D8).
+    # Inconclusive confidence is GRADED/NONE per the engine (no fabricated number, D8).
     assert claim.confidence.type == ConfidenceType.GRADED
-    assert "stub" in claim.confidence.basis.lower()
+    assert "judge" in claim.confidence.basis.lower()
 
 
-def test_qualitative_rule_stub_maps_to_proposed(tmp_path: Path):
-    """A qualitative rule also hits the engine stub -> PROPOSED / inconclusive."""
+def test_qualitative_rule_without_judge_maps_to_proposed(tmp_path: Path):
+    """A qualitative rule with no judge also yields inconclusive -> PROPOSED."""
     rule = DecisionRule(
         kind=DecisionRuleKind.QUALITATIVE,
         expression="Expert consensus on structural preservation",

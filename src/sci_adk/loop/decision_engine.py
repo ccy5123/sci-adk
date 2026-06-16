@@ -16,13 +16,14 @@ Spec: design/decision-engine.md (CONFIRMED 2026-06-15)
     - Decision 5   kind -> ConfidenceType mapping
 
 Phase scope (design/decision-engine.md §6):
-    This module now implements **Phase D2 (numeric kinds)**: the ``threshold``,
-    ``bayesian``, and ``interval`` handlers perform real numeric evaluation per
-    Decisions 2, 3, 5, 6, 7, reading every number from ``rule.params`` (D1). The
-    ``proof`` and ``qualitative`` handlers remain **Phase D1 stubs** (their
-    LLM-judge / human routing is Phase D3, Decision 4). This module still does
-    not touch ``ClaimUpdater`` (Phase D4) -- the engine returns a ``Verdict`` and
-    nothing consumes it yet beyond tests.
+    This module implements the numeric kinds (**Phase D2**: ``threshold``,
+    ``bayesian``, ``interval`` -- every number from ``rule.params``, D1) and the
+    non-numeric kinds (**Phase D3**: ``proof`` and ``qualitative`` route to an
+    injected ``Judge`` per Decision 4, with the §0 override -- a confident proof
+    "verified" still requires a human spot-check before ``supported``, and a
+    counterexample is a decisive refute). ``ClaimUpdater`` (Phase D4) consumes
+    the ``Verdict``. The live Claude-backed judge adapter is deferred (see
+    ``loop/judge.py`` ``ClaudeJudge``); tests inject a fake ``Judge``.
 
 Two-environment note (design/tool-policy.md, §1 of the design doc):
     This is sci-adk *product* runtime code. No hardcoded success metric enters
@@ -52,8 +53,15 @@ from typing import Callable, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from sci_adk.core.claim import Confidence, ConfidenceLevel, ConfidenceType
-from sci_adk.core.evidence import Bearing, BearingDirection, EvidenceItem, Result
+from sci_adk.core.evidence import (
+    Bearing,
+    BearingDirection,
+    EvidenceItem,
+    EvidenceKind,
+    Result,
+)
 from sci_adk.core.spec import DecisionRule, DecisionRuleKind
+from sci_adk.loop.judge import Judge, JudgeVerdict
 
 
 class Verdict(BaseModel):
@@ -167,6 +175,18 @@ class DecisionEngine:
                                   judgment yields ``inconclusive`` with a basis
                                   requesting the checkpoint.
     """
+
+    def __init__(self, judge: Optional[Judge] = None) -> None:
+        """
+        Args:
+            judge: an LLM-judge for ``proof`` / ``qualitative`` rules
+                (Decision 4). Optional -- the numeric kinds
+                (threshold/bayesian/interval) never use it. When absent, and
+                with no decisive counterexample, ``proof`` / ``qualitative``
+                return ``inconclusive`` with a basis requesting a judge or human
+                checkpoint (D8); they never fabricate a verdict.
+        """
+        self._judge = judge
 
     def evaluate(self, rule: DecisionRule, results: EvidenceForHypothesis) -> Verdict:
         """
@@ -425,40 +445,92 @@ class DecisionEngine:
         return self._credence_verdict(direction, value, basis)
 
     # ------------------------------------------------------------------
-    # Phase D1 stub handlers (non-numeric kinds; routing is Phase D3).
+    # Non-numeric kinds (Phase D3): route to the injected LLM-judge (Decision 4).
+    # The engine never fabricates a verdict here (D8); without a judge, and with
+    # no decisive counterexample, it returns inconclusive requesting a checkpoint.
     # ------------------------------------------------------------------
 
     def _eval_proof(self, rule: DecisionRule, results: EvidenceForHypothesis) -> Verdict:
-        # @MX:TODO: [AUTO] Phase D3 - route to LLM-judge + human spot-check (Decision 4)
-        return self._stub_verdict(rule)
+        """
+        Evaluate a ``proof`` rule (Decision 4, with the §0 override).
+
+        - A COUNTEREXAMPLE in the record refutes decisively -- no judge needed,
+          and not outvoted by supportive runs (Decision 7 proof asymmetry).
+        - Otherwise route to the judge, which MUST attempt a counterexample
+          search. A judge-found counterexample -> refutes. A confident "verified"
+          verdict does NOT become ``supports`` here: the override requires a human
+          spot-check first, so the engine returns ``inconclusive`` with a basis
+          flagging the pending spot-check (D8). Low confidence -> escalate.
+        - With no judge, returns ``inconclusive`` requesting a judge/checkpoint.
+        """
+        if self._has_counterexample(results):
+            return self._graded_verdict(
+                BearingDirection.REFUTES,
+                ConfidenceLevel.STRONG,
+                f"{rule.kind.value} rule: counterexample in the record is "
+                f"decisive (refutes), per proof asymmetry",
+            )
+        if self._judge is None:
+            return self._inconclusive(
+                rule,
+                "no LLM-judge injected; route proof to a judge + human "
+                "spot-check (Decision 4)",
+            )
+
+        verdict = self._judge.judge_proof(
+            rule.expression,
+            self._collect_findings(results),
+            self._first_artifact_ref(results),
+            self._evidence_kinds(results),
+            rule.params or {},
+        )
+        if verdict.counterexample or verdict.direction == BearingDirection.REFUTES:
+            level = (verdict.level if verdict.level != ConfidenceLevel.NONE
+                     else ConfidenceLevel.STRONG)
+            return self._graded_verdict(
+                BearingDirection.REFUTES, level,
+                f"{rule.kind.value} judge found a counterexample: {verdict.basis}")
+        if (verdict.direction == BearingDirection.SUPPORTS
+                and verdict.level in (ConfidenceLevel.STRONG,
+                                      ConfidenceLevel.MODERATE)):
+            # Override: a confident "verified" still needs a human spot-check
+            # before a Claim can be supported -- so do NOT emit supports here.
+            return self._inconclusive(
+                rule,
+                f"judge verified ({verdict.level.value} confidence) but a human "
+                f"spot-check is required before 'supported' (override D8): "
+                f"{verdict.basis}")
+        return self._inconclusive(
+            rule,
+            f"judge could not confidently verify -> escalate to human: "
+            f"{verdict.basis}")
 
     def _eval_qualitative(self, rule: DecisionRule, results: EvidenceForHypothesis) -> Verdict:
-        # @MX:TODO: [AUTO] Phase D3 - route to LLM-judge with human fallback (Decision 4)
-        return self._stub_verdict(rule)
-
-    @staticmethod
-    def _stub_verdict(rule: DecisionRule) -> Verdict:
         """
-        Build the shared Phase-D1 stub verdict for a rule.
+        Evaluate a ``qualitative`` rule by routing to the LLM-judge (Decision 4).
 
-        Returns ``inconclusive`` (D3) with a graded ``NONE`` confidence -- the
-        honest "no verdict yet" encoding that fabricates no number (D8) -- and a
-        basis naming the rule kind and marking the stub (D2). See the module
-        docstring for why GRADED/NONE is used rather than the Decision-5 numeric
-        type on a stub.
+        The judge applies the rule's OWN prose criterion (``rule.expression``),
+        never a global rubric (D1). A confident judgment maps straight to the
+        judge's direction + graded level; a low-confidence judgment (WEAK/NONE)
+        escalates to a human (D8). With no judge, returns ``inconclusive``.
         """
-        return Verdict(
-            direction=BearingDirection.INCONCLUSIVE,
-            confidence=Confidence(
-                type=ConfidenceType.GRADED,
-                level=ConfidenceLevel.NONE,
-                basis=(
-                    f"Phase D1 stub for '{rule.kind.value}' decision rule: "
-                    f"not yet implemented (numeric/routing evaluation lands in a "
-                    f"later phase); no verdict can be drawn from the record yet"
-                ),
-            ),
-        )
+        if self._judge is None:
+            return self._inconclusive(
+                rule,
+                "no LLM-judge injected; route qualitative criterion to a judge "
+                "or human (Decision 4)",
+            )
+
+        verdict = self._judge.judge_qualitative(
+            rule.expression, self._collect_findings(results), rule.params or {})
+        if verdict.level in (ConfidenceLevel.WEAK, ConfidenceLevel.NONE):
+            return self._inconclusive(
+                rule,
+                f"judge low-confidence ({verdict.level.value}) -> escalate to "
+                f"human: {verdict.basis}")
+        return self._graded_verdict(
+            verdict.direction, verdict.level,
+            f"{rule.kind.value} judge: {verdict.basis}")
 
     # ------------------------------------------------------------------
     # Shared numeric helpers (Decision 6 weight, Decision 7 aggregation, and the
@@ -641,6 +713,48 @@ class DecisionEngine:
                 basis=f"{rule.kind.value} rule inconclusive: {reason}",
             ),
         )
+
+    @staticmethod
+    def _graded_verdict(
+        direction: BearingDirection,
+        level: ConfidenceLevel,
+        basis: str,
+    ) -> Verdict:
+        """Assemble a GRADED verdict (Decision 5 for proof/qualitative)."""
+        return Verdict(
+            direction=direction,
+            confidence=Confidence(
+                type=ConfidenceType.GRADED,
+                level=level,
+                basis=basis,
+            ),
+        )
+
+    @staticmethod
+    def _has_counterexample(results: EvidenceForHypothesis) -> bool:
+        """True if any bearing item is a COUNTEREXAMPLE (decisive for proofs)."""
+        return any(item.kind == EvidenceKind.COUNTEREXAMPLE
+                   for item, _ in results.pairs)
+
+    @staticmethod
+    def _collect_findings(results: EvidenceForHypothesis) -> str:
+        """Join the non-empty qualitative findings from all bearing results."""
+        findings = [item.result.finding for item, _ in results.pairs
+                    if item.result.finding]
+        return "\n".join(findings)
+
+    @staticmethod
+    def _first_artifact_ref(results: EvidenceForHypothesis) -> Optional[str]:
+        """The first non-null artifact_ref among the bearing results, if any."""
+        for item, _ in results.pairs:
+            if item.result.artifact_ref:
+                return item.result.artifact_ref
+        return None
+
+    @staticmethod
+    def _evidence_kinds(results: EvidenceForHypothesis) -> list[str]:
+        """The evidence kinds bearing on the hypothesis (informs the judge)."""
+        return [item.kind.value for item, _ in results.pairs]
 
 
 __all__ = [

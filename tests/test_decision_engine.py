@@ -160,39 +160,23 @@ def test_stub_returns_inconclusive(engine, empty_results, kind):
 
 
 # ---------------------------------------------------------------------------
-# (c) basis mentions Phase D1 / stub so the unresolved status is explicit (D8).
+# (c) basis marks the unresolved (inconclusive) state explicitly (D8). Post-D3
+# every handler is implemented: numeric kinds with no statistic, and proof/
+# qualitative with no judge + no counterexample, all return an inconclusive
+# verdict whose basis says so. The old Phase-D1 "stub" wording is gone.
 # ---------------------------------------------------------------------------
 
-# After Phase D2 the three numeric kinds (threshold/bayesian/interval) are no
-# longer stubs -- they evaluate. With an EMPTY results view they return an
-# inconclusive verdict because no result carries a statistic, and the basis says
-# "inconclusive" rather than "stub". Only proof/qualitative remain Phase D1 stubs.
-_STILL_STUB_KINDS = [DecisionRuleKind.PROOF, DecisionRuleKind.QUALITATIVE]
-_NOW_NUMERIC_KINDS = [
-    DecisionRuleKind.THRESHOLD,
-    DecisionRuleKind.BAYESIAN,
-    DecisionRuleKind.INTERVAL,
-]
-
-
-@pytest.mark.parametrize("kind", _STILL_STUB_KINDS, ids=[k.value for k in _STILL_STUB_KINDS])
-def test_basis_marks_stub_state_for_nonnumeric(engine, empty_results, kind):
-    """D8: proof/qualitative remain Phase D1 stubs; their basis marks the stub state."""
-    basis = engine.evaluate(_rule(kind), empty_results).confidence.basis.lower()
-    assert "stub" in basis or "not yet implemented" in basis, (
-        f"basis should mark the Phase D1 stub state, got: {basis!r}"
-    )
-
-
-@pytest.mark.parametrize("kind", _NOW_NUMERIC_KINDS, ids=[k.value for k in _NOW_NUMERIC_KINDS])
-def test_basis_marks_unresolved_state_for_numeric_without_results(engine, empty_results, kind):
-    """D8 (post-D2): a numeric kind with no results does not fake decisiveness --
-    it returns inconclusive and the basis says so (the stub wording is gone because
-    the handler is implemented). This preserves the original D8 protection adapted
-    to the Phase D2 reality."""
+@pytest.mark.parametrize("kind", _ALL_KINDS, ids=[k.value for k in _ALL_KINDS])
+def test_basis_marks_unresolved_state(engine, empty_results, kind):
+    """D8: an unresolved verdict (no results; for proof/qualitative also no judge)
+    marks the inconclusive state in its basis -- and no 'stub' wording remains now
+    that every handler is implemented (Phase D2 numeric + Phase D3 routing)."""
     basis = engine.evaluate(_rule(kind), empty_results).confidence.basis.lower()
     assert "inconclusive" in basis, (
-        f"numeric kind with no results should mark the unresolved state, got: {basis!r}"
+        f"unresolved verdict should mark the inconclusive state, got: {basis!r}"
+    )
+    assert "stub" not in basis, (
+        f"Phase-D1 stub wording should be gone post-D3, got: {basis!r}"
     )
 
 
