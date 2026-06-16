@@ -29,6 +29,7 @@ from sci_adk.core.evidence import EvidenceItem, BearingDirection
 from sci_adk.core.spec import Spec
 
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
+from sci_adk.loop.judge import Judge
 
 
 # Decision 8 (design/decision-engine.md §3): how an engine ``Verdict.direction``
@@ -62,6 +63,7 @@ class ClaimUpdater:
         self,
         spec: Spec,
         workspace_dir: Optional[Path] = None,
+        judge: Optional[Judge] = None,
     ):
         """
         Initialize claim updater.
@@ -69,13 +71,17 @@ class ClaimUpdater:
         Args:
             spec: Spec instance with DecisionRules
             workspace_dir: Output directory for claims
+            judge: optional LLM-judge forwarded to the DecisionEngine for
+                proof/qualitative rules (Decision 4). When None (the default,
+                zero-cost path), those rules return inconclusive and are surfaced
+                as agent checkpoints rather than judged autonomously.
         """
         self.spec = spec
         self.workspace_dir = workspace_dir or Path.cwd()
         self.claims_dir = self.workspace_dir / "runs" / spec.id / "claims"
         self.claims_dir.mkdir(parents=True, exist_ok=True)
         # The engine holds no state and no constants (D1); one instance suffices.
-        self.engine = DecisionEngine()
+        self.engine = DecisionEngine(judge=judge)
 
     def update_claims_from_evidence(
         self,

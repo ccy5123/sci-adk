@@ -22,6 +22,12 @@ from sci_adk.loop.judge import (
     Judge,
     JudgeVerdict,
 )
+from sci_adk.loop.compiler import (
+    Checkpoint,
+    CompileResult,
+    ResearchCompiler,
+    t1_molecular_experiment,
+)
 from sci_adk.loop.literature_acquirer import (
     AcquisitionHalt,
     AcquisitionOutcome,
@@ -48,4 +54,8 @@ __all__ = [
     "Judge",
     "JudgeVerdict",
     "ClaudeJudge",
+    "ResearchCompiler",
+    "CompileResult",
+    "Checkpoint",
+    "t1_molecular_experiment",
 ]

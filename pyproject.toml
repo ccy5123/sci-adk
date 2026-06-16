@@ -22,6 +22,9 @@ tools = [
     "paperforge @ git+https://github.com/ccy5123/paperforge.git@60fefedacb7349c755c29b2c2f26873464158c12",
 ]
 
+[project.scripts]
+sci-adk = "sci_adk.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
