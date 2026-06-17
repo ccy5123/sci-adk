@@ -82,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
              "T-1 molecular Gödel-encoding capability over its designed test set; "
              "yields an autonomous injectivity verdict",
     )
+    run.add_argument(
+        "--prose", default=None, metavar="PATH",
+        help="optional JSON file mapping {abstract, introduction, discussion} -> text; "
+             "the agent-authored narrative is injected into BOTH the Markdown and "
+             "LaTeX drafts (never LLM-generated). Omit -> structural skeleton only",
+    )
 
     resolve = sub.add_parser(
         "resolve",
@@ -261,6 +267,23 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 2
         proposal_text = proposal_path.read_text(encoding="utf-8")
 
+    # Optional agent-authored prose (abstract/introduction/discussion) injected into
+    # both drafts. Loaded from a JSON file -- this is input, NOT autonomous generation
+    # (sci-adk never calls an LLM to write it).
+    prose = None
+    if args.prose:
+        prose_path = Path(args.prose)
+        if not prose_path.exists():
+            print(f"error: prose file not found: {prose_path}", file=sys.stderr)
+            return 2
+        from sci_adk.render.prose import PaperProse
+
+        try:
+            prose = PaperProse.model_validate_json(prose_path.read_text(encoding="utf-8"))
+        except ValueError as e:
+            print(f"error: invalid prose JSON ({prose_path}): {e}", file=sys.stderr)
+            return 2
+
     compiler = ResearchCompiler(workspace_dir=Path(args.output))
     # Evidence-validity halt (design/evidence-validity.md E3): an inadequate record
     # (e.g. synthetic data fed to an empirical claim) raises before any Claim is
@@ -270,7 +293,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     try:
         result = compiler.compile(
-            proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment)
+            proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
+            prose=prose)
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
         return 2

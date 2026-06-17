@@ -30,13 +30,14 @@ design/directory-structure.md (loop/), design/decision-engine.md.
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
 from sci_adk.core.claim import Claim, ClaimStatus
-from sci_adk.core.evidence import EvidenceItem
+from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.loop.claim_updater import ClaimUpdater
@@ -48,7 +49,8 @@ from sci_adk.loop.verdict import (
     ContestedCheckpoint,
     PriorWorkCheckpoint,
 )
-from sci_adk.render.paper import render_paper
+from sci_adk.render.paper import render_paper, render_paper_latex
+from sci_adk.render.prose import PaperProse
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
 ExperimentFn = Callable[[Spec, Path], Sequence[EvidenceItem]]
@@ -125,6 +127,7 @@ class ResearchCompiler:
         spec_id: Optional[str] = None,
         spec: Optional[Spec] = None,
         experiment: Optional[ExperimentFn] = None,
+        prose: Optional[PaperProse] = None,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -142,6 +145,10 @@ class ResearchCompiler:
                 that produces Evidence (e.g. a Docker run). When absent, the
                 compile still emits the Spec + a proposal-only draft + any
                 proof/qualitative checkpoints.
+            prose: optional agent-authored narrative (abstract/introduction/
+                discussion) injected into BOTH the Markdown and LaTeX drafts. Never
+                LLM-generated -- it is input the in-session agent (or a --prose file)
+                supplies, the same spirit as ``pending``.
 
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
@@ -182,13 +189,32 @@ class ResearchCompiler:
         # timestamp; recording it makes the post-conflict literature decision explicit.
         contested_checkpoints = self._collect_contested_checkpoints(spec, claims)
 
+        # Citations + bibliography are gathered for the run (renderers stay pure --
+        # data in, string out; the compiler is the composition root that locates them).
+        pending_dicts = [c.__dict__ for c in checkpoints]
+        cited_dois = self._gather_cited_dois(evidence, run_dir)
+        bib_path = self._locate_bib_path(run_dir)
+
         paper = render_paper(
             spec, claims, evidence,
-            pending=[c.__dict__ for c in checkpoints],
+            pending=pending_dicts,
+            prose=prose,
+            cited_dois=cited_dois,
         )
         paper_path = run_dir / "paper" / "draft.md"
         paper_path.parent.mkdir(parents=True, exist_ok=True)
         paper_path.write_text(paper, encoding="utf-8")
+
+        # Emit the LaTeX draft alongside the Markdown one (always). Deterministic and
+        # offline -- no LLM, no network (render_paper_latex is pure).
+        paper_tex = render_paper_latex(
+            spec, claims, evidence,
+            pending=pending_dicts,
+            prose=prose,
+            cited_dois=cited_dois,
+            bib_path=bib_path,
+        )
+        (run_dir / "paper" / "draft.tex").write_text(paper_tex, encoding="utf-8")
 
         if checkpoints:
             self._save_checkpoints(checkpoints, run_dir)
@@ -205,6 +231,67 @@ class ResearchCompiler:
         )
 
     # -- helpers -----------------------------------------------------------
+
+    @staticmethod
+    def _gather_cited_dois(
+        evidence: Sequence[EvidenceItem], run_dir: Path
+    ) -> List[str]:
+        """Collect the DOIs to cite for this run, de-duplicated, first-seen order.
+
+        Two sources (a cited DOI is cited regardless of whether its PDF downloaded):
+          (a) ``LITERATURE`` EvidenceItems -- their ``result.finding`` is the JSON
+              summary the acquirer writes (``acquired[].doi`` + ``failed[].doi``);
+          (b) the run's ``artifacts/literature/manifest.csv`` (the t1-godel shape,
+              where literature was acquired ad-hoc with no LITERATURE EvidenceItem).
+
+        Pure parsing of recorded artifacts -- no acquisition, no network.
+        """
+        seen: List[str] = []
+
+        def _add(doi: Optional[str]) -> None:
+            d = (doi or "").strip()
+            if d and d not in seen:
+                seen.append(d)
+
+        # (a) LITERATURE evidence findings.
+        for ev in evidence:
+            if ev.kind != EvidenceKind.LITERATURE:
+                continue
+            finding = ev.result.finding
+            if not finding:
+                continue
+            try:
+                summary = json.loads(finding)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(summary, dict):
+                continue
+            for bucket in ("acquired", "failed"):
+                for entry in summary.get(bucket, []) or []:
+                    if isinstance(entry, dict):
+                        _add(entry.get("doi"))
+
+        # (b) manifest.csv on disk.
+        manifest = run_dir / "artifacts" / "literature" / "manifest.csv"
+        if manifest.exists():
+            try:
+                with manifest.open(encoding="utf-8", newline="") as fh:
+                    for row in csv.DictReader(fh):
+                        _add(row.get("doi"))
+            except (OSError, csv.Error):
+                pass
+
+        return seen
+
+    @staticmethod
+    def _locate_bib_path(run_dir: Path) -> Optional[str]:
+        """Return the run's ``artifacts/literature/references.bib`` path when present.
+
+        The renderer wires an EXISTING ``.bib`` (it never generates one); this just
+        locates it. ``None`` when absent -> the renderer emits no ``\\bibliography``.
+        """
+        bib = run_dir / "artifacts" / "literature" / "references.bib"
+        return str(bib) if bib.exists() else None
 
     def _collect_contested_checkpoints(
         self, spec: Spec, claims: Sequence[Claim]
