@@ -48,6 +48,10 @@ from sci_adk.core.evidence import (
     Result,
 )
 from sci_adk.core.spec import Spec
+from sci_adk.search.citation_keys import (
+    KeyingResult,
+    assign_and_apply_citation_keys,
+)
 from sci_adk.search.paperforge_adapter import (
     AcquisitionRecord,
     AcquisitionResult,
@@ -156,6 +160,11 @@ class AcquisitionOutcome:
     ``unreadable_pdfs`` lists the filenames of any acquired PDFs that could not be
     parsed even after re-download retries (corrupt/truncated/HTML-as-pdf) --
     surfaced the same way; the batch was not aborted for them.
+    ``citation_keys`` maps each acquired DOI to its sci-adk citation key
+    (``<Surname><Year>`` with ``a/b`` on collision); the PDF/sidecar/bib/manifest
+    were renamed to match. ``key_collisions`` lists any overwrite collisions
+    detected (distinct DOIs that resolved to one on-disk file) -- surfaced so a
+    silently-overwritten paper is never lost.
     """
 
     evidence: EvidenceItem
@@ -164,6 +173,8 @@ class AcquisitionOutcome:
     normalizations: list[NormalizeResult] = field(default_factory=list)
     locked_pdfs: list[str] = field(default_factory=list)
     unreadable_pdfs: list[str] = field(default_factory=list)
+    citation_keys: dict[str, str] = field(default_factory=dict)
+    key_collisions: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def should_halt(self) -> bool:
@@ -178,6 +189,11 @@ class AcquisitionOutcome:
     def has_unreadable_pdfs(self) -> bool:
         """True when at least one acquired PDF stayed unreadable after retries."""
         return bool(self.unreadable_pdfs)
+
+    @property
+    def has_key_collisions(self) -> bool:
+        """True when an overwrite collision (two DOIs -> one file) was detected."""
+        return bool(self.key_collisions)
 
 
 class LiteratureAcquirer:
@@ -274,8 +290,16 @@ class LiteratureAcquirer:
             if n.status == NormalizeStatus.ERROR
         ]
 
+        # Apply sci-adk's own citation-key convention to the acquired files
+        # (after fetch + normalize, before the record is built): rename each
+        # PDF/sidecar to <Surname><Year> (a/b-by-DOI on collision) and update
+        # references.bib + manifest.csv to match. Naming/IO only -- no belief.
+        # An overwrite collision (two DOIs -> one on-disk file) is detected and
+        # surfaced, never silently dropped.
+        keying = assign_and_apply_citation_keys(self.literature_dir, result.records)
+
         evidence = self._build_evidence(
-            result, target_id, normalizations, retries_spent
+            result, target_id, normalizations, retries_spent, keying
         )
         self._save_evidence(evidence)
 
@@ -291,6 +315,8 @@ class LiteratureAcquirer:
             normalizations=normalizations,
             locked_pdfs=locked_pdfs,
             unreadable_pdfs=unreadable_pdfs,
+            citation_keys=dict(keying.mapping),
+            key_collisions=[c.model_dump(mode="json") for c in keying.collisions],
         )
 
     # -- normalization -----------------------------------------------------
@@ -361,6 +387,7 @@ class LiteratureAcquirer:
         target_id: Optional[str],
         normalizations: Optional[Sequence[NormalizeResult]] = None,
         retries_spent: Optional[dict[str, int]] = None,
+        keying: Optional[KeyingResult] = None,
     ) -> EvidenceItem:
         """Assemble a LITERATURE EvidenceItem from a paperforge result.
 
@@ -370,6 +397,12 @@ class LiteratureAcquirer:
         (a user-password lock left untouched), or ``error`` (unreadable even after
         re-download retries), whether an original was preserved, and how many
         re-download retries were spent on each.
+
+        The ``citation_keys`` block records the DOI -> citation-key mapping sci-adk
+        applied to the acquired files (the renaming is an honest part of the
+        record), and ``citation_key_collisions`` records any overwrite collision
+        (distinct DOIs that resolved to one on-disk file) so a silently-overwritten
+        paper is never lost from the log.
         """
         summary = {
             "acquired": [
@@ -386,6 +419,11 @@ class LiteratureAcquirer:
             },
             "normalization": self._normalization_summary(
                 normalizations or [], retries_spent or {}
+            ),
+            "citation_keys": dict(keying.mapping) if keying else {},
+            "citation_key_collisions": (
+                [c.model_dump(mode="json") for c in keying.collisions]
+                if keying else []
             ),
         }
 

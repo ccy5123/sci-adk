@@ -534,3 +534,131 @@ def test_locked_pdf_is_not_retried(tmp_path):
     assert PdfReader(str(locked_path)).is_encrypted is True
     norm = json.loads(outcome.evidence.result.finding)["normalization"]
     assert norm["counts"]["locked"] == 1
+
+
+# -- citation-key naming wired into acquire ----------------------------------
+#
+# After fetch + PDF-normalize, the acquirer applies sci-adk's OWN citation-key
+# convention (<Surname><Year>, a/b-by-DOI on collision) to the acquired files:
+# the PDF/sidecar are renamed, references.bib + manifest.csv are updated, and the
+# DOI->key mapping is recorded in the LITERATURE evidence + surfaced on the
+# outcome. paperforge already wrote surname+year filenames; sci-adk owns the
+# a/b disambiguation as a post-acquisition step.
+
+
+class KeyingAdapter:
+    """A fake adapter that lays out the full acquired dir paperforge produces.
+
+    ``papers`` is a list of (doi, author, year, on_disk_filename, pdf_bytes).
+    Writes each PDF + its ``<stem>.json`` sidecar into ``pdfs/``, plus a
+    ``manifest.csv`` and a ``references.bib`` -- everything the keying step reads.
+    """
+
+    def __init__(self, papers, returncode=0):
+        self.papers = papers
+        self.returncode = returncode
+        self.calls = []
+
+    def fetch(self, dois, output_dir, **options):
+        output_dir = Path(output_dir)
+        self.calls.append((list(dois), output_dir, options))
+        pdf_dir = output_dir / "pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        manifest = ["index,doi,status,source,license,filename,origin,error"]
+        bib = []
+        for i, (doi, author, year, filename, data) in enumerate(self.papers, start=1):
+            stem = Path(filename).stem
+            (pdf_dir / filename).write_bytes(data)
+            (pdf_dir / f"{stem}.json").write_text(
+                json.dumps({"doi": doi, "author": author, "year": year}),
+                encoding="utf-8",
+            )
+            records.append(AcquisitionRecord(doi=doi, status="success",
+                                             source="arxiv", filename=filename))
+            manifest.append(f"{i},{doi},success,arxiv,,{filename},cli,")
+            bib.append(f"@article{{orig{i},\n  author = {{{author}, X.}},\n"
+                       f"  year = {{{year}}},\n  doi = {{{doi}}}\n}}\n")
+        (output_dir / "manifest.csv").write_text("\n".join(manifest) + "\n",
+                                                 encoding="utf-8")
+        (output_dir / "references.bib").write_text("\n".join(bib),
+                                                   encoding="utf-8")
+        return AcquisitionResult(
+            returncode=self.returncode,
+            output_dir=output_dir,
+            manifest_path=output_dir / "manifest.csv",
+            records=records,
+            provenance={"tool": "paperforge", "pinned_sha": PIN,
+                        "installed_version": "0.1.0", "returncode": self.returncode},
+        )
+
+
+def test_acquire_applies_citation_keys_and_records_mapping(tmp_path):
+    good = _text_pdf_bytes()
+    # two Jager 1998 papers (collision) + one Joe 2026; raw on-disk names differ
+    # from the keys so we prove the rename ran.
+    adapter = KeyingAdapter([
+        ("10.9/zzz", "Jager", "1998", "raw_b.pdf", good),
+        ("10.1/aaa", "Jager", "1998", "raw_a.pdf", good),
+        ("10.5/joe", "Joe", "2026", "raw_joe.pdf", good),
+    ])
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(
+                                     ["10.9/zzz", "10.1/aaa", "10.5/joe"])
+
+    pdfs = _pdfs_dir(tmp_path)
+    # renamed by key; a/b by DOI ascending
+    assert (pdfs / "Jager1998a.pdf").exists()   # lower DOI 10.1/aaa
+    assert (pdfs / "Jager1998b.pdf").exists()   # higher DOI 10.9/zzz
+    assert (pdfs / "Joe2026.pdf").exists()
+    assert (pdfs / "Jager1998a.json").exists()
+    assert not (pdfs / "raw_a.pdf").exists()
+
+    # the DOI->key mapping is recorded in the LITERATURE evidence finding
+    summary = json.loads(outcome.evidence.result.finding)
+    assert summary["citation_keys"]["10.1/aaa"] == "Jager1998a"
+    assert summary["citation_keys"]["10.9/zzz"] == "Jager1998b"
+    assert summary["citation_keys"]["10.5/joe"] == "Joe2026"
+
+    # ... and surfaced on the outcome for the orchestrator
+    assert outcome.citation_keys["10.1/aaa"] == "Jager1998a"
+    assert outcome.key_collisions == []
+
+    # bib + manifest updated consistently
+    bib = (tmp_path / "runs" / "test-spec" / "literature"
+           / "references.bib").read_text(encoding="utf-8")
+    assert "@article{Jager1998a," in bib and "@article{Joe2026," in bib
+
+
+def test_acquire_surfaces_overwrite_collision(tmp_path):
+    good = _text_pdf_bytes()
+    # two distinct DOIs that paperforge overwrote into ONE on-disk file: the
+    # keyer must surface the loss on the outcome + in evidence, not drop it.
+    adapter = KeyingAdapter([
+        ("10.1/a", "Jager", "1998", "Jager1998.pdf", good),
+        ("10.2/b", "Jager", "1998", "Jager1998.pdf", good),
+    ])
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/a", "10.2/b"])
+
+    assert outcome.key_collisions, "overwrite collision must be surfaced"
+    assert outcome.has_key_collisions is True
+    summary = json.loads(outcome.evidence.result.finding)
+    assert summary["citation_key_collisions"]  # recorded honestly
+    coll = summary["citation_key_collisions"][0]
+    assert coll["filename"] == "Jager1998.pdf"
+    assert set(coll["dois"]) == {"10.1/a", "10.2/b"}
+
+
+def test_acquire_keying_is_noop_when_nothing_acquired(tmp_path):
+    # a batch where every DOI failed: no files, no keying, no crash.
+    adapter = FakeAdapter(
+        [AcquisitionRecord(doi="10.9/miss", status="failed", error="no OA PDF")],
+        returncode=1,
+    )
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.9/miss"])
+    assert outcome.citation_keys == {}
+    assert outcome.key_collisions == []
+    # the existing unacquired-papers halt still fires
+    assert outcome.should_halt is True
