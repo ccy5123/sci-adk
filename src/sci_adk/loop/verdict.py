@@ -167,6 +167,44 @@ class ContestedCheckpoint(BaseModel):
     prompt: str = Field(..., min_length=1, description="Reminder text for the agent")
 
 
+class NoveltyCheckpoint(BaseModel):
+    """Typed contract behind a ``checkpoints/<hyp-id>.novelty.json`` -- the novelty arm.
+
+    A *recording-type* reminder emitted while a ``novelty=True`` hypothesis's
+    ``claim-novelty-<hyp>`` is PROPOSED (design/literature-acquisition.md §"Discovery
+    trigger model", the High trigger, B-replace). Novelty no longer HALTs: it is a
+    1st-class revisable Claim derived by rule (SUPPORTED iff a recorded found_nothing
+    prior-art search). While the novelty claim is PROPOSED this NON-HALT checkpoint
+    surfaces; the compile proceeds normally. Like :class:`ContestedCheckpoint` it is
+    HYPOTHESIS-bound, carries NO verdict trail, and never gates/halts. The ``prompt`` is
+    reason-tailored upstream (not_searched vs found_something).
+
+    ``model_config.extra = "forbid"`` keeps the union type-safe: a payload that carries
+    judge-only keys (``kind`` / ``expression``) is rejected here, not silently coerced.
+
+    Attributes:
+        checkpoint_type: the union tag (always ``"novelty"`` here).
+        hypothesis_id: the novelty hypothesis whose claim is PROPOSED.
+        spec_id: the Spec this hypothesis belongs to.
+        spec_version: the Spec version this was raised against (replay).
+        prompt: the reason-tailored human/agent-facing reminder text.
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+        "extra": "forbid",
+    }
+
+    checkpoint_type: Literal["novelty"] = Field(
+        default="novelty", description="Discriminator for the Checkpoint union"
+    )
+    hypothesis_id: str = Field(..., min_length=1, description="Novelty hypothesis id")
+    spec_id: str = Field(..., min_length=1, description="Spec id this hypothesis belongs to")
+    spec_version: int = Field(..., ge=1, description="Spec version this was raised against")
+    prompt: str = Field(..., min_length=1, description="Reason-tailored reminder text")
+
+
 def _checkpoint_tag(value: Any) -> str:
     """Discriminator callable for the :data:`Checkpoint` union.
 
@@ -193,6 +231,7 @@ Checkpoint = Annotated[
         Annotated[JudgeCheckpoint, Tag("judge")],
         Annotated[PriorWorkCheckpoint, Tag("prior_work")],
         Annotated[ContestedCheckpoint, Tag("contested")],
+        Annotated[NoveltyCheckpoint, Tag("novelty")],
     ],
     Discriminator(_checkpoint_tag),
 ]
@@ -296,6 +335,7 @@ __all__ = [
     "JudgeCheckpoint",
     "PriorWorkCheckpoint",
     "ContestedCheckpoint",
+    "NoveltyCheckpoint",
     "Checkpoint",
     "PanelVerdict",
     "ChiefVerdict",

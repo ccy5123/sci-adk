@@ -1,11 +1,13 @@
 # sci-adk Literature Acquisition
 
-> Status: v0.3 (2026-06-17). How sci-adk surveys and acquires prior work.
+> Status: v0.4 (2026-06-17). How sci-adk surveys and acquires prior work.
 > Discovery = Claude's web_search (allowed tool); acquisition = paperforge.
 > v0.2 added the discovery **trigger model** (graded triggers + a recorded
 > search/skip decision + an F7 link). v0.3 IMPLEMENTS the novelty (High) and
-> contested (Medium) triggers (the Spec-creation anchor was already implemented);
-> the paper-render (Low) trigger remains deferred.
+> contested (Medium) triggers (the Spec-creation anchor was already implemented).
+> **v0.4 reshapes the novelty trigger (A->B-replace):** novelty is no longer a
+> run-HALT coupled to the experiment verdict -- it is a 1st-class revisable Claim
+> derived by rule. The paper-render (Low) trigger remains deferred.
 
 sci-adk acquires the literature the way a researcher does: when starting, when
 unsure, or when checking whether something has already been done, you *search*
@@ -124,15 +126,17 @@ a decision, not a belief; it asserts no support/refute direction.
 | Trigger | Fires | Why it matters | Weight | Status |
 |---------|-------|----------------|--------|--------|
 | **Spec creation** (prior-art) | before any result exists | pre-registration canonical; zero post-hoc risk -- the cleanest, most important check ("has this been done?") | **Primary anchor** | implemented |
-| Before a **novelty / priority** claim | when asserting "new / first" | underwrites the *validity* of the claim | High | implemented |
+| Before a **novelty / priority** claim | when asserting "new / first" | underwrites the *validity* of the claim | High | implemented (v0.4: B-replace -- a revisable claim, not a HALT) |
 | Claim -> **contested** | after evidence conflicts | here the rigor is **recording, not searching**: a timestamp so literature that arrived *after* the conflict stays visible (anti post-hoc-rationalization -- no hunting for favorable papers once the result is known) | Medium | implemented |
 | Before **paper render** | at output | related-work *completeness*, not claim validity -- weakest and latest | Low | deferred |
 
 **Minimal, highest-value first bite (shipped):** the **Spec-time prior-art check + a
 skip record (with reason)** was the first cut. v0.3 added the next two
 **incremental** triggers -- novelty (High) and contested (Medium) -- never pegged at
-the same priority as the Spec anchor. The paper-render (Low) trigger stays deferred
-(weakest and latest; related-work completeness, not claim validity).
+the same priority as the Spec anchor. **v0.4** reshaped the novelty trigger from a
+run-HALT into a revisable rule-derived claim + a non-HALT compile-time checkpoint
+(A->B-replace). The paper-render (Low) trigger stays deferred (weakest and latest;
+related-work completeness, not claim validity).
 
 ### When found literature touches a frozen element -> Spec amendment (F7)
 
@@ -158,16 +162,27 @@ now built, on top of the Spec-creation anchor. Each recording-type checkpoint
 discriminated union in `loop/verdict.py`): a recording-only checkpoint is that same
 surface with no verdict trail, so the marginal cost is low. Concretely:
 
-- **Novelty (High)** is a hypothesis-bound *hard gate*. `Hypothesis.novelty` is a
-  frozen anti-HARKing flag; `check_novelty_adequacy` (in `core/validity.py`, reusing
-  `ValidityHalt`) refuses a **SUPPORTED** novelty claim that has no recorded *searched*
-  `NOVELTY_DECISION` for it. It is **SUPPORTS-only** (a novelty claim that is refuted
-  or inconclusive never trips it), and a *skipped* novelty decision does **not** satisfy
-  it (skipping the search guts the claim's only evidentiary basis). The two escapes the
-  halt names are (a) `sci-adk novelty <run> --hypothesis <id> --searched <dois>`, or
-  (b) drop the novelty flag through a human-only Spec amendment (F7) -- never a silent
-  edit. `sci-adk verify` re-checks the same faithfulness: a SUPPORTED novelty claim
-  whose searched decision was deleted/tampered is reported DIVERGED.
+- **Novelty (High) -- v0.4 B-replace (a revisable claim, not a HALT).** `Hypothesis.novelty`
+  remains a frozen anti-HARKing flag, but novelty is now **decoupled from the experiment
+  claim** and is a **1st-class revisable Claim** `claim-novelty-<hyp>`, separate from the
+  experiment claim `claim-<hyp>`. The status is derived by a PURE RULE
+  `derive_novelty_status(hypothesis, novelty_decisions)` (in `core/validity.py`, no
+  raise): **SUPPORTED iff** a recorded `NOVELTY_DECISION` bound to the hypothesis has
+  outcome `found_nothing` (a prior-art search that returned nothing); otherwise
+  **PROPOSED** (no decision, a `skipped` one, or a `found_something` one). The searched
+  outcome is split into `found_nothing` / `found_something`; **SUPPORTED-iff-found_nothing**
+  is the safety floor -- a `found_something` decision **never** yields SUPPORTED (active
+  `refuted` promotion is deferred with render). **The run never HALTs on novelty.**
+  Instead, while the novelty claim is PROPOSED the compiler surfaces a **NON-HALT**
+  `NoveltyCheckpoint` (the compile proceeds normally), with a **reason-tailored** prompt:
+  `not_searched` (no decision / a skip) tells the agent to search prior art and record
+  the outcome or drop the flag via an F7 amendment; `found_something` tells the agent the
+  search is done and the escape is the F7 amendment (it does **not** say "go search").
+  Dropping the flag is a human-only Spec amendment (F7) -- never a silent edit. `sci-adk
+  verify` RE-DERIVES the novelty status from the record: a SUPPORTED `claim-novelty-<hyp>`
+  whose `found_nothing` decision was deleted (or a `found_something` tampered to
+  `found_nothing`) is reported DIVERGED. The render `first`-gate + hedge reporting remain
+  **DEFERRED** (this milestone is render-free).
 - **Contested (Medium)** is a hypothesis-bound *recording* trigger -- **no gate, no
   halt**. When a Claim is/becomes CONTESTED the run path surfaces an open
   `ContestedCheckpoint`; `record_contested` writes a `CONTESTED_RECORD` (the
@@ -176,10 +191,13 @@ surface with no verdict trail, so the marginal cost is low. Concretely:
   use separate `EvidenceKind`s (`NOVELTY_DECISION` / `CONTESTED_RECORD`), so the
   Spec-creation `prior_work_open` closing-kind anchor (which keys only on
   `PRIOR_WORK_DECISION`) is unchanged.
-- The CLI verbs are `sci-adk novelty <run> --hypothesis <id> (--searched <dois...> |
-  --skip --reason "...")` and `sci-adk contested <run> --hypothesis <id> (--searched
-  <dois...> | --note "...")`. The searched paths honor the same contact-email policy as
-  `prior-work` (`ConfigHalt` by default, `--allow-no-email` to proceed degraded).
+- The CLI verbs are `sci-adk novelty <run> --hypothesis <id> (--searched <dois...>
+  --outcome {found-nothing|found-prior-art} | --skip --reason "...")` and `sci-adk
+  contested <run> --hypothesis <id> (--searched <dois...> | --note "...")`. For novelty,
+  `--searched` and `--outcome` are required together (a recorded search records what it
+  found; `found-nothing` -> `found_nothing`, `found-prior-art` -> `found_something`). The
+  searched paths honor the same contact-email policy as `prior-work` (`ConfigHalt` by
+  default, `--allow-no-email` to proceed degraded).
 
 The paper-render (Low) trigger remains deferred.
 

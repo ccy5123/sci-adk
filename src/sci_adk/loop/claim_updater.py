@@ -21,6 +21,9 @@ from typing import List, Optional
 from sci_adk.core.claim import (
     Claim,
     ClaimStatus,
+    Confidence,
+    ConfidenceLevel,
+    ConfidenceType,
     EvidenceLink,
     EvidenceLinkRole,
     StatusChange,
@@ -30,7 +33,7 @@ from sci_adk.core.spec import Spec
 from sci_adk.core.validity import (
     check_digitized_adequacy,
     check_evidence_adequacy,
-    check_novelty_adequacy,
+    derive_novelty_status,
 )
 
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
@@ -169,21 +172,23 @@ class ClaimUpdater:
             evidence_items: List of EvidenceItems to evaluate
 
         Returns:
-            Updated/created Claims
+            Updated/created Claims -- the EXPERIMENT claims AND the novelty claims
+            (``claim-novelty-<hyp>``) for novelty hypotheses, so the compiler sees and
+            persists both.
         """
         claims = []
 
         # Novelty decisions (the High discovery trigger) are gathered ONCE: they carry
         # ``bears_on=[]`` (a recorded decision, not a belief), so they never appear in
-        # ``relevant_evidence`` below and never enter the engine -- but the novelty gate
-        # needs them to decide whether a SUPPORTED novelty claim has a recorded prior-art
-        # search. They are hypothesis-bound via their ``literature_decision`` payload.
+        # ``relevant_evidence`` below and never enter the engine -- the novelty claim is
+        # derived from them by rule (``derive_novelty_status``), decoupled from the
+        # experiment verdict. They are hypothesis-bound via their ``literature_decision``.
         novelty_decisions = [
             ev for ev in evidence_items
             if ev.kind == EvidenceKind.NOVELTY_DECISION
         ]
 
-        # Process each hypothesis
+        # Process each hypothesis (the EXPERIMENT claim: experiment evidence only).
         for hypothesis in self.spec.hypotheses:
             # Find evidence bearing on this hypothesis
             relevant_evidence = [
@@ -202,17 +207,135 @@ class ClaimUpdater:
                 continue
 
             # Create or update claim
-            claim = self._evaluate_hypothesis(hypothesis, counted, novelty_decisions)
+            claim = self._evaluate_hypothesis(hypothesis, counted)
             claims.append(claim)
             self._save_claim(claim)
 
+        # SEPARATE per-hypothesis novelty pass (B-replace). NOT gated by the
+        # experiment-evidence ``continue`` above: a novelty=True hypothesis gets its
+        # ``claim-novelty-<hyp>`` derived/persisted even when it has no experiment
+        # evidence yet (the novelty claim is decoupled from the experiment claim).
+        claims.extend(self._update_novelty_claims(novelty_decisions))
+
         return claims
+
+    def _update_novelty_claims(
+        self, novelty_decisions: List[EvidenceItem]
+    ) -> List[Claim]:
+        """Load-or-create + persist a ``claim-novelty-<hyp>`` for every novelty=True
+        hypothesis, with status = ``derive_novelty_status(hyp, novelty_decisions)``.
+
+        The novelty claim is a full revisable Claim with a stable id, so re-compile is
+        idempotent and the status can move non-monotonically (PROPOSED -> SUPPORTED when
+        a found_nothing decision is later added). The Confidence is STRUCTURAL (no
+        DecisionRule -- novelty is rule-derived, not evidence-tallied).
+        """
+        out: List[Claim] = []
+        for hypothesis in self.spec.hypotheses:
+            if not hypothesis.novelty:
+                continue
+            status = derive_novelty_status(hypothesis, novelty_decisions)
+            triggering_id = self._latest_evidence_id(novelty_decisions)
+            existing = self._load_novelty_claim(hypothesis)
+            if existing is not None:
+                claim = self._apply_novelty_update(existing, status, triggering_id)
+            else:
+                claim = self._create_novelty_claim(hypothesis, status, triggering_id)
+            out.append(claim)
+            self._save_claim(claim)
+        return out
+
+    @staticmethod
+    def _novelty_confidence(status: ClaimStatus) -> Confidence:
+        """Structural Confidence for a novelty claim (rule-derived, not evidence-tallied).
+
+        SUPPORTED reflects "a prior-art search returned nothing"; PROPOSED reflects an
+        unassessed/minimal basis. Graded type so no numeric threshold carries authority
+        (the basis is the load-bearing field, C3).
+        """
+        if status == ClaimStatus.SUPPORTED:
+            return Confidence(
+                type=ConfidenceType.GRADED,
+                level=ConfidenceLevel.MODERATE,
+                basis="novelty supported: a recorded prior-art search returned nothing "
+                "(found_nothing) for this hypothesis (rule-derived, decoupled from the "
+                "experiment verdict).",
+            )
+        return Confidence(
+            type=ConfidenceType.GRADED,
+            level=ConfidenceLevel.NONE,
+            basis="novelty unassessed: no recorded found_nothing prior-art search for "
+            "this hypothesis yet (PROPOSED; rule-derived, decoupled from the experiment "
+            "verdict).",
+        )
+
+    def _load_novelty_claim(self, hypothesis) -> Optional[Claim]:
+        """Load the persisted ``claim-novelty-<hyp>`` if present, else ``None``."""
+        filepath = (
+            self.claims_dir / f"{self._generate_novelty_claim_id(hypothesis)}.json"
+        )
+        if not filepath.exists():
+            return None
+        with open(filepath, "r", encoding="utf-8") as f:
+            return Claim.model_validate(json.load(f))
+
+    def _apply_novelty_update(
+        self, claim: Claim, status: ClaimStatus, triggering_id: str
+    ) -> Claim:
+        """Non-monotonically update an existing novelty claim (C1/C2).
+
+        Only threads a ``StatusChange`` when the derived status DIFFERS from the current
+        one (no spurious history on a stable re-compile). Confidence is refreshed to the
+        structural value for the new status.
+        """
+        if claim.status != status:
+            claim.update_status(
+                status,
+                triggered_by=triggering_id or claim.id,
+                note=f"Re-derivation moved novelty status to {status.value}",
+            )
+        conf = self._novelty_confidence(status)
+        claim.update_confidence(
+            confidence_type=conf.type,
+            level=conf.level,
+            value=conf.value,
+            basis=conf.basis,
+        )
+        return claim
+
+    def _create_novelty_claim(
+        self, hypothesis, status: ClaimStatus, triggering_id: str
+    ) -> Claim:
+        """Create a fresh ``claim-novelty-<hyp>`` with one initial ``StatusChange``."""
+        return Claim(
+            id=self._generate_novelty_claim_id(hypothesis),
+            spec_id=self.spec.id,
+            answers=hypothesis.id,
+            statement=f"Novelty/priority: {hypothesis.statement}",
+            status=status,
+            confidence=self._novelty_confidence(status),
+            evidence_set=[],
+            mode=hypothesis.mode,
+            renders_to=None,
+            history=[
+                StatusChange(
+                    at=datetime.now(timezone.utc),
+                    from_status=ClaimStatus.PROPOSED,
+                    to_status=status,
+                    triggered_by=triggering_id or self._generate_novelty_claim_id(hypothesis),
+                    note="Initial novelty derivation (rule-derived)",
+                )
+            ],
+        )
+
+    def _generate_novelty_claim_id(self, hypothesis) -> str:
+        """Stable novelty Claim id per hypothesis (``claim-novelty-<hyp.id>``)."""
+        return f"claim-novelty-{hypothesis.id}"
 
     def _evaluate_hypothesis(
         self,
         hypothesis,
         evidence_items: List[EvidenceItem],
-        novelty_decisions: Optional[List[EvidenceItem]] = None,
     ) -> Claim:
         """
         Evaluate a hypothesis by DELEGATING belief to the DecisionEngine, then
@@ -262,13 +385,10 @@ class ClaimUpdater:
         # neither is weakened.
         check_digitized_adequacy(hypothesis, evidence_items, verdict.direction)
         check_evidence_adequacy(hypothesis, evidence_items, verdict.direction)
-        # The novelty gate (the High discovery trigger, literature-acquisition.md) COMPOSES
-        # here too: a SUPPORTED novelty hypothesis with no recorded prior-art search halts
-        # before any Claim is written. It consults the NOVELTY_DECISION items (a record,
-        # not a bearing -- so they are NOT in ``evidence_items``), passed in separately.
-        check_novelty_adequacy(
-            hypothesis, novelty_decisions or [], verdict.direction
-        )
+        # B-replace (design/literature-acquisition.md): the novelty HALT is GONE. The
+        # experiment claim now derives from EXPERIMENT evidence ONLY -- novelty is
+        # decoupled into a separate revisable ``claim-novelty-<hyp>`` derived by rule
+        # (see ``_update_novelty_claims``). The experiment claim never stops on novelty.
 
         raw_directions = {b.direction for _, b in results.pairs}
         status = self._status_for_verdict(verdict, raw_directions)

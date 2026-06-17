@@ -144,8 +144,9 @@ def build_parser() -> argparse.ArgumentParser:
     novelty = sub.add_parser(
         "novelty",
         help="record a novelty/priority discovery decision for a hypothesis (the High "
-             "trigger): searched -> LITERATURE + NOVELTY_DECISION, or skipped -> a "
-             "recorded null. A SUPPORTED novelty claim needs a searched decision",
+             "trigger): searched (--outcome found-nothing|found-prior-art) -> LITERATURE "
+             "+ NOVELTY_DECISION, or skipped -> a recorded null. A SUPPORTED novelty "
+             "claim needs a found-nothing searched decision (B-replace: non-HALT)",
     )
     novelty.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
     novelty.add_argument(
@@ -156,12 +157,17 @@ def build_parser() -> argparse.ArgumentParser:
     nov_group.add_argument(
         "--searched", nargs="+", metavar="DOI",
         help="prior art WAS searched: acquire these DOIs (discovery via web_search is "
-             "upstream) -> a LITERATURE item + a searched NOVELTY_DECISION",
+             "upstream) -> a LITERATURE item + a NOVELTY_DECISION. REQUIRES --outcome",
     )
     nov_group.add_argument(
         "--skip", action="store_true",
         help="prior art was NOT searched: record a skipped NOVELTY_DECISION null "
-             "(requires --reason). NOTE: a skip does NOT satisfy the novelty gate",
+             "(requires --reason). NOTE: a skip leaves the novelty claim PROPOSED",
+    )
+    novelty.add_argument(
+        "--outcome", choices=["found-nothing", "found-prior-art"], default=None,
+        help="REQUIRED with --searched: found-nothing (no prior art -> the novelty claim "
+             "derives SUPPORTED) | found-prior-art (prior art exists -> stays PROPOSED)",
     )
     novelty.add_argument(
         "--reason", default=None,
@@ -504,26 +510,39 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
         print(f"recorded novelty decision (skipped) for hypothesis '{args.hypothesis}' "
               f"-> {item.kind.value} evidence {item.id}")
         print(f"  reason: {args.reason.strip()}")
-        print("  note: a skipped novelty search does NOT satisfy the novelty gate")
+        print("  note: a skipped novelty search leaves the novelty claim PROPOSED")
         return 0
 
-    # searched path: same contact-email policy as prior-work (E4).
+    # searched path: --outcome is REQUIRED with --searched (a search has an outcome).
+    if not args.outcome:
+        print("error: --searched requires --outcome {found-nothing|found-prior-art} "
+              "(a recorded prior-art search must record what it found)", file=sys.stderr)
+        return 2
+    found = "nothing" if args.outcome == "found-nothing" else "something"
+
+    # same contact-email policy as prior-work (E4).
     from sci_adk.config import ConfigHalt
 
     try:
         outcome = record_novelty_searched(
             spec, workspace, hypothesis_id=args.hypothesis, dois=args.searched,
-            allow_no_email=args.allow_no_email)
+            found=found, allow_no_email=args.allow_no_email)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
               file=sys.stderr)
         return 2
     ev = outcome.evidence
-    print(f"recorded novelty decision (searched) for hypothesis '{args.hypothesis}' "
-          f"-> {ev.kind.value} evidence {ev.id}")
+    outcome_str = "found_nothing" if found == "nothing" else "found_something"
+    print(f"recorded novelty decision (searched: {outcome_str}) for hypothesis "
+          f"'{args.hypothesis}' -> {ev.kind.value} evidence {ev.id}")
     print(f"  acquired: {len(outcome.result.succeeded)} | "
           f"failed: {len(outcome.result.failed)}")
+    if found == "nothing":
+        print("  note: found-nothing -> the novelty claim derives SUPPORTED on recompile")
+    else:
+        print("  note: found-prior-art -> the novelty claim stays PROPOSED "
+              "(drop the novelty flag via a Spec amendment, F7)")
     if outcome.should_halt:
         print("  halt (human input needed):", file=sys.stderr)
         print(outcome.halt.feedback(), file=sys.stderr)

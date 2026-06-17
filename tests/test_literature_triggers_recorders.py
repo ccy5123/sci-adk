@@ -102,7 +102,7 @@ def test_record_novelty_searched_writes_decision_referencing_literature(tmp_path
     spec = _spec("nov-searched")
     outcome = record_novelty_searched(
         spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/a", "10.1/b"],
-        adapter=_FakeAdapter(), email="novelty-test@example.org",
+        found="nothing", adapter=_FakeAdapter(), email="novelty-test@example.org",
     )
     # the acquisition artifact is a LITERATURE item ...
     assert outcome.evidence.kind is EvidenceKind.LITERATURE
@@ -114,11 +114,26 @@ def test_record_novelty_searched_writes_decision_referencing_literature(tmp_path
 
     decision = next(i for i in items if i.kind is EvidenceKind.NOVELTY_DECISION)
     assert decision.literature_decision is not None
-    assert decision.literature_decision.outcome == "searched"
+    # B-replace: a novelty search records its outcome (found_nothing here).
+    assert decision.literature_decision.outcome == "found_nothing"
     assert decision.literature_decision.hypothesis_id == "hyp-1"
     # references the acquired LITERATURE item for traceability
     assert decision.literature_decision.literature_evidence_id == outcome.evidence.id
     assert decision.bears_on == []  # a recorded decision, not a belief
+
+
+def test_record_novelty_searched_found_something_records_found_something(tmp_path):
+    from sci_adk.loop.literature_triggers import record_novelty_searched
+
+    spec = _spec("nov-searched-fs")
+    record_novelty_searched(
+        spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/a"],
+        found="something", adapter=_FakeAdapter(), email="novelty-test@example.org",
+    )
+    items = _load_evidence(tmp_path, spec.id)
+    decision = next(i for i in items if i.kind is EvidenceKind.NOVELTY_DECISION)
+    assert decision.literature_decision is not None
+    assert decision.literature_decision.outcome == "found_something"
 
 
 def test_record_novelty_searched_requires_email_by_default(tmp_path, monkeypatch):
@@ -141,7 +156,7 @@ def test_record_novelty_searched_requires_email_by_default(tmp_path, monkeypatch
     with pytest.raises(ConfigHalt):
         record_novelty_searched(
             spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/x"],
-            adapter=_Spy(), config_root=cfg_root,
+            found="nothing", adapter=_Spy(), config_root=cfg_root,
         )
     assert calls["n"] == 0  # no acquisition attempted
 

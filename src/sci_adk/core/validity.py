@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from sci_adk.core.claim import ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Hypothesis
 
@@ -283,81 +284,71 @@ def check_digitized_adequacy(
         )
 
 
-def check_novelty_adequacy(
+def derive_novelty_status(
     hypothesis: Hypothesis,
     novelty_decisions: Sequence[EvidenceItem],
-    verdict_direction: BearingDirection,
-) -> None:
-    """Enforce the novelty hard gate for one hypothesis (the High discovery trigger).
+) -> ClaimStatus:
+    """Derive the revisable novelty-claim status for one hypothesis (the High trigger).
+
+    B-replace (design/literature-acquisition.md §"Discovery trigger model"): novelty is
+    no longer a run-HALT coupled to the experiment verdict. It is a 1st-class revisable
+    Claim derived by THIS PURE RULE -- decoupled from the experiment verdict (no
+    ``verdict_direction`` param) and never raising.
 
     A novelty/priority claim asserts "first/new" -- a universal-negative over the
-    literature (design/literature-acquisition.md §"Discovery trigger model"). Its
-    validity rests on a prior-art search having been performed. So a SUPPORTED novelty
-    claim with no recorded *searched* novelty decision is refused.
+    literature. Its validity rests on a prior-art search that returned nothing. So:
 
-    Fires ``ValidityHalt`` iff ALL of:
-      - ``hypothesis.novelty is True``;
-      - ``verdict_direction == SUPPORTS`` (SUPPORTS-only -- narrower than the other
-        adequacy gates: REFUTES / NEUTRAL / INCONCLUSIVE never trip it);
-      - there is NO novelty decision for this hypothesis with ``outcome == "searched"``.
+      - returns ``ClaimStatus.SUPPORTED`` iff some ``NOVELTY_DECISION`` bound to
+        ``hypothesis.id`` records ``outcome == "found_nothing"`` (a recorded prior-art
+        search that found no prior art);
+      - returns ``ClaimStatus.PROPOSED`` otherwise -- no decision, a ``skipped``
+        decision (no search), or a ``found_something`` decision (prior art exists).
 
-    A novelty ``outcome == "skipped"`` decision does NOT satisfy the gate -- skipping the
-    search guts the claim's only evidentiary basis.
+    SAFETY FLOOR: ``found_something`` NEVER yields SUPPORTED (active ``refuted``
+    promotion is deferred with render). A non-novelty hypothesis yields PROPOSED (the
+    caller does not derive a novelty claim for it; this is a defensive return).
 
-    Unlike the other gates, this takes the novelty DECISION items (kind ==
+    Like the other gates, this takes the novelty DECISION items (kind ==
     ``NOVELTY_DECISION`` whose ``literature_decision.hypothesis_id == hypothesis.id``),
     NOT bearing evidence -- the decisions carry ``bears_on=[]`` and never enter the
-    DecisionEngine, so the caller must pass them separately. Returns ``None`` (passes)
-    when the gate does not fire.
+    DecisionEngine, so the caller passes them separately.
 
     Args:
-        hypothesis: the hypothesis under evaluation (its frozen ``novelty`` flag and
-            ``id`` drive the gate).
-        novelty_decisions: the ``NOVELTY_DECISION`` EvidenceItems whose payload binds to
-            this hypothesis (the caller pre-filters by ``literature_decision.hypothesis_id``,
-            or passes the full set -- this function also matches by id defensively).
-        verdict_direction: the engine's verdict direction. Only ``SUPPORTS`` can trip
-            the gate.
+        hypothesis: the hypothesis under evaluation (its ``id`` binds the decisions).
+        novelty_decisions: the ``NOVELTY_DECISION`` EvidenceItems (the caller may pass
+            the full set -- this function matches by kind + payload hypothesis_id).
 
-    Raises:
-        ValidityHalt: when a SUPPORTED novelty claim lacks a recorded prior-art search.
+    Returns:
+        ``ClaimStatus.SUPPORTED`` iff a recorded found_nothing search exists for the
+        hypothesis, else ``ClaimStatus.PROPOSED``. Never raises.
     """
-    # @MX:ANCHOR: [AUTO] the novelty hard gate (the High discovery trigger).
-    # @MX:REASON: [AUTO] ClaimUpdater and the verify audit both consult this before a
-    #   novelty Claim is trusted; it is the one place the "SUPPORTED novelty needs a
-    #   recorded prior-art search" rule lives. Weakening it (dropping SUPPORTS-only, or
-    #   letting a 'skipped' decision satisfy it) re-opens an unsearched first/new claim
-    #   -- the exact self-certification the trigger exists to prevent. The HALT MUST keep
-    #   naming both F7 escapes (search+record, or amend away the flag), never a silent edit.
+    # @MX:ANCHOR: [AUTO] the novelty status rule (the High discovery trigger, B-replace).
+    # @MX:REASON: [AUTO] ClaimUpdater (persist the novelty claim) and the verify audit
+    #   (re-derive it) both call this; it is the one place the "SUPPORTED iff a recorded
+    #   found_nothing prior-art search" rule lives. Loosening it (letting found_something
+    #   or a skip yield SUPPORTED) re-opens the false-novelty claim the trigger exists to
+    #   prevent -- the safety floor. It is PURE (no raise): the HALT was replaced by a
+    #   non-HALT compile-time NoveltyCheckpoint surfaced while the claim is PROPOSED.
+    # Defense-in-depth on the safety floor: a non-novelty hypothesis can never produce a
+    # SUPPORTED novelty claim regardless of any (mis-bound) found_nothing decision. The
+    # caller only derives a novelty claim for novelty=True hypotheses, so this guard is
+    # belt-and-suspenders -- it keeps the single safety-floor predicate honest if a future
+    # caller passes a non-novelty hypothesis.
     if not hypothesis.novelty:
-        return
-    if verdict_direction != BearingDirection.SUPPORTS:
-        return
-    searched = any(
+        return ClaimStatus.PROPOSED
+    found_nothing = any(
         ev.kind == EvidenceKind.NOVELTY_DECISION
         and ev.literature_decision is not None
         and ev.literature_decision.hypothesis_id == hypothesis.id
-        and ev.literature_decision.outcome == "searched"
+        and ev.literature_decision.outcome == "found_nothing"
         for ev in novelty_decisions
     )
-    if searched:
-        return
-    raise ValidityHalt(
-        hypothesis.id,
-        "novelty/priority hypothesis would be supported but no prior-art search is "
-        "recorded for it -- a 'first/new' claim is a universal-negative over the "
-        "literature and cannot be self-certified without searching it. Either: "
-        "(a) perform a prior-art search and record it "
-        f"(`sci-adk novelty <run> --hypothesis {hypothesis.id} --searched <dois>`), or "
-        "(b) drop the novelty flag via a Spec amendment (F7, spec.amend(...), human-only "
-        "-- never a silent edit). A 'skipped' novelty decision does NOT satisfy this "
-        "gate. See design/literature-acquisition.md §\"Discovery trigger model\".",
-    )
+    return ClaimStatus.SUPPORTED if found_nothing else ClaimStatus.PROPOSED
 
 
 __all__ = [
     "ValidityHalt",
     "check_evidence_adequacy",
     "check_digitized_adequacy",
-    "check_novelty_adequacy",
+    "derive_novelty_status",
 ]

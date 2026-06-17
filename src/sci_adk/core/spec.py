@@ -209,8 +209,10 @@ class Hypothesis(BaseModel):
             trigger). Default ``False`` (most hypotheses are not novelty claims).
             Frozen with the Spec (anti-HARKing): the flag cannot be flipped after seeing
             results to dodge or invent the prior-art-search requirement. When ``True``, a
-            SUPPORTED verdict requires a recorded prior-art search (the novelty gate,
-            ``check_novelty_adequacy``); dropping the flag is a human-only Spec amendment
+            separate revisable novelty Claim ``claim-novelty-<hyp>`` is derived by rule
+            (``derive_novelty_status``): SUPPORTED iff a recorded *found_nothing*
+            prior-art search, else PROPOSED -- decoupled from the experiment verdict and
+            never a run-HALT (B-replace). Dropping the flag is a human-only Spec amendment
             (F7), never a silent edit.
     """
 

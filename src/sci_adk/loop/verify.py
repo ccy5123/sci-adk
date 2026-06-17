@@ -54,7 +54,7 @@ from sci_adk.core.spec import Hypothesis, Spec
 from sci_adk.core.validity import (
     ValidityHalt,
     check_digitized_adequacy,
-    check_novelty_adequacy,
+    derive_novelty_status,
 )
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
@@ -146,15 +146,16 @@ def verify_run(run_dir: Path) -> VerifyReport:
 
     hyp_by_id: Dict[str, Hypothesis] = {h.id: h for h in spec.hypotheses}
 
-    # Novelty decisions (bears_on=[]) never enter the engine, but the novelty
-    # faithfulness re-check needs them: a SUPPORTED novelty claim is reproducible only
-    # if the record shows the prior-art search was done. Gather once.
+    # Novelty decisions (bears_on=[]) never enter the engine, but the novelty claim
+    # re-derivation needs them: a SUPPORTED novelty claim re-derives only if the record
+    # still holds a *found_nothing* prior-art decision (B-replace). Gather once.
     novelty_decisions = [
         ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
     ]
 
     outcomes: List[VerifyOutcome] = []
-    for hyp_id, claim in sorted(recorded_claims.items()):
+    for claim_id, claim in sorted(recorded_claims.items()):
+        hyp_id = claim.answers
         hypothesis = hyp_by_id.get(hyp_id)
         if hypothesis is None:
             # A recorded claim whose hypothesis is absent from the (frozen) Spec: the
@@ -173,8 +174,17 @@ def verify_run(run_dir: Path) -> VerifyReport:
                 )
             )
             continue
+        if _is_novelty_claim(claim):
+            # Novelty claim (B-replace): re-derive its status by RULE
+            # (``derive_novelty_status`` over the recorded novelty decisions), NOT via the
+            # experiment DecisionEngine. A deleted/tampered found_nothing decision makes
+            # the recorded SUPPORTED novelty claim no longer re-derive -> DIVERGED.
+            outcomes.append(
+                _audit_novelty_claim(hypothesis, claim, novelty_decisions)
+            )
+            continue
         outcomes.append(
-            _audit_hypothesis(engine, hypothesis, evidence, claim, novelty_decisions)
+            _audit_hypothesis(engine, hypothesis, evidence, claim)
         )
 
     all_reproduced = bool(outcomes) and all(o.result == REPRODUCED for o in outcomes)
@@ -193,9 +203,8 @@ def _audit_hypothesis(
     hypothesis: Hypothesis,
     evidence: List[EvidenceItem],
     recorded_claim: Claim,
-    novelty_decisions: List[EvidenceItem],
 ) -> VerifyOutcome:
-    """Re-derive one hypothesis's belief and compare it to its recorded Claim.
+    """Re-derive one hypothesis's EXPERIMENT belief and compare it to its recorded Claim.
 
     Mirrors ``ClaimUpdater._evaluate_hypothesis`` (build ``EvidenceForHypothesis`` from
     the bearings on this hypothesis, call ``engine.evaluate``, then map the verdict via
@@ -209,10 +218,9 @@ def _audit_hypothesis(
     therefore does NOT reproduce -- the audit reports it (UNRESOLVED when there is
     nothing left to count, DIVERGED when a counted digitized fails the verifier check).
 
-    The same faithfulness logic covers the novelty gate (the High discovery trigger): a
-    recorded SUPPORTED novelty claim is reproducible only if the record still holds a
-    *searched* ``NOVELTY_DECISION`` for it; if that decision was deleted/tampered, the
-    recorded belief no longer follows from the record -> DIVERGED.
+    Novelty is audited SEPARATELY (B-replace): the novelty claim ``claim-novelty-<hyp>``
+    is re-derived by rule in :func:`_audit_novelty_claim`, not here -- this path is the
+    EXPERIMENT claim only.
     """
     relevant = [
         ev for ev in evidence
@@ -252,27 +260,6 @@ def _audit_hypothesis(
             ),
         )
 
-    # Re-apply the novelty gate over the RECORDED novelty decisions (the High discovery
-    # trigger). If the recorded run holds a SUPPORTED novelty claim but no *searched*
-    # NOVELTY_DECISION for it (e.g. the decision was deleted/tampered), the updater would
-    # have HALTED -- so the recorded belief does not follow from a properly-recorded run:
-    # report DIVERGED. Read-only (consulted, not enforced as a stop).
-    try:
-        check_novelty_adequacy(
-            hypothesis, novelty_decisions, verdict.direction
-        )
-    except ValidityHalt as halt:
-        return VerifyOutcome(
-            hypothesis_id=hypothesis.id,
-            recorded_status=recorded_claim.status,
-            rederived_status=None,
-            result=DIVERGED,
-            rederived_basis=(
-                "recorded SUPPORTED novelty claim has no recorded prior-art search "
-                f"(not reproducible from record): {halt.reason}"
-            ),
-        )
-
     raw_directions = {b.direction for _, b in results.pairs}
     # SINGLE source of truth (Fix 1): the SAME public derivation ClaimUpdater uses to
     # persist -- mapping + CONTESTED override -- so a faithful record re-derives exactly
@@ -308,6 +295,48 @@ def _classify(
     return REPRODUCED if rederived_status == recorded_status else DIVERGED
 
 
+def _is_novelty_claim(claim: Claim) -> bool:
+    """True iff ``claim`` is a novelty claim (id ``claim-novelty-<hyp>``)."""
+    return claim.id.startswith("claim-novelty-")
+
+
+def _audit_novelty_claim(
+    hypothesis: Hypothesis,
+    recorded_claim: Claim,
+    novelty_decisions: List[EvidenceItem],
+) -> VerifyOutcome:
+    """Re-derive the novelty claim status by RULE and compare to the recorded one.
+
+    B-replace (design/literature-acquisition.md): the novelty claim is rule-derived
+    (``derive_novelty_status`` over the recorded NOVELTY_DECISIONs), decoupled from the
+    experiment verdict. A recorded SUPPORTED novelty claim is faithful only if the record
+    still holds a *found_nothing* decision for the hypothesis; if that decision was
+    deleted (or a found_something was tampered to found_nothing), the re-derived status
+    diverges from the recorded one. READ-ONLY: no persist, no LLM.
+
+    Classification: matching status -> REPRODUCED; any mismatch -> DIVERGED (novelty has
+    no inconclusive/UNRESOLVED state -- the rule always yields PROPOSED or SUPPORTED).
+    """
+    rederived = derive_novelty_status(hypothesis, novelty_decisions)
+    result = REPRODUCED if rederived == recorded_claim.status else DIVERGED
+    basis = (
+        "novelty re-derived from the recorded prior-art decisions"
+        if result == REPRODUCED
+        else (
+            "recorded novelty claim does not re-derive from the record: recorded "
+            f"{recorded_claim.status.value}, re-derived {rederived.value} (a "
+            "found_nothing prior-art decision was deleted or tampered)"
+        )
+    )
+    return VerifyOutcome(
+        hypothesis_id=hypothesis.id,
+        recorded_status=recorded_claim.status,
+        rederived_status=rederived,
+        result=result,
+        rederived_basis=basis,
+    )
+
+
 # -- read-only loaders -------------------------------------------------------
 
 def _load_spec(run_dir: Path) -> Spec:
@@ -331,14 +360,20 @@ def _load_evidence(run_dir: Path) -> List[EvidenceItem]:
 
 
 def _load_claims(run_dir: Path) -> Dict[str, Claim]:
-    """Load recorded Claims keyed by the hypothesis id each answers (read-only)."""
+    """Load recorded Claims keyed by their unique Claim ``id`` (read-only).
+
+    Keyed by ``claim.id`` (not ``claim.answers``) because the two-claim model
+    (B-replace) means a hypothesis can have BOTH an experiment claim ``claim-<hyp>`` and
+    a novelty claim ``claim-novelty-<hyp>`` answering the SAME hypothesis id -- keying by
+    ``answers`` would silently drop one. The audit routes each by id.
+    """
     claims_dir = run_dir / "claims"
     if not claims_dir.is_dir():
         return {}
     claims: Dict[str, Claim] = {}
     for path in sorted(claims_dir.glob("*.json")):
         claim = Claim.model_validate(json.loads(path.read_text(encoding="utf-8")))
-        claims[claim.answers] = claim
+        claims[claim.id] = claim
     return claims
 
 

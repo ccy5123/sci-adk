@@ -1,41 +1,29 @@
 """
-Novelty hard gate (RED-first).
+Novelty status derivation (RED-first, B-replace).
 
-design/literature-acquisition.md §"Discovery trigger model" (High trigger): a
-novelty/priority claim asserts "first/new" -- a universal-negative over the
-literature. Its validity rests on a prior-art search having been done. So:
+design/literature-acquisition.md §"Discovery trigger model" (High trigger): novelty
+is no longer a run-HALT. It is a 1st-class revisable Claim derived by a RULE.
 
-  ``check_novelty_adequacy(hypothesis, novelty_decisions, verdict_direction)``
+  ``derive_novelty_status(hypothesis, novelty_decisions) -> ClaimStatus``
 
-fires a ``ValidityHalt`` when
-  - ``hypothesis.novelty is True`` AND
-  - ``verdict_direction == SUPPORTS`` AND
-  - there is NO ``NOVELTY_DECISION`` for this hypothesis with ``outcome=="searched"``.
+returns ``ClaimStatus.SUPPORTED`` iff some ``NOVELTY_DECISION`` bound to
+``hypothesis.id`` has outcome ``"found_nothing"`` (a recorded prior-art search that
+returned nothing), else ``ClaimStatus.PROPOSED``.
 
-SUPPORTS-only (narrower than the other adequacy gates): REFUTES/NEUTRAL/INCONCLUSIVE
-never trip it. A novelty ``outcome=="skipped"`` decision does NOT satisfy the gate
-(skipping the search guts the claim's only evidentiary basis).
+Safety floor (the whole point): a ``found_something`` decision NEVER yields SUPPORTED
+(it stays PROPOSED). No decision / a ``skipped`` decision -> PROPOSED. The predicate is
+PURE: it never raises (the HALT is gone, replaced by a non-HALT compile-time checkpoint).
 
-The two escapes the HALT must name:
-  (a) perform a prior-art search and record it
-      (``sci-adk novelty <run> --hypothesis <id> --searched <dois>``), or
-  (b) drop the novelty flag via a Spec amendment (F7, ``spec.amend(...)``, human-only)
-      -- never a silent edit.
-
-The gate takes the novelty DECISION items (kind==NOVELTY_DECISION whose
+The predicate takes the novelty DECISION items (kind==NOVELTY_DECISION whose
 ``literature_decision.hypothesis_id == hypothesis.id``), NOT bearing evidence --
-decisions carry ``bears_on=[]`` and never enter the DecisionEngine.
-
-This is the kernel, deterministic, no-LLM application of "agents propose, the engine
-judges, no self-certification" to the novelty trigger; it REUSES ``ValidityHalt``.
+decisions carry ``bears_on=[]`` and never enter the DecisionEngine. It is decoupled
+from the experiment verdict (no ``verdict_direction`` param).
 """
 
 from __future__ import annotations
 
-import pytest
-
+from sci_adk.core.claim import ClaimStatus
 from sci_adk.core.evidence import (
-    BearingDirection,
     EvidenceItem,
     EvidenceKind,
     LiteratureDecision,
@@ -48,7 +36,7 @@ from sci_adk.core.spec import (
     Hypothesis,
     HypothesisMode,
 )
-from sci_adk.core.validity import ValidityHalt, check_novelty_adequacy
+from sci_adk.core.validity import derive_novelty_status
 
 
 # --------------------------------------------------------------------------- #
@@ -82,121 +70,101 @@ def _novelty_decision(
 
 
 # --------------------------------------------------------------------------- #
-# the gate fires
+# SUPPORTED iff a recorded found_nothing prior-art search
 # --------------------------------------------------------------------------- #
 
-def test_novelty_supports_no_decision_halts():
-    """novelty + SUPPORTS + no novelty decision -> HALT."""
-    with pytest.raises(ValidityHalt):
-        check_novelty_adequacy(_hyp(True), [], BearingDirection.SUPPORTS)
+def test_found_nothing_yields_supported():
+    """A recorded prior-art search that returned nothing -> SUPPORTED novelty."""
+    decisions = [_novelty_decision("hyp-1", "found_nothing")]
+    assert derive_novelty_status(_hyp(True), decisions) == ClaimStatus.SUPPORTED
 
 
-def test_novelty_supports_skip_decision_halts():
-    """A skipped novelty decision does NOT satisfy the gate (skipping guts the
-    claim's evidentiary basis) -> still HALT."""
+def test_no_decision_yields_proposed():
+    """No novelty decision at all -> PROPOSED (the search has not been done)."""
+    assert derive_novelty_status(_hyp(True), []) == ClaimStatus.PROPOSED
+
+
+def test_skipped_decision_yields_proposed():
+    """A skipped novelty decision does NOT support the claim (no search) -> PROPOSED."""
     decisions = [_novelty_decision("hyp-1", "skipped")]
-    with pytest.raises(ValidityHalt):
-        check_novelty_adequacy(_hyp(True), decisions, BearingDirection.SUPPORTS)
+    assert derive_novelty_status(_hyp(True), decisions) == ClaimStatus.PROPOSED
 
 
-def test_novelty_halt_is_bound_to_the_hypothesis_id():
-    try:
-        check_novelty_adequacy(_hyp(True, "hyp-7"), [], BearingDirection.SUPPORTS)
-    except ValidityHalt as halt:
-        assert halt.hypothesis_id == "hyp-7"
-    else:  # pragma: no cover - the call must raise
-        pytest.fail("expected a ValidityHalt")
-
-
-def test_novelty_halt_message_names_both_F7_escapes():
-    """The HALT must name BOTH escapes: (a) search+record via the CLI verb, and
-    (b) drop the novelty flag through a Spec amendment (F7, human-only)."""
-    try:
-        check_novelty_adequacy(_hyp(True), [], BearingDirection.SUPPORTS)
-    except ValidityHalt as halt:
-        reason = halt.reason.lower()
-        # (a) the searched-record escape (the CLI verb)
-        assert "--searched" in halt.reason
-        assert "novelty" in reason
-        # (b) the Spec-amendment escape (F7, human-only)
-        assert "amend" in reason
-        assert "f7" in reason
-    else:  # pragma: no cover
-        pytest.fail("expected a ValidityHalt")
+def test_found_something_never_yields_supported():
+    """SAFETY FLOOR: a found_something decision (prior art exists) NEVER yields
+    SUPPORTED; it stays PROPOSED (active refuted-promotion is deferred with render)."""
+    decisions = [_novelty_decision("hyp-1", "found_something")]
+    assert derive_novelty_status(_hyp(True), decisions) == ClaimStatus.PROPOSED
 
 
 # --------------------------------------------------------------------------- #
-# the gate passes
+# binding to the hypothesis id + fail-closed guards
 # --------------------------------------------------------------------------- #
 
-def test_novelty_supports_searched_decision_passes():
-    """novelty + SUPPORTS + a SEARCHED novelty decision -> passes (no raise)."""
-    decisions = [_novelty_decision("hyp-1", "searched")]
-    # passes silently (returns None)
-    assert check_novelty_adequacy(_hyp(True), decisions, BearingDirection.SUPPORTS) is None
+def test_found_nothing_for_another_hypothesis_does_not_support():
+    """A found_nothing decision bound to a DIFFERENT hypothesis must not support this
+    one (the decision is hypothesis-bound via its payload)."""
+    decisions = [_novelty_decision("hyp-OTHER", "found_nothing")]
+    assert derive_novelty_status(_hyp(True, "hyp-1"), decisions) == ClaimStatus.PROPOSED
 
 
-def test_novelty_refutes_no_decision_passes():
-    """SUPPORTS-only: a novelty hypothesis that is REFUTED never trips the gate."""
-    assert check_novelty_adequacy(_hyp(True), [], BearingDirection.REFUTES) is None
+def test_non_novelty_hypothesis_never_supported_even_with_found_nothing():
+    """SAFETY-FLOOR HARDENING (defense-in-depth): a non-novelty hypothesis ALWAYS yields
+    PROPOSED, even with a matching found_nothing decision -- the guard makes the code
+    match the docstring so a mis-bound decision can never fabricate a SUPPORTED novelty
+    claim for a hypothesis that is not a novelty claim."""
+    decisions = [_novelty_decision("hyp-1", "found_nothing")]
+    assert derive_novelty_status(_hyp(False), decisions) == ClaimStatus.PROPOSED
 
 
-def test_novelty_neutral_passes():
-    assert check_novelty_adequacy(_hyp(True), [], BearingDirection.NEUTRAL) is None
+def test_found_nothing_alongside_found_something_still_supported():
+    """If the record holds a found_nothing for this hypothesis, the presence of an
+    additional found_something does not erase the recorded null search -> SUPPORTED."""
+    decisions = [
+        _novelty_decision("hyp-1", "found_something", item_id="evi-a"),
+        _novelty_decision("hyp-1", "found_nothing", item_id="evi-b"),
+    ]
+    assert derive_novelty_status(_hyp(True), decisions) == ClaimStatus.SUPPORTED
 
 
-def test_novelty_inconclusive_passes():
-    assert check_novelty_adequacy(_hyp(True), [], BearingDirection.INCONCLUSIVE) is None
-
-
-def test_non_novelty_supports_no_decision_passes():
-    """novelty=False -> the gate is inert regardless of direction/decisions."""
-    assert check_novelty_adequacy(_hyp(False), [], BearingDirection.SUPPORTS) is None
-
-
-def test_searched_decision_for_another_hypothesis_does_not_satisfy():
-    """A searched decision bound to a DIFFERENT hypothesis must not satisfy this
-    hypothesis's gate (the decision is hypothesis-bound via its payload)."""
-    decisions = [_novelty_decision("hyp-OTHER", "searched")]
-    with pytest.raises(ValidityHalt):
-        check_novelty_adequacy(_hyp(True, "hyp-1"), decisions, BearingDirection.SUPPORTS)
-
-
-# --------------------------------------------------------------------------- #
-# fail-closed guards (promoted from evaluator-active probes)
-# --------------------------------------------------------------------------- #
-
-def test_novelty_decision_with_null_payload_does_not_satisfy():
-    """Fail-closed: a NOVELTY_DECISION whose ``literature_decision`` payload is absent
-    carries no ``searched`` outcome, so it must NOT satisfy the gate (still HALT). Guards
-    the ``ev.literature_decision is not None`` branch in ``check_novelty_adequacy``
-    against a future refactor that drops it."""
+def test_null_payload_does_not_support():
+    """Fail-closed: a NOVELTY_DECISION whose payload is absent carries no outcome,
+    so it must NOT support -> PROPOSED."""
     null_payload = EvidenceItem(
         id="evi-nov-null",
         spec_id="s",
         kind=EvidenceKind.NOVELTY_DECISION,
-        provenance=Provenance(code_ref="novelty:searched"),
-        result=Result(type="qualitative", finding="searched: ..."),
+        provenance=Provenance(code_ref="novelty:found_nothing"),
+        result=Result(type="qualitative", finding="found_nothing: ..."),
         bears_on=[],
-        literature_decision=None,  # payload explicitly absent
+        literature_decision=None,
     )
-    with pytest.raises(ValidityHalt):
-        check_novelty_adequacy(_hyp(True), [null_payload], BearingDirection.SUPPORTS)
+    assert derive_novelty_status(_hyp(True), [null_payload]) == ClaimStatus.PROPOSED
 
 
-def test_wrong_kind_with_searched_payload_does_not_satisfy():
+def test_wrong_kind_with_found_nothing_payload_does_not_support():
     """Fail-closed: a non-NOVELTY_DECISION item (here CONTESTED_RECORD) carrying a
-    ``searched`` payload must NOT satisfy the gate -- ``check_novelty_adequacy`` filters
-    on ``kind == NOVELTY_DECISION``, so a wrong-kind item with a searched payload still
-    HALTs. Guards the load-bearing kind filter."""
+    found_nothing payload must NOT support -- the predicate filters on
+    kind==NOVELTY_DECISION."""
     wrong_kind = EvidenceItem(
-        id="evi-contested-searched",
+        id="evi-contested",
         spec_id="s",
         kind=EvidenceKind.CONTESTED_RECORD,
         provenance=Provenance(code_ref="contested"),
-        result=Result(type="qualitative", finding="searched: ..."),
+        result=Result(type="qualitative", finding="found_nothing: ..."),
         bears_on=[],
-        literature_decision=LiteratureDecision(outcome="searched", hypothesis_id="hyp-1"),
+        literature_decision=LiteratureDecision(
+            outcome="found_nothing", hypothesis_id="hyp-1"
+        ),
     )
-    with pytest.raises(ValidityHalt):
-        check_novelty_adequacy(_hyp(True), [wrong_kind], BearingDirection.SUPPORTS)
+    assert derive_novelty_status(_hyp(True), [wrong_kind]) == ClaimStatus.PROPOSED
+
+
+def test_pure_predicate_never_raises():
+    """The predicate replaces the HALT: it must return a ClaimStatus, never raise --
+    even on a novelty hypothesis with no decision (which used to HALT)."""
+    # No assertion of value beyond "did not raise"; the value is covered above.
+    assert derive_novelty_status(_hyp(True), []) in (
+        ClaimStatus.PROPOSED,
+        ClaimStatus.SUPPORTED,
+    )

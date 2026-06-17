@@ -43,11 +43,18 @@ from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.loop.claim_updater import ClaimUpdater
 from sci_adk.loop.judge import Judge
-from sci_adk.loop.literature_triggers import contested_checkpoint, contested_open
+from sci_adk.loop.literature_triggers import (
+    contested_checkpoint,
+    contested_open,
+    novelty_checkpoint,
+    novelty_open,
+    novelty_reason_from_decisions,
+)
 from sci_adk.loop.prior_work import prior_work_checkpoint
 from sci_adk.loop.verdict import (
     CheckpointModel,
     ContestedCheckpoint,
+    NoveltyCheckpoint,
     PriorWorkCheckpoint,
 )
 from sci_adk.render.paper import render_paper_latex
@@ -97,6 +104,7 @@ class CompileResult:
     paper_path: Path
     prior_work_checkpoint: Optional[PriorWorkCheckpoint] = None
     contested_checkpoints: List[ContestedCheckpoint] = field(default_factory=list)
+    novelty_checkpoints: List[NoveltyCheckpoint] = field(default_factory=list)
 
     @property
     def needs_agent(self) -> bool:
@@ -190,6 +198,16 @@ class ResearchCompiler:
         # timestamp; recording it makes the post-conflict literature decision explicit.
         contested_checkpoints = self._collect_contested_checkpoints(spec, claims)
 
+        # Novelty surfacing (the High discovery trigger, B-replace): for every
+        # novelty=True hypothesis whose ``claim-novelty-<hyp>`` is still PROPOSED, surface
+        # a reason-tailored NON-HALT NoveltyCheckpoint. The compile PROCEEDS normally --
+        # this is a recording reminder, not a gate. ``novelty_open`` keys on the
+        # novelty claim ClaimUpdater just persisted, so a re-compile after a found_nothing
+        # decision (claim SUPPORTED) surfaces nothing. The reason is derived from the SAME
+        # in-memory ``evidence`` the claim was derived from (NOT disk) so the message and
+        # the claim status agree even in this single pass.
+        novelty_checkpoints = self._collect_novelty_checkpoints(spec, claims, evidence)
+
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
         pending_dicts = [c.__dict__ for c in checkpoints]
@@ -229,6 +247,7 @@ class ResearchCompiler:
             paper_path=paper_path,
             prior_work_checkpoint=pw_checkpoint,
             contested_checkpoints=contested_checkpoints,
+            novelty_checkpoints=novelty_checkpoints,
         )
 
     # -- helpers -----------------------------------------------------------
@@ -327,6 +346,39 @@ class ResearchCompiler:
             if contested_open(spec, claim.answers, self.workspace_dir):
                 out.append(
                     contested_checkpoint(spec, claim.answers, spec.version)
+                )
+        return out
+
+    def _collect_novelty_checkpoints(
+        self, spec: Spec, claims: Sequence[Claim], evidence: Sequence[EvidenceItem]
+    ) -> List[NoveltyCheckpoint]:
+        """Surface a reason-tailored novelty checkpoint per novelty=True hypothesis whose
+        ``claim-novelty-<hyp>`` is PROPOSED (NON-HALT; ``novelty_open`` keys on the
+        novelty claim just persisted, so a re-compile after a found_nothing decision --
+        which makes the claim SUPPORTED -- surfaces nothing).
+
+        Iterates the SPEC hypotheses (not ``claims``): a novelty hypothesis is open even
+        with no experiment claim, exactly as the novelty pass in ClaimUpdater persists
+        its novelty claim independently of experiment evidence.
+
+        The reason is derived from the SAME in-memory ``evidence`` the novelty claim was
+        derived from (``novelty_reason_from_decisions`` over the NOVELTY_DECISIONs in
+        ``evidence``), NOT from disk: in a single-pass ``compile()`` an in-memory
+        found_something decision is not yet persisted, so a disk read would emit the wrong
+        (not_searched / "go search") prompt. ``novelty_open`` reads the just-persisted
+        novelty CLAIM status, which IS on disk -- that read is correct.
+        """
+        novelty_decisions = [
+            ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
+        ]
+        out: List[NoveltyCheckpoint] = []
+        for h in spec.hypotheses:
+            if not h.novelty:
+                continue
+            if novelty_open(spec, h.id, self.workspace_dir):
+                reason = novelty_reason_from_decisions(h.id, novelty_decisions)
+                out.append(
+                    novelty_checkpoint(spec, h.id, spec.version, reason=reason)
                 )
         return out
 

@@ -102,7 +102,8 @@ def test_novelty_searched_no_email_exits_two_friendly(tmp_path, monkeypatch, cap
     (tmp_path / "xdg").mkdir(parents=True, exist_ok=True)
 
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-noemail")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--searched", "10.1/x"])
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+               "--searched", "10.1/x", "--outcome", "found-nothing"])
     err = capsys.readouterr().err
     assert rc == 2
     assert "error:" in err
@@ -110,12 +111,16 @@ def test_novelty_searched_no_email_exits_two_friendly(tmp_path, monkeypatch, cap
     assert "Traceback (most recent call last)" not in err
 
 
-def test_novelty_searched_allow_no_email_proceeds(tmp_path, monkeypatch, capsys):
-    monkeypatch.delenv("UNPAYWALL_EMAIL", raising=False)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    (tmp_path / "xdg").mkdir(parents=True, exist_ok=True)
+def test_novelty_searched_requires_outcome(tmp_path, capsys):
+    """--searched without --outcome is rejected (they are required together)."""
+    run_dir, hyp_id = _seed(tmp_path, "cli-nov-no-outcome")
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--searched", "10.1/x"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "outcome" in err.lower()
 
-    # Swap the acquirer where literature_triggers uses it (bound at import).
+
+def _swap_acquirer(monkeypatch):
     import sci_adk.loop.literature_triggers as lt_mod
     spy = _FakeAdapter()
     real_acquirer = lt_mod.LiteratureAcquirer
@@ -126,14 +131,43 @@ def test_novelty_searched_allow_no_email_proceeds(tmp_path, monkeypatch, capsys)
 
     monkeypatch.setattr(lt_mod, "LiteratureAcquirer", _FakeAcquirer)
 
-    run_dir, hyp_id = _seed(tmp_path, "cli-nov-degraded")
+
+def _novelty_outcomes(run_dir: Path) -> list[str]:
+    return [
+        i.literature_decision.outcome
+        for i in _load_evidence(run_dir)
+        if i.kind is EvidenceKind.NOVELTY_DECISION and i.literature_decision is not None
+    ]
+
+
+def test_novelty_searched_found_nothing_proceeds(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("UNPAYWALL_EMAIL", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / "xdg").mkdir(parents=True, exist_ok=True)
+    _swap_acquirer(monkeypatch)
+
+    run_dir, hyp_id = _seed(tmp_path, "cli-nov-found-nothing")
     rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
-               "--searched", "10.1/x", "--allow-no-email"])
+               "--searched", "10.1/x", "--outcome", "found-nothing", "--allow-no-email"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "searched" in out.lower()
-    items = _load_evidence(run_dir)
-    assert any(i.kind is EvidenceKind.NOVELTY_DECISION for i in items)
+    assert "found_nothing" in out.lower() or "found-nothing" in out.lower() \
+        or "searched" in out.lower()
+    assert "found_nothing" in _novelty_outcomes(run_dir)
+
+
+def test_novelty_searched_found_prior_art_proceeds(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("UNPAYWALL_EMAIL", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / "xdg").mkdir(parents=True, exist_ok=True)
+    _swap_acquirer(monkeypatch)
+
+    run_dir, hyp_id = _seed(tmp_path, "cli-nov-found-prior-art")
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+               "--searched", "10.1/x", "--outcome", "found-prior-art",
+               "--allow-no-email"])
+    assert rc == 0
+    assert "found_something" in _novelty_outcomes(run_dir)
 
 
 # --------------------------------------------------------------------------- #

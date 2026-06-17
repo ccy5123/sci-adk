@@ -391,9 +391,13 @@ class LiteratureDecision(BaseModel):
     load-bearing closing-kind anchor (see :func:`sci_adk.loop.prior_work.prior_work_open`).
 
     Attributes:
-        outcome: ``searched`` (a prior-art search was performed -> flows into the
-            existing acquisition + a ``LITERATURE`` item), ``skipped`` (a recorded null
-            with a reason), or ``recorded`` (a post-conflict contested record).
+        outcome: ``searched`` (prior_work: a prior-art search was performed -> flows
+            into the existing acquisition + a ``LITERATURE`` item), ``skipped`` (a
+            recorded null with a reason -- prior_work or a novelty skip), ``recorded``
+            (a post-conflict contested record), ``found_nothing`` (a novelty prior-art
+            search that returned nothing -> supports the novelty claim), or
+            ``found_something`` (a novelty prior-art search that found prior art -> does
+            NOT support the novelty claim).
         hypothesis_id: the hypothesis this decision is bound to (REQUIRED, non-empty --
             these triggers are hypothesis-bound, unlike the Spec-time prior-art check).
         reason: why the search was skipped, or a contested note (optional).
@@ -406,8 +410,14 @@ class LiteratureDecision(BaseModel):
         "str_strip_whitespace": True,
     }
 
-    outcome: Literal["searched", "skipped", "recorded"] = Field(
-        ..., description="searched | skipped | recorded"
+    outcome: Literal[
+        "searched", "skipped", "recorded", "found_nothing", "found_something"
+    ] = Field(
+        ...,
+        description="The recorded decision outcome. prior_work uses searched|skipped; "
+        "contested uses recorded; a novelty *search* uses found_nothing (prior art "
+        "search returned nothing -> supports the novelty claim) | found_something "
+        "(prior art exists -> does not); a novelty *skip* uses skipped.",
     )
     hypothesis_id: str = Field(
         ..., min_length=1,
