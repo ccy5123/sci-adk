@@ -117,6 +117,30 @@ and add Tier 3.
 
 ---
 
+## 4b. Render output convention (LaTeX, Overleaf-as-is)
+
+The paper artifact is `runs/<id>/paper/draft.tex` (the Markdown `render_paper` is
+kept as a library function but is no longer auto-emitted). The `.tex` is the source
+of truth and is hardened to compile on Overleaf's default **pdflatex** as-is:
+
+- **Author LaTeX-safe.** Proposal panes, hypothesis statements, and `PaperProse`
+  (abstract/introduction/discussion) should be written in LaTeX-safe form — e.g.
+  `$\geq$`, `H$_2$O`, `30\textdegree{}C` — not unicode.
+- **Unicode safety net (fallback, not a license).** `render/paper.py`'s
+  `_latex_sanitize` composes with `_latex_escape`: a curated set of scientific
+  unicode is mapped to pdflatex-safe LaTeX (`≥`→`$\geq$`, `₂`→`$_2$`, `α`→`$\alpha$`,
+  `°`→`\textdegree{}`, dashes/quotes/ellipsis), common European accents
+  (U+00C0–U+024F: Gödel, Erdős) pass through unchanged under `utf8` inputenc, and any
+  other non-ASCII codepoint (CJK, emoji) is NFKD-folded or replaced with `?`. A stray
+  unicode char never breaks compilation.
+- **Self-contained bibliography.** When the run has a
+  `artifacts/literature/references.bib`, the compiler copies it to
+  `paper/references.bib` and the `.tex` emits `\bibliography{references}` + `\nocite{*}`,
+  so uploading the `paper/` folder to Overleaf resolves as-is. DOIs without a `.bib`
+  render as a `\url{}` list. No BibTeX is generated; no network; no LLM.
+
+---
+
 ## 5. References
 
 - Current usable state + run instructions + LLM constraint: auto-memory `sci-adk-usable`.

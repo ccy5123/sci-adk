@@ -13,9 +13,11 @@ sci-adk command-line interface.
     sci-adk contested <run-dir> --hypothesis <id> [--searched <dois...> | --note "..."]
 
 Compiles a four-pane proposal into ``runs/<spec.id>/`` (spec.json, evidence/,
-claims/, paper/draft.md). The numeric path runs autonomously at zero LLM cost;
-proof/qualitative hypotheses are surfaced as agent checkpoints (resolved
-in-session, never via an autonomous claude -p / API call).
+claims/, paper/draft.tex). The paper artifact is LaTeX (Overleaf default pdflatex):
+when a references.bib exists it is co-located into paper/ so the folder uploads
+as-is. The numeric path runs autonomously at zero LLM cost; proof/qualitative
+hypotheses are surfaced as agent checkpoints (resolved in-session, never via an
+autonomous claude -p / API call).
 
 Experiment capabilities are served by the capability adapter (``sci_adk.adapter``),
 NOT the kernel (design/rigor-shell-architecture.md §3.2/§3.3, F3/F4). ``--capability
@@ -85,8 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--prose", default=None, metavar="PATH",
         help="optional JSON file mapping {abstract, introduction, discussion} -> text; "
-             "the agent-authored narrative is injected into BOTH the Markdown and "
-             "LaTeX drafts (never LLM-generated). Omit -> structural skeleton only",
+             "agent-authored narrative injected verbatim into the LaTeX draft as "
+             "LaTeX body input (author it LaTeX-safe, e.g. $\\geq$ / H$_2$O; a unicode "
+             "safety net is a fallback, not a license to rely on unicode). Never "
+             "LLM-generated. Omit -> structural skeleton only",
     )
 
     resolve = sub.add_parser(

@@ -1,12 +1,13 @@
 """
 render-merge (RED-first): the compiler/CLI wiring.
 
-The compiler must emit ``runs/<id>/paper/draft.tex`` alongside ``draft.md`` (always,
-via ``render_paper_latex``), gather ``cited_dois`` from the run's LITERATURE
-EvidenceItem and/or its ``artifacts/literature/manifest.csv``, and set ``bib_path``
-to ``artifacts/literature/references.bib`` when that file exists. The CLI gains an
-optional ``--prose <json>`` that injects an agent-authored ``PaperProse`` into both
-renderers.
+The compiler must emit ``runs/<id>/paper/draft.tex`` as THE paper artifact (via
+``render_paper_latex``; ``draft.md`` is no longer auto-emitted), gather ``cited_dois``
+from the run's LITERATURE EvidenceItem and/or its
+``artifacts/literature/manifest.csv``, and -- when ``artifacts/literature/references.bib``
+exists -- copy it into ``paper/`` and wire ``\bibliography{references}`` so the folder
+uploads to Overleaf as-is. The CLI gains an optional ``--prose <json>`` that injects an
+agent-authored ``PaperProse`` into the LaTeX renderer.
 
 Network-free: a fake experiment hook stands in for the Docker run; literature DOIs
 come from a recorded LITERATURE EvidenceItem (no acquisition runs here).
@@ -82,15 +83,21 @@ def _literature_experiment(spec, workspace_dir):
     return [*base, lit]
 
 
-def test_compile_emits_draft_tex_alongside_md(tmp_path):
+def test_compile_emits_tex_only_not_md(tmp_path):
+    # Overleaf-hardening: the .tex is THE paper artifact; the compiler no longer
+    # emits draft.md (render_paper stays a library fn, just not auto-written here).
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-tex", experiment=_fake_experiment)
 
     run_dir = tmp_path / "runs" / "t-tex"
     tex_path = run_dir / "paper" / "draft.tex"
     md_path = run_dir / "paper" / "draft.md"
-    assert md_path.exists()
-    assert tex_path.exists(), "draft.tex must be emitted alongside draft.md"
+    assert tex_path.exists(), "draft.tex must be emitted as the paper artifact"
+    assert not md_path.exists(), "draft.md must NOT be emitted (tex is the source of truth)"
+
+    # result.paper_path points at the .tex.
+    assert result.paper_path == tex_path
+    assert result.paper_path.name == "draft.tex"
 
     tex = tex_path.read_text(encoding="utf-8")
     assert r"\documentclass{article}" in tex
@@ -137,6 +144,46 @@ def test_compile_gathers_dois_from_manifest_and_wires_bib(tmp_path):
     # The existing references.bib is wired (NOT generated).
     assert r"\bibliography{references}" in tex
     assert r"\nocite{*}" in tex
+
+
+def test_compile_copies_references_bib_into_paper_dir(tmp_path):
+    """Overleaf self-containment: when a references.bib exists for the run, the
+    compiler copies it NEXT TO draft.tex (runs/<id>/paper/references.bib), so
+    uploading the paper/ folder to Overleaf as-is resolves \\bibliography{references}."""
+    run_dir = tmp_path / "runs" / "t-bib-colocate"
+    lit_dir = run_dir / "artifacts" / "literature"
+    lit_dir.mkdir(parents=True, exist_ok=True)
+    bib_content = "@article{morgan1965, doi={10.1021/c160017a018}, title={Algorithm}}\n"
+    (lit_dir / "references.bib").write_text(bib_content, encoding="utf-8")
+    (lit_dir / "manifest.csv").write_text(
+        "index,doi,status,source,license,filename,origin,error\n"
+        "1,10.1021/c160017a018,success,arxiv,,X.pdf,cli,\n",
+        encoding="utf-8",
+    )
+
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-bib-colocate", experiment=_fake_experiment)
+
+    paper_dir = run_dir / "paper"
+    co_located = paper_dir / "references.bib"
+    # The .bib is co-located next to draft.tex ...
+    assert co_located.exists(), "references.bib must be copied into paper/ for Overleaf"
+    # ... with identical content (a faithful copy, not a regeneration) ...
+    assert co_located.read_text(encoding="utf-8") == bib_content
+    # ... and the stem the .tex references is 'references' (resolves in paper/).
+    tex = (paper_dir / "draft.tex").read_text(encoding="utf-8")
+    assert r"\bibliography{references}" in tex
+    assert r"\nocite{*}" in tex
+
+
+def test_compile_no_bib_does_not_create_paper_bib(tmp_path):
+    """No references.bib for the run -> nothing copied into paper/, no \\bibliography."""
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-bib-none", experiment=_fake_experiment)
+    paper_dir = tmp_path / "runs" / "t-bib-none" / "paper"
+    assert not (paper_dir / "references.bib").exists()
+    tex = (paper_dir / "draft.tex").read_text(encoding="utf-8")
+    assert r"\bibliography{" not in tex
 
 
 def test_compile_without_literature_says_none_cited(tmp_path):
@@ -214,17 +261,14 @@ def test_cli_run_prose_injects_into_both_renderers(tmp_path):
     assert rc == 0
 
     paper_dir = tmp_path / "runs" / "t-cli-prose" / "paper"
-    md = (paper_dir / "draft.md").read_text(encoding="utf-8")
     tex = (paper_dir / "draft.tex").read_text(encoding="utf-8")
 
-    # Markdown got the prose.
-    assert "## Abstract" in md
-    assert "An offline abstract for the draft." in md
-    assert "## Discussion" in md
-    # LaTeX got the prose.
+    # Only the .tex is emitted now; the prose is injected into it.
+    assert not (paper_dir / "draft.md").exists()
     assert r"\begin{abstract}" in tex
     assert "An offline abstract for the draft." in tex
     assert "Discussion" in tex
+    assert "An offline introduction." in tex
 
 
 def test_cli_run_without_prose_has_no_abstract(tmp_path):

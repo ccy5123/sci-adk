@@ -30,6 +30,13 @@ class PaperProse(BaseModel):
     back to the structural skeleton (no section emitted). Frozen and
     whitespace-stripping, consistent with the core models.
 
+    Each slot is **LaTeX body input**: the paper artifact is ``draft.tex`` (Overleaf
+    default pdflatex), so author the text LaTeX-safe -- e.g. ``$\\geq$``, ``H$_2$O``,
+    ``30\\textdegree{}C`` -- not unicode. The LaTeX renderer injects it (after LaTeX
+    special-char escaping) verbatim into the document. A lightweight unicode safety
+    net folds a stray ``≥`` / ``α`` / accent to a pdflatex-safe form, but it is a
+    fallback, not a license to rely on unicode; the ``.tex`` is the source of truth.
+
     Attributes:
         abstract: the paper abstract (rendered after the title / ``\\maketitle``).
         introduction: the Introduction section body.

@@ -7,11 +7,23 @@ pending agent judgments -- as a structured draft, with NO LLM prose (so it runs
 at zero cost, design/tool-policy.md). Prose polishing, when wanted, is a separate
 in-session agent step over this draft (never an autonomous claude -p call).
 
+LaTeX-authoring convention (the ``.tex`` is the source of truth): the Spec proposal
+panes, the hypothesis statements, and ``PaperProse`` (abstract/introduction/
+discussion) should be authored in **LaTeX-safe form** -- e.g. ``$\\geq$``,
+``H$_2$O``, ``30\\textdegree{}C`` -- NOT unicode, because the emitted document is
+what the author uploads to Overleaf (default pdflatex). A lightweight unicode
+sanitizer (:func:`_latex_sanitize`) is a *safety net*, not a license to rely on
+unicode: a stray ``≥`` or ``α`` is mapped to a pdflatex-safe LaTeX command, common
+European accents (Gödel, Erdős) pass through unchanged under ``utf8`` inputenc, and
+any other non-ASCII codepoint (CJK, emoji) is folded/placeheld so it cannot break
+compilation. Author LaTeX-safe; the net only guards against accidents.
+
 Reference: design/directory-structure.md (render/), design/abstractions.md.
 """
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -41,8 +53,10 @@ _LATEX_SPECIALS: list[tuple[str, str]] = [
 
 # A sentinel per special whose characters are NONE of the LaTeX specials, so it
 # survives every replacement pass untouched. The sentinels use NUL-range bytes
-# (\x00..\x01), which are assumed absent from paper content -- they never occur in
-# rendered Spec/Evidence/prose text, so a literal collision is not a practical concern.
+# (\x00..\x01); ``_latex_escape`` STRIPS those bytes from its input before the
+# sentinel phase (see below), making their absence a hard invariant rather than an
+# assumption -- a corrupted NUL-bearing string can never collide with a sentinel and
+# inject a spurious ``\textbackslash``.
 _LATEX_SENTINELS: list[tuple[str, str, str]] = [
     (char, f"\x00{i}\x01", replacement)
     for i, (char, replacement) in enumerate(_LATEX_SPECIALS)
@@ -67,11 +81,140 @@ def _latex_escape(s: str) -> str:
     statements, rule expressions, findings, basis text, ids) MUST pass through here
     or the emitted .tex will not compile (or will silently corrupt content).
     """
+    # Strip the sentinel bytes from the input first, so a (corrupted) NUL-bearing
+    # string cannot collide with a sentinel and inject a spurious command. This turns
+    # the sentinels' "absent from content" assumption into a hard invariant.
+    s = s.replace("\x00", "").replace("\x01", "")
     for char, sentinel, _final in _LATEX_SENTINELS:
         s = s.replace(char, sentinel)
     for _char, sentinel, final in _LATEX_SENTINELS:
         s = s.replace(sentinel, final)
     return s
+
+
+# Curated unicode -> pdflatex-safe LaTeX. The primary strategy is "author LaTeX-safe"
+# (the .tex is the source of truth); this map is the SAFETY NET so a stray scientific
+# unicode char does not break Overleaf's default pdflatex. Math symbols use
+# ``$...$`` (base LaTeX -- no amssymb needed for any entry here). Applied AFTER
+# :func:`_latex_escape`, so the values here are final LaTeX and the ASCII keys are
+# disjoint from the LaTeX specials the escaper handles.
+_UNICODE_MAP: dict[str, str] = {
+    # Subscripts 0-9 -> $_n$.
+    "₀": "$_0$", "₁": "$_1$", "₂": "$_2$", "₃": "$_3$",
+    "₄": "$_4$", "₅": "$_5$", "₆": "$_6$", "₇": "$_7$",
+    "₈": "$_8$", "₉": "$_9$",
+    # Superscripts -> $^n$ (the common digits/sign; 1/2/3 have legacy codepoints).
+    "⁰": "$^0$", "¹": "$^1$", "²": "$^2$", "³": "$^3$",
+    "⁴": "$^4$", "⁵": "$^5$", "⁶": "$^6$", "⁷": "$^7$",
+    "⁸": "$^8$", "⁹": "$^9$", "⁺": "$^+$", "⁻": "$^-$",
+    "ⁿ": "$^n$",
+    # Relations / operators.
+    "≥": r"$\geq$", "≤": r"$\leq$", "≠": r"$\neq$",
+    "±": r"$\pm$", "×": r"$\times$", "÷": r"$\div$",
+    "≈": r"$\approx$", "≡": r"$\equiv$", "∝": r"$\propto$",
+    "·": r"$\cdot$", "∙": r"$\cdot$",
+    # Big operators / analysis.
+    "∞": r"$\infty$", "∑": r"$\sum$", "∏": r"$\prod$",
+    "∫": r"$\int$", "√": r"$\surd$", "∂": r"$\partial$",
+    "∇": r"$\nabla$",
+    # Set relations.
+    "∈": r"$\in$", "∉": r"$\notin$", "⊂": r"$\subset$",
+    "⊆": r"$\subseteq$", "∪": r"$\cup$", "∩": r"$\cap$",
+    # Arrows.
+    "→": r"$\rightarrow$", "←": r"$\leftarrow$",
+    "↔": r"$\leftrightarrow$", "⇒": r"$\Rightarrow$",
+    "⇐": r"$\Leftarrow$",
+    # Greek lowercase alpha..omega.
+    "α": r"$\alpha$", "β": r"$\beta$", "γ": r"$\gamma$",
+    "δ": r"$\delta$", "ε": r"$\epsilon$", "ζ": r"$\zeta$",
+    "η": r"$\eta$", "θ": r"$\theta$", "ι": r"$\iota$",
+    "κ": r"$\kappa$", "λ": r"$\lambda$", "μ": r"$\mu$",
+    "ν": r"$\nu$", "ξ": r"$\xi$", "ο": "o",
+    "π": r"$\pi$", "ρ": r"$\rho$", "σ": r"$\sigma$",
+    "ς": r"$\varsigma$", "τ": r"$\tau$", "υ": r"$\upsilon$",
+    "φ": r"$\phi$", "χ": r"$\chi$", "ψ": r"$\psi$",
+    "ω": r"$\omega$",
+    # Greek uppercase Alpha..Omega (the ones with distinct LaTeX commands; the rest
+    # look like Latin capitals and fold cleanly via NFKD if they ever appear).
+    "Γ": r"$\Gamma$", "Δ": r"$\Delta$", "Θ": r"$\Theta$",
+    "Λ": r"$\Lambda$", "Ξ": r"$\Xi$", "Π": r"$\Pi$",
+    "Σ": r"$\Sigma$", "Φ": r"$\Phi$", "Ψ": r"$\Psi$",
+    "Ω": r"$\Omega$",
+    # Micro sign + degree.
+    "µ": r"$\mu$", "°": r"\textdegree{}",
+    # Dashes, quotes, ellipsis.
+    "–": "--", "—": "---",
+    "‘": "`", "’": "'", "“": "``", "”": "''",
+    "…": r"\ldots{}",
+}
+
+# The inputenc-safe accent window. ``\usepackage[utf8]{inputenc}`` (TeX Live /
+# Overleaf) only defines codepoints up to ~U+017E -- the end of Latin Extended-A --
+# so this window covers Latin-1 Supplement (U+00C0..U+00FF) + Latin Extended-A
+# (U+0100..U+017E). These pass through unchanged under pdflatex, so common European
+# accents stay correct (Gödel, Erdős, ł U+0142, ø). Latin Extended-B and above
+# (U+0180..U+024F: Romanian Ș U+0218 / Ț U+021A, ƒ U+0192, etc.) are NOT defined by
+# inputenc and would abort pdflatex if passed raw, so they fall through to the
+# NFKD-fold/placeholder path instead (Ș->S, Ț->T; ƒ and Ʒ have no ASCII fold -> ?).
+_ACCENT_LO = 0x00C0
+_ACCENT_HI = 0x017E
+
+# Replacement for a non-ASCII codepoint that is neither curated nor an inputenc-safe
+# accent and does not NFKD-fold to ASCII (e.g. CJK, emoji): a safe placeholder so the
+# document still compiles. ``?`` is ASCII and not a LaTeX special.
+_UNICODE_PLACEHOLDER = "?"
+
+
+def _latex_sanitize(s: str) -> str:
+    """Escape LaTeX specials AND fold unicode to pdflatex-safe LaTeX (the safety net).
+
+    Two-phase, order-critical:
+
+    1. :func:`_latex_escape` first -- neutralizes the ASCII specials
+       ``& % $ # _ { } ~ ^ \\`` while ``s`` is still raw (no LaTeX commands of ours
+       present yet, so nothing we emit later gets double-escaped).
+    2. Then, per remaining character: a curated scientific symbol maps to its LaTeX
+       form via :data:`_UNICODE_MAP` (e.g. ``≥`` -> ``$\\geq$``, ``₂`` -> ``$_2$``,
+       ``α`` -> ``$\\alpha$``); an inputenc-safe accent (U+00C0..U+017E, e.g. ``ö``)
+       passes through unchanged; any other non-ASCII codepoint -- including Latin
+       Extended-B (U+0180+, e.g. Romanian ``Ș``/``Ț``) which inputenc does NOT define
+       -- is NFKD-normalized with combining marks stripped, and if STILL non-ASCII
+       (CJK, emoji) is replaced with :data:`_UNICODE_PLACEHOLDER`. ASCII passes
+       through (it survived phase 1 as-is).
+
+    Result: every codepoint is ASCII or an inputenc-safe accent, so the emitted .tex
+    compiles under Overleaf's default pdflatex. This is a fallback -- author LaTeX-safe
+    (the module docstring's convention); do not rely on the net for correctness.
+
+    Replaces :func:`_latex_escape` at EVERY interpolation point in the LaTeX renderer.
+    Like ``_latex_escape`` it is NOT idempotent -- call exactly once per string.
+    """
+    escaped = _latex_escape(s)
+    out: list[str] = []
+    for ch in escaped:
+        cp = ord(ch)
+        if cp < 0x80:
+            out.append(ch)
+            continue
+        mapped = _UNICODE_MAP.get(ch)
+        if mapped is not None:
+            out.append(mapped)
+            continue
+        if _ACCENT_LO <= cp <= _ACCENT_HI:
+            # Common European accent: inputenc renders it under pdflatex. Keep it.
+            out.append(ch)
+            continue
+        # Fold via NFKD (drops combining marks); keep ASCII fallout (e.g. an
+        # astral-plane math letter folds to its base Latin letter), placehold the rest.
+        folded = unicodedata.normalize("NFKD", ch)
+        for f in folded:
+            if ord(f) < 0x80:
+                out.append(f)
+            elif unicodedata.combining(f):
+                continue  # drop combining marks
+            else:
+                out.append(_UNICODE_PLACEHOLDER)
+    return "".join(out)
 
 
 def _confidence_str(claim: Claim) -> str:
@@ -316,10 +459,10 @@ def _latex_evidence_validity_label(
     referent and data_source(s) are escaped (they originate in the Spec/Evidence).
     """
     referent, sources_str, qualifier = _evidence_validity_fields(hyp, claim, evidence)
-    suffix = f" --- {_latex_escape(qualifier)}" if qualifier else ""
+    suffix = f" --- {_latex_sanitize(qualifier)}" if qualifier else ""
     return (
-        f"\\textit{{Evidence validity:}} referent={_latex_escape(referent)}; "
-        f"data\\_source(s)={_latex_escape(sources_str)}{suffix}"
+        f"\\textit{{Evidence validity:}} referent={_latex_sanitize(referent)}; "
+        f"data\\_source(s)={_latex_sanitize(sources_str)}{suffix}"
     )
 
 
@@ -377,7 +520,7 @@ def render_paper_latex(
     lines.append(r"\usepackage[utf8]{inputenc}")
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
-    lines.append(f"\\title{{{_latex_escape(title)}}}")
+    lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     lines.append(r"\author{sci-adk (deterministic render)}")
     lines.append(r"\date{\today}")
     lines.append("")
@@ -386,7 +529,7 @@ def render_paper_latex(
     lines.append("")
     lines.append(
         f"\\noindent\\textit{{Draft compiled by sci-adk from Spec "
-        f"\\texttt{{{_latex_escape(spec.id)}}} (v{spec.version}). "
+        f"\\texttt{{{_latex_sanitize(spec.id)}}} (v{spec.version}). "
         f"Belief state is revisable as Evidence accrues.}}"
     )
     lines.append("")
@@ -394,30 +537,30 @@ def render_paper_latex(
     # Abstract (after \maketitle), when supplied.
     if prose is not None and prose.abstract:
         lines.append(r"\begin{abstract}")
-        lines.append(_latex_escape(prose.abstract.strip()))
+        lines.append(_latex_sanitize(prose.abstract.strip()))
         lines.append(r"\end{abstract}")
         lines.append("")
 
     # Introduction, when supplied.
     if prose is not None and prose.introduction:
         lines.append(r"\section{Introduction}")
-        lines.append(_latex_escape(prose.introduction.strip()))
+        lines.append(_latex_sanitize(prose.introduction.strip()))
         lines.append("")
 
     lines.append(r"\section{Goal}")
-    lines.append(_latex_escape(rp.goal.strip()) or r"\emph{(none)}")
+    lines.append(_latex_sanitize(rp.goal.strip()) or r"\emph{(none)}")
     lines.append("")
     lines.append(r"\section{Background}")
-    lines.append(_latex_escape(rp.background.strip()) or r"\emph{(none)}")
+    lines.append(_latex_sanitize(rp.background.strip()) or r"\emph{(none)}")
     lines.append("")
     lines.append(r"\section{Method}")
-    lines.append(_latex_escape(rp.method.strip()) or r"\emph{(none)}")
+    lines.append(_latex_sanitize(rp.method.strip()) or r"\emph{(none)}")
     if spec.method and spec.method.approaches:
         lines.append("")
         lines.append("Planned approaches:")
         lines.append(r"\begin{itemize}")
         for a in spec.method.approaches:
-            lines.append(f"  \\item {_latex_escape(a)}")
+            lines.append(f"  \\item {_latex_sanitize(a)}")
         lines.append(r"\end{itemize}")
     lines.append("")
 
@@ -430,22 +573,22 @@ def render_paper_latex(
         rule = h.decision_rule
         rule_kind = rule.kind.value if hasattr(rule.kind, "value") else str(rule.kind)
         mode = h.mode.value if hasattr(h.mode, "value") else str(h.mode)
-        lines.append(f"\\subsection{{{_latex_escape(h.statement)}}}")
+        lines.append(f"\\subsection{{{_latex_sanitize(h.statement)}}}")
         lines.append(r"\begin{itemize}")
         lines.append(
-            f"  \\item Hypothesis id: \\texttt{{{_latex_escape(h.id)}}} "
-            f"({_latex_escape(mode)})"
+            f"  \\item Hypothesis id: \\texttt{{{_latex_sanitize(h.id)}}} "
+            f"({_latex_sanitize(mode)})"
         )
         lines.append(
-            f"  \\item Decision rule ({_latex_escape(rule_kind)}): "
-            f"{_latex_escape(rule.expression)}"
+            f"  \\item Decision rule ({_latex_sanitize(rule_kind)}): "
+            f"{_latex_sanitize(rule.expression)}"
         )
         if claim is not None:
             lines.append(
-                f"  \\item \\textbf{{Status: {_latex_escape(_status_str(claim))}}} "
-                f"--- confidence {_latex_escape(_confidence_str(claim))}"
+                f"  \\item \\textbf{{Status: {_latex_sanitize(_status_str(claim))}}} "
+                f"--- confidence {_latex_sanitize(_confidence_str(claim))}"
             )
-            lines.append(f"  \\item Basis: {_latex_escape(claim.confidence.basis)}")
+            lines.append(f"  \\item Basis: {_latex_sanitize(claim.confidence.basis)}")
         else:
             lines.append(
                 r"  \item \textbf{Status: no claim} "
@@ -469,8 +612,8 @@ def render_paper_latex(
             kind = ev.kind.value if hasattr(ev.kind, "value") else str(ev.kind)
             summary = _result_summary(ev)
             lines.append(
-                f"  \\item \\texttt{{{_latex_escape(ev.id)}}} "
-                f"({_latex_escape(kind)}): {_latex_escape(summary)}"
+                f"  \\item \\texttt{{{_latex_sanitize(ev.id)}}} "
+                f"({_latex_sanitize(kind)}): {_latex_sanitize(summary)}"
             )
         lines.append(r"\end{itemize}")
     lines.append("")
@@ -484,20 +627,20 @@ def render_paper_latex(
         )
         lines.append(r"\begin{itemize}")
         for p in pending:
-            hyp_id = _latex_escape(str(p.get("hypothesis_id")))
-            kind = _latex_escape(str(p.get("kind")))
-            expr = _latex_escape(str(p.get("expression")))
+            hyp_id = _latex_sanitize(str(p.get("hypothesis_id")))
+            kind = _latex_sanitize(str(p.get("kind")))
+            expr = _latex_sanitize(str(p.get("expression")))
             lines.append(f"  \\item \\texttt{{{hyp_id}}} ({kind}): {expr}")
             finding = (p.get("finding") or "").strip()
             if finding:
-                lines.append(f"  \\item finding: {_latex_escape(finding)}")
+                lines.append(f"  \\item finding: {_latex_sanitize(finding)}")
         lines.append(r"\end{itemize}")
         lines.append("")
 
     # Agent-authored discussion, when supplied (before References).
     if prose is not None and prose.discussion:
         lines.append(r"\section{Discussion}")
-        lines.append(_latex_escape(prose.discussion.strip()))
+        lines.append(_latex_sanitize(prose.discussion.strip()))
         lines.append("")
 
     # References: a DOI list (no BibTeX generation). Always emitted.

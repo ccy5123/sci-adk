@@ -7,7 +7,7 @@ Drives a four-pane proposal through the parts that need NO LLM (zero cost):
         -> parse (ProposalParser)            -> Spec        (runs/<id>/spec.json)
         -> [experiment hook]                 -> Evidence    (runs/<id>/evidence/)
         -> ClaimUpdater + DecisionEngine     -> Claims      (runs/<id>/claims/)
-        -> render_paper                      -> draft       (runs/<id>/paper/draft.md)
+        -> render_paper_latex                -> draft       (runs/<id>/paper/draft.tex)
 
 LLM-dependent steps are NOT run autonomously here (design/tool-policy.md: the LLM
 is Claude Code, and a per-call ``claude -p`` subprocess costs tokens). Instead,
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
@@ -49,7 +50,7 @@ from sci_adk.loop.verdict import (
     ContestedCheckpoint,
     PriorWorkCheckpoint,
 )
-from sci_adk.render.paper import render_paper, render_paper_latex
+from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.prose import PaperProse
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
@@ -193,20 +194,19 @@ class ResearchCompiler:
         # data in, string out; the compiler is the composition root that locates them).
         pending_dicts = [c.__dict__ for c in checkpoints]
         cited_dois = self._gather_cited_dois(evidence, run_dir)
-        bib_path = self._locate_bib_path(run_dir)
 
-        paper = render_paper(
-            spec, claims, evidence,
-            pending=pending_dicts,
-            prose=prose,
-            cited_dois=cited_dois,
-        )
-        paper_path = run_dir / "paper" / "draft.md"
-        paper_path.parent.mkdir(parents=True, exist_ok=True)
-        paper_path.write_text(paper, encoding="utf-8")
+        paper_dir = run_dir / "paper"
+        paper_dir.mkdir(parents=True, exist_ok=True)
 
-        # Emit the LaTeX draft alongside the Markdown one (always). Deterministic and
-        # offline -- no LLM, no network (render_paper_latex is pure).
+        # Co-locate references.bib next to draft.tex so the paper/ folder is
+        # self-contained on Overleaf (upload-as-is resolves \bibliography{references}).
+        # The compiler does the copy (the renderer stays pure); it then passes the
+        # CO-LOCATED path, whose stem is "references", to the renderer.
+        bib_path = self._colocate_bib(run_dir, paper_dir)
+
+        # The .tex is THE paper artifact (Overleaf default pdflatex). Deterministic and
+        # offline -- no LLM, no network (render_paper_latex is pure). The Markdown
+        # render_paper remains a library function but is no longer auto-emitted.
         paper_tex = render_paper_latex(
             spec, claims, evidence,
             pending=pending_dicts,
@@ -214,7 +214,8 @@ class ResearchCompiler:
             cited_dois=cited_dois,
             bib_path=bib_path,
         )
-        (run_dir / "paper" / "draft.tex").write_text(paper_tex, encoding="utf-8")
+        paper_path = paper_dir / "draft.tex"
+        paper_path.write_text(paper_tex, encoding="utf-8")
 
         if checkpoints:
             self._save_checkpoints(checkpoints, run_dir)
@@ -292,6 +293,25 @@ class ResearchCompiler:
         """
         bib = run_dir / "artifacts" / "literature" / "references.bib"
         return str(bib) if bib.exists() else None
+
+    @classmethod
+    def _colocate_bib(cls, run_dir: Path, paper_dir: Path) -> Optional[str]:
+        """Copy the run's ``references.bib`` next to ``draft.tex`` and return its path.
+
+        Overleaf self-containment: when ``_locate_bib_path`` finds the run's
+        ``artifacts/literature/references.bib``, copy it verbatim to
+        ``paper/references.bib`` so uploading the ``paper/`` folder as-is resolves
+        ``\\bibliography{references}``. The returned path's stem is ``references``, so
+        the (pure) renderer emits exactly that ``\\bibliography`` key. ``None`` when no
+        source ``.bib`` exists -> the renderer emits no ``\\bibliography``. No BibTeX is
+        generated -- this is a faithful copy of an existing file.
+        """
+        src = cls._locate_bib_path(run_dir)
+        if src is None:
+            return None
+        dest = paper_dir / "references.bib"
+        shutil.copyfile(src, dest)
+        return str(dest)
 
     def _collect_contested_checkpoints(
         self, spec: Spec, claims: Sequence[Claim]

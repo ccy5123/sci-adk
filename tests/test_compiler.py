@@ -71,22 +71,24 @@ def test_compile_with_experiment_produces_claims_and_checkpoints(tmp_path):
     assert all(c.kind == "qualitative" for c in result.checkpoints)
     assert any("finding for" in c.finding for c in result.checkpoints)
 
-    # Artifacts written under runs/<spec.id>/.
+    # Artifacts written under runs/<spec.id>/. The .tex is THE paper artifact;
+    # draft.md is no longer emitted (render_paper stays a library fn).
     run_dir = tmp_path / "runs" / "t-compile"
     assert (run_dir / "spec.json").exists()
-    assert result.paper_path == run_dir / "paper" / "draft.md"
+    assert result.paper_path == run_dir / "paper" / "draft.tex"
     assert result.paper_path.exists()
+    assert not (run_dir / "paper" / "draft.md").exists()
     assert (run_dir / "checkpoints.md").exists()
 
     # spec.json is the compiled Spec.
     on_disk = json.loads((run_dir / "spec.json").read_text(encoding="utf-8"))
     assert on_disk["id"] == "t-compile"
 
-    # The paper draft carries the key sections.
+    # The paper draft (LaTeX) carries the key sections.
     paper = result.paper_path.read_text(encoding="utf-8")
-    assert "## Hypotheses and findings" in paper
-    assert "## Evidence" in paper
-    assert "## Pending agent judgments" in paper
+    assert r"\section{Hypotheses and findings}" in paper
+    assert r"\section{Evidence}" in paper
+    assert r"\section{Pending agent judgments}" in paper
 
 
 def test_compile_without_experiment_still_emits_spec_and_draft(tmp_path):
@@ -99,16 +101,17 @@ def test_compile_without_experiment_still_emits_spec_and_draft(tmp_path):
     assert result.needs_agent is True
     run_dir = tmp_path / "runs" / "t-noexp"
     assert (run_dir / "spec.json").exists()
-    assert (run_dir / "paper" / "draft.md").exists()
-    paper = (run_dir / "paper" / "draft.md").read_text(encoding="utf-8")
-    assert "## Goal" in paper and "## Hypotheses and findings" in paper
+    assert (run_dir / "paper" / "draft.tex").exists()
+    assert not (run_dir / "paper" / "draft.md").exists()
+    paper = (run_dir / "paper" / "draft.tex").read_text(encoding="utf-8")
+    assert r"\section{Goal}" in paper and r"\section{Hypotheses and findings}" in paper
 
 
 def test_paper_draft_renders_status_when_claims_exist(tmp_path):
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-status", experiment=_fake_experiment)
     paper = result.paper_path.read_text(encoding="utf-8")
-    # qualitative + no judge -> PROPOSED (inconclusive), shown in the draft.
+    # qualitative + no judge -> PROPOSED (inconclusive), shown in the LaTeX draft.
     assert "Status: proposed" in paper
 
 
