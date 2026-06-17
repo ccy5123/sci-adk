@@ -27,7 +27,11 @@ from sci_adk.core.claim import (
 )
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind, BearingDirection
 from sci_adk.core.spec import Spec
-from sci_adk.core.validity import check_digitized_adequacy, check_evidence_adequacy
+from sci_adk.core.validity import (
+    check_digitized_adequacy,
+    check_evidence_adequacy,
+    check_novelty_adequacy,
+)
 
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.judge import Judge
@@ -169,6 +173,16 @@ class ClaimUpdater:
         """
         claims = []
 
+        # Novelty decisions (the High discovery trigger) are gathered ONCE: they carry
+        # ``bears_on=[]`` (a recorded decision, not a belief), so they never appear in
+        # ``relevant_evidence`` below and never enter the engine -- but the novelty gate
+        # needs them to decide whether a SUPPORTED novelty claim has a recorded prior-art
+        # search. They are hypothesis-bound via their ``literature_decision`` payload.
+        novelty_decisions = [
+            ev for ev in evidence_items
+            if ev.kind == EvidenceKind.NOVELTY_DECISION
+        ]
+
         # Process each hypothesis
         for hypothesis in self.spec.hypotheses:
             # Find evidence bearing on this hypothesis
@@ -188,7 +202,7 @@ class ClaimUpdater:
                 continue
 
             # Create or update claim
-            claim = self._evaluate_hypothesis(hypothesis, counted)
+            claim = self._evaluate_hypothesis(hypothesis, counted, novelty_decisions)
             claims.append(claim)
             self._save_claim(claim)
 
@@ -198,6 +212,7 @@ class ClaimUpdater:
         self,
         hypothesis,
         evidence_items: List[EvidenceItem],
+        novelty_decisions: Optional[List[EvidenceItem]] = None,
     ) -> Claim:
         """
         Evaluate a hypothesis by DELEGATING belief to the DecisionEngine, then
@@ -247,6 +262,13 @@ class ClaimUpdater:
         # neither is weakened.
         check_digitized_adequacy(hypothesis, evidence_items, verdict.direction)
         check_evidence_adequacy(hypothesis, evidence_items, verdict.direction)
+        # The novelty gate (the High discovery trigger, literature-acquisition.md) COMPOSES
+        # here too: a SUPPORTED novelty hypothesis with no recorded prior-art search halts
+        # before any Claim is written. It consults the NOVELTY_DECISION items (a record,
+        # not a bearing -- so they are NOT in ``evidence_items``), passed in separately.
+        check_novelty_adequacy(
+            hypothesis, novelty_decisions or [], verdict.direction
+        )
 
         raw_directions = {b.direction for _, b in results.pairs}
         status = self._status_for_verdict(verdict, raw_directions)

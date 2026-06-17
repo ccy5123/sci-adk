@@ -8,6 +8,9 @@ sci-adk command-line interface.
     sci-adk verify <run-dir>                           # headless read-only belief audit
     sci-adk prior-work <run-dir> --searched <dois...>  # record a prior-work decision
     sci-adk prior-work <run-dir> --skip --reason "..." #   (searched or skipped)
+    sci-adk novelty <run-dir> --hypothesis <id> --searched <dois...>  # novelty trigger
+    sci-adk novelty <run-dir> --hypothesis <id> --skip --reason "..." #   (searched/skip)
+    sci-adk contested <run-dir> --hypothesis <id> [--searched <dois...> | --note "..."]
 
 Compiles a four-pane proposal into ``runs/<spec.id>/`` (spec.json, evidence/,
 claims/, paper/draft.md). The numeric path runs autonomously at zero LLM cost;
@@ -126,6 +129,65 @@ def build_parser() -> argparse.ArgumentParser:
         help="searched path only: proceed with DEGRADED Open-Access acquisition when "
              "no contact email is set (default: refuse and halt). By default the "
              "searched path requires a contact email (arg/config/$UNPAYWALL_EMAIL)",
+    )
+
+    novelty = sub.add_parser(
+        "novelty",
+        help="record a novelty/priority discovery decision for a hypothesis (the High "
+             "trigger): searched -> LITERATURE + NOVELTY_DECISION, or skipped -> a "
+             "recorded null. A SUPPORTED novelty claim needs a searched decision",
+    )
+    novelty.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    novelty.add_argument(
+        "--hypothesis", required=True, metavar="ID",
+        help="the hypothesis id this novelty decision is bound to",
+    )
+    nov_group = novelty.add_mutually_exclusive_group(required=True)
+    nov_group.add_argument(
+        "--searched", nargs="+", metavar="DOI",
+        help="prior art WAS searched: acquire these DOIs (discovery via web_search is "
+             "upstream) -> a LITERATURE item + a searched NOVELTY_DECISION",
+    )
+    nov_group.add_argument(
+        "--skip", action="store_true",
+        help="prior art was NOT searched: record a skipped NOVELTY_DECISION null "
+             "(requires --reason). NOTE: a skip does NOT satisfy the novelty gate",
+    )
+    novelty.add_argument(
+        "--reason", default=None,
+        help="why the prior-art search was skipped (required with --skip)",
+    )
+    novelty.add_argument(
+        "--allow-no-email", action="store_true",
+        help="searched path only: proceed with DEGRADED OA acquisition when no contact "
+             "email is set (default: refuse and halt)",
+    )
+
+    contested = sub.add_parser(
+        "contested",
+        help="record the post-conflict literature decision for a CONTESTED hypothesis "
+             "(the Medium trigger): a timestamp so papers found after the conflict stay "
+             "visible. Recording only -- never gates or halts",
+    )
+    contested.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    contested.add_argument(
+        "--hypothesis", required=True, metavar="ID",
+        help="the contested hypothesis id this record is bound to",
+    )
+    con_group = contested.add_mutually_exclusive_group(required=False)
+    con_group.add_argument(
+        "--searched", nargs="+", metavar="DOI",
+        help="also acquire these DOIs (the searched-contested path) -> a LITERATURE "
+             "item referenced by the CONTESTED_RECORD",
+    )
+    con_group.add_argument(
+        "--note", default=None,
+        help="a free-text note about the conflict / what was found (pure-record path)",
+    )
+    contested.add_argument(
+        "--allow-no-email", action="store_true",
+        help="searched path only: proceed with DEGRADED OA acquisition when no contact "
+             "email is set (default: refuse and halt)",
     )
     return parser
 
@@ -382,6 +444,101 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_novelty(args: argparse.Namespace) -> int:
+    """Record a novelty/priority discovery decision (the High trigger) into the log.
+
+    Reads the recorded Spec (no LLM); for ``--searched`` it drives the existing acquirer
+    (a LITERATURE item) and records a searched NOVELTY_DECISION, for ``--skip`` it records
+    a skipped NOVELTY_DECISION null with the given reason. A skip does NOT satisfy the
+    novelty gate (it is a recorded null, not a search).
+    """
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+    workspace = run_dir.parent.parent
+
+    from sci_adk.loop.literature_triggers import (
+        record_novelty_searched,
+        record_novelty_skip,
+    )
+
+    if args.skip:
+        if not args.reason or not args.reason.strip():
+            print("error: --skip requires a non-empty --reason (a skipped novelty "
+                  "search is a recorded null; the record must say why)", file=sys.stderr)
+            return 2
+        item = record_novelty_skip(
+            spec, workspace, hypothesis_id=args.hypothesis, reason=args.reason)
+        print(f"recorded novelty decision (skipped) for hypothesis '{args.hypothesis}' "
+              f"-> {item.kind.value} evidence {item.id}")
+        print(f"  reason: {args.reason.strip()}")
+        print("  note: a skipped novelty search does NOT satisfy the novelty gate")
+        return 0
+
+    # searched path: same contact-email policy as prior-work (E4).
+    from sci_adk.config import ConfigHalt
+
+    try:
+        outcome = record_novelty_searched(
+            spec, workspace, hypothesis_id=args.hypothesis, dois=args.searched,
+            allow_no_email=args.allow_no_email)
+    except ConfigHalt as e:
+        print(f"error: {e}", file=sys.stderr)
+        print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
+              file=sys.stderr)
+        return 2
+    ev = outcome.evidence
+    print(f"recorded novelty decision (searched) for hypothesis '{args.hypothesis}' "
+          f"-> {ev.kind.value} evidence {ev.id}")
+    print(f"  acquired: {len(outcome.result.succeeded)} | "
+          f"failed: {len(outcome.result.failed)}")
+    if outcome.should_halt:
+        print("  halt (human input needed):", file=sys.stderr)
+        print(outcome.halt.feedback(), file=sys.stderr)
+    return 0
+
+
+def _cmd_contested(args: argparse.Namespace) -> int:
+    """Record the post-conflict literature decision for a CONTESTED hypothesis.
+
+    Recording only -- never gates or halts. ``--searched`` also acquires DOIs (same
+    email policy as the other searched paths); ``--note`` is the pure-record path.
+    """
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+    workspace = run_dir.parent.parent
+
+    from sci_adk.loop.literature_triggers import record_contested
+
+    # The searched path uses the polite pool, so it honors the contact-email policy.
+    from sci_adk.config import ConfigHalt
+
+    try:
+        item = record_contested(
+            spec, workspace, hypothesis_id=args.hypothesis,
+            reason_or_note=args.note or "", dois=args.searched,
+            allow_no_email=args.allow_no_email)
+    except ConfigHalt as e:
+        print(f"error: {e}", file=sys.stderr)
+        print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
+              file=sys.stderr)
+        return 2
+    print(f"recorded contested decision for hypothesis '{args.hypothesis}' "
+          f"-> {item.kind.value} evidence {item.id}")
+    if args.searched:
+        print(f"  acquired DOIs: {len(args.searched)}")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
@@ -392,6 +549,10 @@ def main(argv=None) -> int:
         return _cmd_verify(args)
     if args.command == "prior-work":
         return _cmd_prior_work(args)
+    if args.command == "novelty":
+        return _cmd_novelty(args)
+    if args.command == "contested":
+        return _cmd_contested(args)
     return 1
 
 

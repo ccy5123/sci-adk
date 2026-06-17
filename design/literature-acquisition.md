@@ -1,9 +1,11 @@
 # sci-adk Literature Acquisition
 
-> Status: v0.2 (2026-06-16). How sci-adk surveys and acquires prior work.
+> Status: v0.3 (2026-06-17). How sci-adk surveys and acquires prior work.
 > Discovery = Claude's web_search (allowed tool); acquisition = paperforge.
-> v0.2 adds the discovery **trigger model** (graded triggers + a recorded
-> search/skip decision + an F7 link); decision adopted, implementation deferred.
+> v0.2 added the discovery **trigger model** (graded triggers + a recorded
+> search/skip decision + an F7 link). v0.3 IMPLEMENTS the novelty (High) and
+> contested (Medium) triggers (the Spec-creation anchor was already implemented);
+> the paper-render (Low) trigger remains deferred.
 
 sci-adk acquires the literature the way a researcher does: when starting, when
 unsure, or when checking whether something has already been done, you *search*
@@ -119,16 +121,18 @@ a decision, not a belief; it asserts no support/refute direction.
 
 ### The triggers are NOT equal weight
 
-| Trigger | Fires | Why it matters | Weight |
-|---------|-------|----------------|--------|
-| **Spec creation** (prior-art) | before any result exists | pre-registration canonical; zero post-hoc risk -- the cleanest, most important check ("has this been done?") | **Primary anchor** |
-| Before a **novelty / priority** claim | when asserting "new / first" | underwrites the *validity* of the claim | High |
-| Claim -> **contested** | after evidence conflicts | here the rigor is **recording, not searching**: a timestamp so literature that arrived *after* the conflict stays visible (anti post-hoc-rationalization -- no hunting for favorable papers once the result is known) | Medium |
-| Before **paper render** | at output | related-work *completeness*, not claim validity -- weakest and latest | Low |
+| Trigger | Fires | Why it matters | Weight | Status |
+|---------|-------|----------------|--------|--------|
+| **Spec creation** (prior-art) | before any result exists | pre-registration canonical; zero post-hoc risk -- the cleanest, most important check ("has this been done?") | **Primary anchor** | implemented |
+| Before a **novelty / priority** claim | when asserting "new / first" | underwrites the *validity* of the claim | High | implemented |
+| Claim -> **contested** | after evidence conflicts | here the rigor is **recording, not searching**: a timestamp so literature that arrived *after* the conflict stays visible (anti post-hoc-rationalization -- no hunting for favorable papers once the result is known) | Medium | implemented |
+| Before **paper render** | at output | related-work *completeness*, not claim validity -- weakest and latest | Low | deferred |
 
-**Minimal, highest-value first bite:** the **Spec-time prior-art check + a skip
-record (with reason)**. The other three triggers are **incremental** -- added
-later, never pegged at the same priority as the Spec anchor.
+**Minimal, highest-value first bite (shipped):** the **Spec-time prior-art check + a
+skip record (with reason)** was the first cut. v0.3 added the next two
+**incremental** triggers -- novelty (High) and contested (Medium) -- never pegged at
+the same priority as the Spec anchor. The paper-render (Low) trigger stays deferred
+(weakest and latest; related-work completeness, not claim validity).
 
 ### When found literature touches a frozen element -> Spec amendment (F7)
 
@@ -148,11 +152,44 @@ discovery); the "Halt gates" above are **reactive** (raised after an acquisition
 attempt -- an OA miss, or SI needed). They are complementary surfaces, not the
 same mechanism.
 
-**Implementation is deferred -- this section is design only.** When built, the
-recording-type checkpoint **reuses the judge rail's `Checkpoint` surface** (the
-typed `checkpoints/*.json` contract from `design/rigor-shell-architecture.md`
-Sec.4, now on master): a recording-only checkpoint is that same surface with no
-verdict trail, so the marginal cost is low.
+**Implementation (v0.3).** The novelty (High) and contested (Medium) triggers are
+now built, on top of the Spec-creation anchor. Each recording-type checkpoint
+**reuses the judge rail's `Checkpoint` surface** (the typed `checkpoints/*.json`
+discriminated union in `loop/verdict.py`): a recording-only checkpoint is that same
+surface with no verdict trail, so the marginal cost is low. Concretely:
+
+- **Novelty (High)** is a hypothesis-bound *hard gate*. `Hypothesis.novelty` is a
+  frozen anti-HARKing flag; `check_novelty_adequacy` (in `core/validity.py`, reusing
+  `ValidityHalt`) refuses a **SUPPORTED** novelty claim that has no recorded *searched*
+  `NOVELTY_DECISION` for it. It is **SUPPORTS-only** (a novelty claim that is refuted
+  or inconclusive never trips it), and a *skipped* novelty decision does **not** satisfy
+  it (skipping the search guts the claim's only evidentiary basis). The two escapes the
+  halt names are (a) `sci-adk novelty <run> --hypothesis <id> --searched <dois>`, or
+  (b) drop the novelty flag through a human-only Spec amendment (F7) -- never a silent
+  edit. `sci-adk verify` re-checks the same faithfulness: a SUPPORTED novelty claim
+  whose searched decision was deleted/tampered is reported DIVERGED.
+- **Contested (Medium)** is a hypothesis-bound *recording* trigger -- **no gate, no
+  halt**. When a Claim is/becomes CONTESTED the run path surfaces an open
+  `ContestedCheckpoint`; `record_contested` writes a `CONTESTED_RECORD` (the
+  anti-post-hoc timestamp is the append-only `created_at`), optionally acquiring DOIs.
+- Both write through a single shared decision-writer (`loop/decision_record.py`) and
+  use separate `EvidenceKind`s (`NOVELTY_DECISION` / `CONTESTED_RECORD`), so the
+  Spec-creation `prior_work_open` closing-kind anchor (which keys only on
+  `PRIOR_WORK_DECISION`) is unchanged.
+- The CLI verbs are `sci-adk novelty <run> --hypothesis <id> (--searched <dois...> |
+  --skip --reason "...")` and `sci-adk contested <run> --hypothesis <id> (--searched
+  <dois...> | --note "...")`. The searched paths honor the same contact-email policy as
+  `prior-work` (`ConfigHalt` by default, `--allow-no-email` to proceed degraded).
+
+The paper-render (Low) trigger remains deferred.
+
+**Novelty claim framing (convention).** Novelty claims are framed in the direction
+they assert. A novel refutation (e.g. "first to show X does NOT cause Y") is set up as
+a **negative hypothesis** ("X does not cause Y") and handled as SUPPORTED, so it passes
+through the SUPPORTS-only novelty gate. **Explicit limitation:** if a novel refutation
+is mis-framed as a REFUTED novelty claim it escapes the gate -- this residual is left
+to the (future) substance-judge backstop, the same process-vs-substance limit as
+elsewhere; no extra code/gate is built for it now.
 
 ## Code map
 
@@ -160,10 +197,18 @@ verdict trail, so the marginal cost is low.
   driver over the `paperforge` CLI; pinned SHA; provenance capture).
 - `src/sci_adk/loop/literature_acquirer.py` -- `LiteratureAcquirer` /
   `acquire_literature` (the loop stage: DOIs -> PDFs + `LITERATURE` Evidence).
+- `src/sci_adk/loop/prior_work.py` -- the Spec-creation prior-art trigger
+  (`prior_work_open` / `record_prior_work_searched` / `record_prior_work_skip`).
+- `src/sci_adk/loop/literature_triggers.py` -- the novelty (High) + contested (Medium)
+  triggers (`record_novelty_searched` / `record_novelty_skip` / `record_contested` /
+  `contested_open` / `contested_checkpoint`).
+- `src/sci_adk/loop/decision_record.py` -- the single shared decision-writer reused by
+  all three triggers (`write_decision_evidence`).
+- `src/sci_adk/core/validity.py` -- `check_novelty_adequacy` (the novelty hard gate).
 - `design/tool-policy.md` -- paperforge tool record + web_search discovery pairing.
 
 ---
 
-Version: 0.2.0
-Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only -- implementation deferred)
-Last Updated: 2026-06-16
+Version: 0.3.0
+Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17, render trigger still deferred)
+Last Updated: 2026-06-17

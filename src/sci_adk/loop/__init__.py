@@ -27,6 +27,7 @@ from sci_adk.loop.compiler import (
 from sci_adk.loop.verdict import (
     CheckpointModel,
     ChiefVerdict,
+    ContestedCheckpoint,
     PanelVerdict,
     VerdictProvenance,
     VerdictTrail,
@@ -40,6 +41,13 @@ from sci_adk.loop.literature_acquirer import (
     HaltReason,
     LiteratureAcquirer,
     acquire_literature,
+)
+from sci_adk.loop.literature_triggers import (
+    contested_checkpoint,
+    contested_open,
+    record_contested,
+    record_novelty_searched,
+    record_novelty_skip,
 )
 
 __all__ = [
@@ -63,10 +71,16 @@ __all__ = [
     "Checkpoint",
     "CheckpointModel",
     "ChiefVerdict",
+    "ContestedCheckpoint",
     "PanelVerdict",
     "VerdictProvenance",
     "VerdictTrail",
     "RecordedJudge",
     "LoopResult",
     "run_checkpoint_loop",
+    "record_novelty_searched",
+    "record_novelty_skip",
+    "record_contested",
+    "contested_checkpoint",
+    "contested_open",
 ]

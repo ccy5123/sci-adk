@@ -46,6 +46,17 @@ class EvidenceKind(str, Enum):
             LITERATURE item, not this. Kept distinct so the decision is never
             confused with an acquisition in the single append-only log
             (design/literature-acquisition.md, Invariant E2).
+        novelty_decision: A recorded novelty/priority discovery decision (the High
+            trigger, design/literature-acquisition.md). Carries a ``LiteratureDecision``
+            payload (searched -> references the LITERATURE artifact; skipped -> a
+            recorded null with a reason). SEPARATE from ``PRIOR_WORK_DECISION`` -- whose
+            closing-kind set is a load-bearing anchor that must stay unchanged -- so a
+            novelty decision never spuriously satisfies the Spec-time prior-art check.
+        contested_record: A recorded post-conflict literature decision (the Medium
+            trigger, design/literature-acquisition.md). Made explicit AFTER a claim
+            becomes CONTESTED so literature that arrived after the conflict stays visible
+            (anti post-hoc-rationalization; the append-only ``created_at`` is the
+            timestamp). Carries a ``LiteratureDecision`` payload; never gates/halts.
     """
 
     EXPERIMENT_RUN = "experiment_run"
@@ -54,6 +65,8 @@ class EvidenceKind(str, Enum):
     COUNTEREXAMPLE = "counterexample"
     OBSERVATION = "observation"
     PRIOR_WORK_DECISION = "prior_work_decision"
+    NOVELTY_DECISION = "novelty_decision"
+    CONTESTED_RECORD = "contested_record"
     DIGITIZED = "digitized"
     # @MX:NOTE: [AUTO] figure-digitization (design/figure-digitization.md §2): a value
     #   recovered from a published FIGURE (last-resort fidelity; author-raw and
@@ -360,6 +373,55 @@ class DigitizedData(BaseModel):
     )
 
 
+class LiteratureDecision(BaseModel):
+    """
+    The typed payload of a discovery-trigger decision EvidenceItem
+    (design/literature-acquisition.md §"Discovery trigger model").
+
+    Mirrors :class:`DigitizedData`'s style (a small frozen sub-model carried on
+    ``EvidenceItem``), present ONLY on the ``NOVELTY_DECISION`` (High trigger) and
+    ``CONTESTED_RECORD`` (Medium trigger) kinds -- the two hypothesis-bound triggers.
+    It records the *decision* the agent made, not a belief: the parent item always
+    carries ``bears_on=[]`` (it asserts no support/refute direction and never enters
+    the DecisionEngine).
+
+    The Spec-creation prior-art trigger does NOT use this payload -- it is Spec-bound
+    (per Spec, not per hypothesis) and its ``PRIOR_WORK_DECISION`` item carries no
+    ``LiteratureDecision``. Keeping the prior-art path untouched preserves its
+    load-bearing closing-kind anchor (see :func:`sci_adk.loop.prior_work.prior_work_open`).
+
+    Attributes:
+        outcome: ``searched`` (a prior-art search was performed -> flows into the
+            existing acquisition + a ``LITERATURE`` item), ``skipped`` (a recorded null
+            with a reason), or ``recorded`` (a post-conflict contested record).
+        hypothesis_id: the hypothesis this decision is bound to (REQUIRED, non-empty --
+            these triggers are hypothesis-bound, unlike the Spec-time prior-art check).
+        reason: why the search was skipped, or a contested note (optional).
+        literature_evidence_id: the id of the ``LITERATURE`` EvidenceItem this decision
+            references, when a search was performed (None for a pure skip).
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
+
+    outcome: Literal["searched", "skipped", "recorded"] = Field(
+        ..., description="searched | skipped | recorded"
+    )
+    hypothesis_id: str = Field(
+        ..., min_length=1,
+        description="Hypothesis this decision is bound to (REQUIRED, non-empty)",
+    )
+    reason: Optional[str] = Field(
+        default=None, description="Why skipped, or a contested note (optional)"
+    )
+    literature_evidence_id: Optional[str] = Field(
+        default=None,
+        description="Referenced LITERATURE EvidenceItem id when a search was performed",
+    )
+
+
 class EvidenceItem(BaseModel):
     """
     A single evidence item in the append-only evidence log.
@@ -406,6 +468,13 @@ class EvidenceItem(BaseModel):
         description="Digitized-specific payload, present ONLY when kind==DIGITIZED "
         "(design/figure-digitization.md §4). None for every other kind (asymmetric "
         "adoption -- measured/reported carry no digitized obligations).",
+    )
+    literature_decision: Optional[LiteratureDecision] = Field(
+        default=None,
+        description="Discovery-trigger decision payload, present ONLY when "
+        "kind in {NOVELTY_DECISION, CONTESTED_RECORD} "
+        "(design/literature-acquisition.md §\"Discovery trigger model\"). None for every "
+        "other kind. The parent item is a recorded decision, not a belief (bears_on=[]).",
     )
 
     # @MX:ANCHOR: Evidence is append-only audit trail
@@ -455,6 +524,7 @@ class EvidenceItem(BaseModel):
             bears_on=bears_on or self.bears_on,
             supersedes=self.id,
             digitized=self.digitized,
+            literature_decision=self.literature_decision,
         )
 
     def supports_target(self, target_id: Id) -> bool:
@@ -498,5 +568,6 @@ __all__ = [
     "Bearing",
     "DigitizedVerification",
     "DigitizedData",
+    "LiteratureDecision",
     "EvidenceItem",
 ]

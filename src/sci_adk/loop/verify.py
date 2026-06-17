@@ -49,9 +49,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
-from sci_adk.core.evidence import BearingDirection, EvidenceItem
+from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Hypothesis, Spec
-from sci_adk.core.validity import ValidityHalt, check_digitized_adequacy
+from sci_adk.core.validity import (
+    ValidityHalt,
+    check_digitized_adequacy,
+    check_novelty_adequacy,
+)
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.recorded_judge import RecordedJudge
@@ -142,6 +146,13 @@ def verify_run(run_dir: Path) -> VerifyReport:
 
     hyp_by_id: Dict[str, Hypothesis] = {h.id: h for h in spec.hypotheses}
 
+    # Novelty decisions (bears_on=[]) never enter the engine, but the novelty
+    # faithfulness re-check needs them: a SUPPORTED novelty claim is reproducible only
+    # if the record shows the prior-art search was done. Gather once.
+    novelty_decisions = [
+        ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
+    ]
+
     outcomes: List[VerifyOutcome] = []
     for hyp_id, claim in sorted(recorded_claims.items()):
         hypothesis = hyp_by_id.get(hyp_id)
@@ -162,7 +173,9 @@ def verify_run(run_dir: Path) -> VerifyReport:
                 )
             )
             continue
-        outcomes.append(_audit_hypothesis(engine, hypothesis, evidence, claim))
+        outcomes.append(
+            _audit_hypothesis(engine, hypothesis, evidence, claim, novelty_decisions)
+        )
 
     all_reproduced = bool(outcomes) and all(o.result == REPRODUCED for o in outcomes)
     return VerifyReport(
@@ -180,6 +193,7 @@ def _audit_hypothesis(
     hypothesis: Hypothesis,
     evidence: List[EvidenceItem],
     recorded_claim: Claim,
+    novelty_decisions: List[EvidenceItem],
 ) -> VerifyOutcome:
     """Re-derive one hypothesis's belief and compare it to its recorded Claim.
 
@@ -194,6 +208,11 @@ def _audit_hypothesis(
     whose only support is a proposed / unverified / self-certified digitized item
     therefore does NOT reproduce -- the audit reports it (UNRESOLVED when there is
     nothing left to count, DIVERGED when a counted digitized fails the verifier check).
+
+    The same faithfulness logic covers the novelty gate (the High discovery trigger): a
+    recorded SUPPORTED novelty claim is reproducible only if the record still holds a
+    *searched* ``NOVELTY_DECISION`` for it; if that decision was deleted/tampered, the
+    recorded belief no longer follows from the record -> DIVERGED.
     """
     relevant = [
         ev for ev in evidence
@@ -230,6 +249,27 @@ def _audit_hypothesis(
             rederived_basis=(
                 "recorded claim relies on a digitized item that fails the "
                 f"independent-verification gate (not reproducible from record): {halt.reason}"
+            ),
+        )
+
+    # Re-apply the novelty gate over the RECORDED novelty decisions (the High discovery
+    # trigger). If the recorded run holds a SUPPORTED novelty claim but no *searched*
+    # NOVELTY_DECISION for it (e.g. the decision was deleted/tampered), the updater would
+    # have HALTED -- so the recorded belief does not follow from a properly-recorded run:
+    # report DIVERGED. Read-only (consulted, not enforced as a stop).
+    try:
+        check_novelty_adequacy(
+            hypothesis, novelty_decisions, verdict.direction
+        )
+    except ValidityHalt as halt:
+        return VerifyOutcome(
+            hypothesis_id=hypothesis.id,
+            recorded_status=recorded_claim.status,
+            rederived_status=None,
+            result=DIVERGED,
+            rederived_basis=(
+                "recorded SUPPORTED novelty claim has no recorded prior-art search "
+                f"(not reproducible from record): {halt.reason}"
             ),
         )
 

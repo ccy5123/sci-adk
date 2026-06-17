@@ -117,7 +117,45 @@ def resolve_contact_email(
     )
 
 
+def require_contact_email(
+    explicit: Optional[str] = None,
+    *,
+    allow_no_email: bool = False,
+    config_root: Optional[Path] = None,
+) -> Optional[str]:
+    """Resolve the contact email under the searched-path "require-or-degrade" policy.
+
+    The single home for the policy every Open-Access *searched* trigger shares
+    (prior-work, novelty, contested): by DEFAULT an email is REQUIRED -- a missing one
+    raises ``ConfigHalt`` BEFORE any acquisition (E4, refusing the silently degraded OA
+    run the rice case rode past). ``allow_no_email=True`` is the explicit escape hatch to
+    proceed degraded (returns whatever resolves, possibly ``None``, never halts).
+
+    Resolving here (not only in the acquirer/adapter) keeps the requirement firm even
+    when a fake adapter is injected for tests.
+
+    Args:
+        explicit: an email passed in directly (highest priority).
+        allow_no_email: when True, never halt -- return the best-effort email or None.
+        config_root: override the config root (tests).
+
+    Returns:
+        The resolved contact email (or ``None`` only in the ``allow_no_email`` path when
+        none resolves).
+
+    Raises:
+        ConfigHalt: when ``allow_no_email`` is False and no contact email resolves.
+    """
+    if allow_no_email:
+        try:
+            return resolve_contact_email(explicit, config_root=config_root)
+        except ConfigHalt:  # proceed degraded as requested.
+            return None
+    return resolve_contact_email(explicit, config_root=config_root)
+
+
 __all__ = [
     "ConfigHalt",
     "resolve_contact_email",
+    "require_contact_email",
 ]

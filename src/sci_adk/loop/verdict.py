@@ -130,6 +130,43 @@ class PriorWorkCheckpoint(BaseModel):
     prompt: str = Field(..., min_length=1, description="Reminder text for the agent")
 
 
+class ContestedCheckpoint(BaseModel):
+    """Typed contract behind a ``checkpoints/<hyp-id>.contested.json`` -- the contested arm.
+
+    A *recording-type* reminder emitted when a hypothesis's Claim is/becomes CONTESTED
+    (design/literature-acquisition.md §"Discovery trigger model", the Medium trigger).
+    Unlike :class:`PriorWorkCheckpoint` (Spec-bound), it is HYPOTHESIS-bound: the rigor
+    here is *recording, not searching* -- a timestamp so literature that arrived after the
+    conflict stays visible (anti post-hoc-rationalization). It carries NO verdict trail
+    and never gates/halts; it stays "open" until a ``CONTESTED_RECORD`` decision for the
+    hypothesis is recorded in the single Evidence log.
+
+    ``model_config.extra = "forbid"`` keeps the union type-safe: a payload that carries
+    judge-only keys (``kind`` / ``expression``) is rejected here, not silently coerced.
+
+    Attributes:
+        checkpoint_type: the union tag (always ``"contested"`` here).
+        hypothesis_id: the hypothesis whose Claim is contested.
+        spec_id: the Spec this hypothesis belongs to.
+        spec_version: the Spec version this was raised against (replay).
+        prompt: the human/agent-facing reminder text.
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+        "extra": "forbid",
+    }
+
+    checkpoint_type: Literal["contested"] = Field(
+        default="contested", description="Discriminator for the Checkpoint union"
+    )
+    hypothesis_id: str = Field(..., min_length=1, description="Contested hypothesis id")
+    spec_id: str = Field(..., min_length=1, description="Spec id this hypothesis belongs to")
+    spec_version: int = Field(..., ge=1, description="Spec version this was raised against")
+    prompt: str = Field(..., min_length=1, description="Reminder text for the agent")
+
+
 def _checkpoint_tag(value: Any) -> str:
     """Discriminator callable for the :data:`Checkpoint` union.
 
@@ -146,14 +183,16 @@ def _checkpoint_tag(value: Any) -> str:
 
 
 # The on-disk Checkpoint contract is a discriminated union tagged by
-# ``checkpoint_type``: judge checkpoints (per hypothesis) vs the single prior_work
-# checkpoint (per Spec). Use ``pydantic.TypeAdapter(Checkpoint)`` to load either --
-# including legacy judge files that predate the ``checkpoint_type`` key (a missing
-# tag defaults to ``"judge"`` via :func:`_checkpoint_tag`).
+# ``checkpoint_type``: judge checkpoints (per hypothesis), the single prior_work
+# checkpoint (per Spec), and contested checkpoints (per hypothesis). Use
+# ``pydantic.TypeAdapter(Checkpoint)`` to load any -- including legacy judge files that
+# predate the ``checkpoint_type`` key (a missing tag defaults to ``"judge"`` via
+# :func:`_checkpoint_tag`).
 Checkpoint = Annotated[
     Union[
         Annotated[JudgeCheckpoint, Tag("judge")],
         Annotated[PriorWorkCheckpoint, Tag("prior_work")],
+        Annotated[ContestedCheckpoint, Tag("contested")],
     ],
     Discriminator(_checkpoint_tag),
 ]
@@ -256,6 +295,7 @@ __all__ = [
     "CheckpointModel",
     "JudgeCheckpoint",
     "PriorWorkCheckpoint",
+    "ContestedCheckpoint",
     "Checkpoint",
     "PanelVerdict",
     "ChiefVerdict",

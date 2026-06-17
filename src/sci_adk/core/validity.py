@@ -283,8 +283,81 @@ def check_digitized_adequacy(
         )
 
 
+def check_novelty_adequacy(
+    hypothesis: Hypothesis,
+    novelty_decisions: Sequence[EvidenceItem],
+    verdict_direction: BearingDirection,
+) -> None:
+    """Enforce the novelty hard gate for one hypothesis (the High discovery trigger).
+
+    A novelty/priority claim asserts "first/new" -- a universal-negative over the
+    literature (design/literature-acquisition.md §"Discovery trigger model"). Its
+    validity rests on a prior-art search having been performed. So a SUPPORTED novelty
+    claim with no recorded *searched* novelty decision is refused.
+
+    Fires ``ValidityHalt`` iff ALL of:
+      - ``hypothesis.novelty is True``;
+      - ``verdict_direction == SUPPORTS`` (SUPPORTS-only -- narrower than the other
+        adequacy gates: REFUTES / NEUTRAL / INCONCLUSIVE never trip it);
+      - there is NO novelty decision for this hypothesis with ``outcome == "searched"``.
+
+    A novelty ``outcome == "skipped"`` decision does NOT satisfy the gate -- skipping the
+    search guts the claim's only evidentiary basis.
+
+    Unlike the other gates, this takes the novelty DECISION items (kind ==
+    ``NOVELTY_DECISION`` whose ``literature_decision.hypothesis_id == hypothesis.id``),
+    NOT bearing evidence -- the decisions carry ``bears_on=[]`` and never enter the
+    DecisionEngine, so the caller must pass them separately. Returns ``None`` (passes)
+    when the gate does not fire.
+
+    Args:
+        hypothesis: the hypothesis under evaluation (its frozen ``novelty`` flag and
+            ``id`` drive the gate).
+        novelty_decisions: the ``NOVELTY_DECISION`` EvidenceItems whose payload binds to
+            this hypothesis (the caller pre-filters by ``literature_decision.hypothesis_id``,
+            or passes the full set -- this function also matches by id defensively).
+        verdict_direction: the engine's verdict direction. Only ``SUPPORTS`` can trip
+            the gate.
+
+    Raises:
+        ValidityHalt: when a SUPPORTED novelty claim lacks a recorded prior-art search.
+    """
+    # @MX:ANCHOR: [AUTO] the novelty hard gate (the High discovery trigger).
+    # @MX:REASON: [AUTO] ClaimUpdater and the verify audit both consult this before a
+    #   novelty Claim is trusted; it is the one place the "SUPPORTED novelty needs a
+    #   recorded prior-art search" rule lives. Weakening it (dropping SUPPORTS-only, or
+    #   letting a 'skipped' decision satisfy it) re-opens an unsearched first/new claim
+    #   -- the exact self-certification the trigger exists to prevent. The HALT MUST keep
+    #   naming both F7 escapes (search+record, or amend away the flag), never a silent edit.
+    if not hypothesis.novelty:
+        return
+    if verdict_direction != BearingDirection.SUPPORTS:
+        return
+    searched = any(
+        ev.kind == EvidenceKind.NOVELTY_DECISION
+        and ev.literature_decision is not None
+        and ev.literature_decision.hypothesis_id == hypothesis.id
+        and ev.literature_decision.outcome == "searched"
+        for ev in novelty_decisions
+    )
+    if searched:
+        return
+    raise ValidityHalt(
+        hypothesis.id,
+        "novelty/priority hypothesis would be supported but no prior-art search is "
+        "recorded for it -- a 'first/new' claim is a universal-negative over the "
+        "literature and cannot be self-certified without searching it. Either: "
+        "(a) perform a prior-art search and record it "
+        f"(`sci-adk novelty <run> --hypothesis {hypothesis.id} --searched <dois>`), or "
+        "(b) drop the novelty flag via a Spec amendment (F7, spec.amend(...), human-only "
+        "-- never a silent edit). A 'skipped' novelty decision does NOT satisfy this "
+        "gate. See design/literature-acquisition.md §\"Discovery trigger model\".",
+    )
+
+
 __all__ = [
     "ValidityHalt",
     "check_evidence_adequacy",
     "check_digitized_adequacy",
+    "check_novelty_adequacy",
 ]

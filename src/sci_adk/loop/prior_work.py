@@ -39,13 +39,12 @@ seam is preserved by construction (see :func:`record_prior_work_searched`).
 from __future__ import annotations
 
 import json
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from sci_adk.core.evidence import EvidenceItem, EvidenceKind, Provenance, Result
+from sci_adk.core.evidence import EvidenceItem, EvidenceKind, Provenance
 from sci_adk.core.spec import Spec
+from sci_adk.loop.decision_record import write_decision_evidence
 from sci_adk.loop.literature_acquirer import AcquisitionOutcome, LiteratureAcquirer
 from sci_adk.loop.verdict import PriorWorkCheckpoint
 from sci_adk.search.paperforge_adapter import PaperforgeAdapter
@@ -199,19 +198,13 @@ def record_prior_work_searched(
         ConfigHalt: when ``allow_no_email`` is False and no contact email resolves.
     """
     # Resolve+require the contact email FIRST, so a missing email halts before any
-    # acquisition is attempted (E4). require=True is the default; allow_no_email flips
-    # it off for the rare "I accept degraded OA" case.
-    from sci_adk.config import resolve_contact_email
+    # acquisition is attempted (E4). The require-or-degrade policy is single-sourced in
+    # config.require_contact_email (shared by every OA searched trigger).
+    from sci_adk.config import require_contact_email
 
-    if allow_no_email:
-        # Degraded path: use whatever resolves (may be None), never halt.
-        try:
-            email = resolve_contact_email(email, config_root=config_root)
-        except Exception:  # ConfigHalt -- proceed degraded as requested.
-            email = None
-    else:
-        # Default path: REQUIRE an email (raises ConfigHalt if none resolves).
-        email = resolve_contact_email(email, config_root=config_root)
+    email = require_contact_email(
+        email, allow_no_email=allow_no_email, config_root=config_root
+    )
 
     acquirer = LiteratureAcquirer(
         spec, workspace_dir, adapter=adapter, email=email
@@ -248,32 +241,22 @@ def _write_prior_work_decision(
 
     Shared by both decision paths. The item is a recorded decision, not a belief --
     ``bears_on`` is empty (it asserts no support/refute direction on any hypothesis).
+    Delegates the id/build/save mechanics to the shared
+    :func:`sci_adk.loop.decision_record.write_decision_evidence` so there is ONE
+    implementation of "write a decision EvidenceItem" across the discovery triggers
+    (the novelty / contested recorders reuse the same writer).
+
+    The Spec-creation prior-art decision is Spec-bound (not hypothesis-bound), so it
+    carries NO ``literature_decision`` payload -- preserving its load-bearing
+    closing-kind anchor (``prior_work_open`` keys solely on ``PRIOR_WORK_DECISION``).
     """
-    workspace = Path(workspace_dir) if workspace_dir else Path.cwd()
-    evidence_dir = workspace / "runs" / spec.id / "evidence"
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-
-    item = EvidenceItem(
-        id=_generate_evidence_id(),
-        spec_id=spec.id,
+    return write_decision_evidence(
+        spec,
+        workspace_dir,
         kind=EvidenceKind.PRIOR_WORK_DECISION,
+        finding=finding,
         provenance=provenance,
-        result=Result(type="qualitative", finding=finding),
-        bears_on=[],  # a recorded decision, not a belief -> no bearing
-    )
-    _save_evidence(item, evidence_dir)
-    return item
-
-
-def _generate_evidence_id() -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    return f"evi-pw-decision-{timestamp}-{uuid.uuid4().hex[:8]}"
-
-
-def _save_evidence(item: EvidenceItem, evidence_dir: Path) -> None:
-    (evidence_dir / f"{item.id}.json").write_text(
-        json.dumps(item.model_dump(mode="json"), indent=2, ensure_ascii=False),
-        encoding="utf-8",
+        id_prefix="evi-pw-decision",
     )
 
 

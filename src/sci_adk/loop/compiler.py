@@ -31,18 +31,23 @@ design/directory-structure.md (loop/), design/decision-engine.md.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
-from sci_adk.core.claim import Claim
+from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.loop.claim_updater import ClaimUpdater
 from sci_adk.loop.judge import Judge
+from sci_adk.loop.literature_triggers import contested_checkpoint, contested_open
 from sci_adk.loop.prior_work import prior_work_checkpoint
-from sci_adk.loop.verdict import CheckpointModel, PriorWorkCheckpoint
+from sci_adk.loop.verdict import (
+    CheckpointModel,
+    ContestedCheckpoint,
+    PriorWorkCheckpoint,
+)
 from sci_adk.render.paper import render_paper
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
@@ -88,6 +93,7 @@ class CompileResult:
     run_dir: Path
     paper_path: Path
     prior_work_checkpoint: Optional[PriorWorkCheckpoint] = None
+    contested_checkpoints: List[ContestedCheckpoint] = field(default_factory=list)
 
     @property
     def needs_agent(self) -> bool:
@@ -168,6 +174,14 @@ class ResearchCompiler:
 
         checkpoints = self._collect_checkpoints(spec, evidence)
 
+        # Contested surfacing (the Medium discovery trigger,
+        # design/literature-acquisition.md): for every hypothesis whose freshly
+        # persisted Claim is CONTESTED and has no CONTESTED_RECORD yet, surface a
+        # recording-type contested checkpoint. This is a reminder, NOT a gate -- nothing
+        # halts. The append-only ``created_at`` already supplies the anti-post-hoc
+        # timestamp; recording it makes the post-conflict literature decision explicit.
+        contested_checkpoints = self._collect_contested_checkpoints(spec, claims)
+
         paper = render_paper(
             spec, claims, evidence,
             pending=[c.__dict__ for c in checkpoints],
@@ -187,9 +201,27 @@ class ResearchCompiler:
             run_dir=run_dir,
             paper_path=paper_path,
             prior_work_checkpoint=pw_checkpoint,
+            contested_checkpoints=contested_checkpoints,
         )
 
     # -- helpers -----------------------------------------------------------
+
+    def _collect_contested_checkpoints(
+        self, spec: Spec, claims: Sequence[Claim]
+    ) -> List[ContestedCheckpoint]:
+        """Surface a contested checkpoint per hypothesis whose Claim is CONTESTED and
+        which still lacks a CONTESTED_RECORD (read-only; ``contested_open`` keys on the
+        record just written, so a re-compile after ``record_contested`` surfaces nothing).
+        """
+        out: List[ContestedCheckpoint] = []
+        for claim in claims:
+            if claim.status != ClaimStatus.CONTESTED:
+                continue
+            if contested_open(spec, claim.answers, self.workspace_dir):
+                out.append(
+                    contested_checkpoint(spec, claim.answers, spec.version)
+                )
+        return out
 
     @staticmethod
     def _collect_checkpoints(

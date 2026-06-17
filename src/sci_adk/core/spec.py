@@ -203,6 +203,15 @@ class Hypothesis(BaseModel):
             generator (design/evidence-validity.md Guard 2). Recorded/surfaced, never
             auto-proven. ``None`` for empirical hypotheses or where no generated
             evidence binds.
+        novelty: whether this hypothesis is a novelty/priority claim -- one that asserts
+            "first/new", i.e. a universal-negative over the literature
+            (design/literature-acquisition.md §"Discovery trigger model", the High
+            trigger). Default ``False`` (most hypotheses are not novelty claims).
+            Frozen with the Spec (anti-HARKing): the flag cannot be flipped after seeing
+            results to dodge or invent the prior-art-search requirement. When ``True``, a
+            SUPPORTED verdict requires a recorded prior-art search (the novelty gate,
+            ``check_novelty_adequacy``); dropping the flag is a human-only Spec amendment
+            (F7), never a silent edit.
     """
 
     model_config = {
@@ -225,6 +234,13 @@ class Hypothesis(BaseModel):
         default=None,
         description="Non-circularity attestation for a formal/generated claim: what "
         "the verifier tests that is not baked into the generator (recorded, not proven).",
+    )
+    novelty: bool = Field(
+        default=False,
+        description="Novelty/priority claim (asserts 'first/new', a universal-negative "
+        "over the literature). Default False; frozen (anti-HARKing). A SUPPORTED novelty "
+        "claim requires a recorded prior-art search (the novelty gate); dropping the flag "
+        "is a human-only Spec amendment (F7).",
     )
 
     # @MX:ANCHOR: Hypothesis uniquely maps evidence to claim via one mode + one rule
