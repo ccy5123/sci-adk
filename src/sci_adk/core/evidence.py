@@ -54,6 +54,12 @@ class EvidenceKind(str, Enum):
     COUNTEREXAMPLE = "counterexample"
     OBSERVATION = "observation"
     PRIOR_WORK_DECISION = "prior_work_decision"
+    DIGITIZED = "digitized"
+    # @MX:NOTE: [AUTO] figure-digitization (design/figure-digitization.md §2): a value
+    #   recovered from a published FIGURE (last-resort fidelity; author-raw and
+    #   in-text/table numbers are preferred). Asymmetric adoption -- this is the ONLY
+    #   kind that is gated through the proposed->verified lifecycle (DigitizedData) and
+    #   may NEVER auto-promote to measured. measured/reported carry no such obligation.
 
 
 class BearingDirection(str, Enum):
@@ -244,6 +250,116 @@ class Bearing(BaseModel):
     # Null results (refutes/inconclusive/neutral) are valid science
 
 
+class DigitizedVerification(BaseModel):
+    """
+    The independent-verification record for a digitized value.
+
+    design/figure-digitization.md §4: a digitized value is not evidence-grade until an
+    INDEPENDENT party re-confirms it. This records WHO certified it and HOW. The
+    ``verifier_id`` is load-bearing for the gate's self-certification ban: a counted
+    digitized item must record a ``verifier_id`` that differs from the extractor (the
+    one who read the value off the plot may not also certify it).
+
+    Attributes:
+        method: how the value was verified -- ``replot`` (recompute the extracted value
+            back to pixel space and overlay on the original), ``human`` (a human
+            re-read), or ``judge`` (an LLM-judge spot-check). v1 produces ``replot``.
+        verifier_id: identity of the independent verifier (MUST differ from the
+            extractor for the item to count -- enforced by the gate, not this model).
+        result: outcome of the check (e.g. ``reproduced`` | ``diverged``).
+        artifact: optional reference to the verification artifact (e.g. the overlay).
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
+
+    method: Literal["replot", "human", "judge"] = Field(
+        ..., description="Verification method: replot | human | judge"
+    )
+    verifier_id: Optional[str] = Field(
+        default=None,
+        description="Independent verifier identity (must differ from the extractor to "
+        "count -- the self-certification ban is enforced by the gate).",
+    )
+    result: Optional[str] = Field(
+        default=None, description="Verification outcome (e.g. reproduced | diverged)"
+    )
+    artifact: Optional[str] = Field(
+        default=None, description="Reference to the verification artifact (e.g. overlay)"
+    )
+
+
+class DigitizedData(BaseModel):
+    """
+    The typed payload of a ``digitized`` EvidenceItem (design/figure-digitization.md §4).
+
+    A value RECONSTRUCTED from a published figure carries obligations the trustworthy
+    kinds (measured/reported) do not: it must never auto-promote to measured, it cannot
+    be counted before independent verification, and it carries reconstruction
+    uncertainty intrinsically. This sub-model holds those digitized-specific fields on
+    ``EvidenceItem``; it is round-trippable (plain Pydantic v2 model).
+
+    Lifecycle (§3): ``proposed`` (extracted, NOT evidence-grade) -> ``verified``.
+
+    ``method="vlm"`` is a RESERVED enum value: v1 implements ``deterministic`` ONLY (the
+    digitizer refuses to PRODUCE a vlm item). The gate is method-agnostic, so a future
+    vlm method can plug in behind the same gate without a schema change.
+
+    Attributes:
+        quantity: what value this is (e.g. "leaf_dry_weight").
+        value: the extracted measurement (the recovered figure number).
+        unit: the measurement unit.
+        source: provenance of ORIGIN -- the figure + DOI / run (e.g. "Fig 2 / 10.x/y").
+        method: ``deterministic`` (v1) | ``vlm`` (reserved, unimplemented).
+        axis_calib: axis-calibration values (the deterministic path's reconstruction
+            basis); a plain JSON-able mapping so it round-trips without importing the
+            digitizer's typed calibration (kernel must not depend on search/).
+        read_uncert: read uncertainty (marker size / resolution / log-axis effects).
+        state: ``proposed`` (default) | ``verified``.
+        verification: the independent-verification record (None until verified).
+        extractor: identity of the agent that extracted the value (REQUIRED, non-empty --
+            fail-closed). The gate requires the verifier to differ from this, so an
+            absent/empty extractor would bypass the self-certification ban.
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
+
+    quantity: str = Field(..., min_length=1, description="What value this is")
+    value: float = Field(..., description="Extracted measurement (recovered figure number)")
+    unit: str = Field(..., description="Measurement unit")
+    source: str = Field(..., min_length=1, description="Origin provenance: Fig X / DOI / run")
+    method: Literal["deterministic", "vlm"] = Field(
+        default="deterministic",
+        description="Extraction method: deterministic (v1) | vlm (reserved, unimplemented)",
+    )
+    axis_calib: Optional[Dict[str, Any]] = Field(
+        default=None, description="Axis-calibration values (deterministic path)"
+    )
+    read_uncert: Optional[float] = Field(
+        default=None, ge=0, description="Read uncertainty (marker/resolution/log effects)"
+    )
+    state: Literal["proposed", "verified"] = Field(
+        default="proposed",
+        description="Lifecycle: proposed (extracted, not evidence-grade) | verified",
+    )
+    verification: Optional[DigitizedVerification] = Field(
+        default=None, description="Independent-verification record (None until verified)"
+    )
+    extractor: str = Field(
+        ...,
+        min_length=1,
+        description="Identity of the extractor (REQUIRED, non-empty -- fail-closed). The "
+        "self-certification ban (verifier_id != extractor) depends on a recorded "
+        "extractor; an absent/empty one would let 'verifier_id != None/\"\"' falsely read "
+        "as independent, so a digitized item cannot exist without it.",
+    )
+
+
 class EvidenceItem(BaseModel):
     """
     A single evidence item in the append-only evidence log.
@@ -284,6 +400,12 @@ class EvidenceItem(BaseModel):
     )
     supersedes: Optional[Id] = Field(
         default=None, description="Supersedes prior evidence id (for corrections)"
+    )
+    digitized: Optional[DigitizedData] = Field(
+        default=None,
+        description="Digitized-specific payload, present ONLY when kind==DIGITIZED "
+        "(design/figure-digitization.md §4). None for every other kind (asymmetric "
+        "adoption -- measured/reported carry no digitized obligations).",
     )
 
     # @MX:ANCHOR: Evidence is append-only audit trail
@@ -332,6 +454,7 @@ class EvidenceItem(BaseModel):
             result=result or self.result,
             bears_on=bears_on or self.bears_on,
             supersedes=self.id,
+            digitized=self.digitized,
         )
 
     def supports_target(self, target_id: Id) -> bool:
@@ -373,5 +496,7 @@ __all__ = [
     "Provenance",
     "Result",
     "Bearing",
+    "DigitizedVerification",
+    "DigitizedData",
     "EvidenceItem",
 ]

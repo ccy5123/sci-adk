@@ -25,9 +25,9 @@ from sci_adk.core.claim import (
     EvidenceLinkRole,
     StatusChange,
 )
-from sci_adk.core.evidence import EvidenceItem, BearingDirection
+from sci_adk.core.evidence import EvidenceItem, EvidenceKind, BearingDirection
 from sci_adk.core.spec import Spec
-from sci_adk.core.validity import check_evidence_adequacy
+from sci_adk.core.validity import check_digitized_adequacy, check_evidence_adequacy
 
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.judge import Judge
@@ -51,6 +51,34 @@ DIRECTION_TO_STATUS: dict[BearingDirection, ClaimStatus] = {
     BearingDirection.NEUTRAL: ClaimStatus.PROPOSED,
     BearingDirection.INCONCLUSIVE: ClaimStatus.PROPOSED,
 }
+
+
+def is_proposed_digitized(ev: EvidenceItem) -> bool:
+    """True iff ``ev`` is a digitized item still in the ``proposed`` state.
+
+    A proposed digitized value is NOT evidence-grade (design/figure-digitization.md §3):
+    it is a candidate, like a pending checkpoint. It is EXCLUDED from DecisionRule
+    evaluation -- it does not count toward "measured" and does NOT halt. Only a
+    ``verified`` digitized item may influence a Claim. This predicate is the single,
+    shared exclusion rule so the persister (``ClaimUpdater``) and the read-only audit
+    (``loop/verify.py``) exclude proposed digitized items identically.
+    """
+    return (
+        ev.kind == EvidenceKind.DIGITIZED
+        and ev.digitized is not None
+        and ev.digitized.state == "proposed"
+    )
+
+
+def counted_evidence(evidence_items: List[EvidenceItem]) -> List[EvidenceItem]:
+    """Drop evidence that is not evidence-grade before it reaches the verdict.
+
+    Currently this excludes ``proposed`` digitized items (figure-digitization §5): they
+    are pending candidates, not counted Evidence. The append-only RECORD still holds
+    them; this is a belief-time filter (record vs belief). Every other kind passes
+    through untouched -- the function is a no-op for runs with no digitized evidence.
+    """
+    return [ev for ev in evidence_items if not is_proposed_digitized(ev)]
 
 
 def status_for_verdict(verdict, raw_directions: set) -> ClaimStatus:
@@ -149,11 +177,18 @@ class ClaimUpdater:
                 if any(b.target_id == hypothesis.id for b in ev.bears_on)
             ]
 
-            if not relevant_evidence:
+            # Exclude non-evidence-grade items (proposed digitized) BEFORE evaluation
+            # (figure-digitization §5): a proposed digitized value is a pending candidate
+            # -- it does not count toward the verdict and does not halt. A hypothesis
+            # whose ONLY bearing evidence is proposed digitized therefore has no counted
+            # evidence and yields no Claim (it simply awaits verification), exactly like
+            # a hypothesis with no relevant evidence at all.
+            counted = counted_evidence(relevant_evidence)
+            if not counted:
                 continue
 
             # Create or update claim
-            claim = self._evaluate_hypothesis(hypothesis, relevant_evidence)
+            claim = self._evaluate_hypothesis(hypothesis, counted)
             claims.append(claim)
             self._save_claim(claim)
 
@@ -196,13 +231,21 @@ class ClaimUpdater:
         # and confidence (D1). The vote-count is gone.
         verdict = self.engine.evaluate(hypothesis.decision_rule, results)
 
-        # Evidence-validity adequacy gate (design/evidence-validity.md E3): refuse to
-        # turn an inadequate record into a Claim. This runs AFTER the engine renders a
-        # verdict (so the gate knows whether it is binding) but BEFORE any Claim is
-        # assembled or persisted, so a halt means NO Claim is written -- an ungrounded
-        # empirical result can never be self-certified. ``evidence_items`` is already
-        # pre-filtered to the bearings on this hypothesis (line 146-149). A halt
-        # propagates out of the updater; the CLI turns it into a friendly non-zero exit.
+        # Adequacy gates (run AFTER the engine renders a verdict -- so the gates know
+        # whether it is binding -- but BEFORE any Claim is assembled or persisted, so a
+        # halt means NO Claim is written; an ungrounded result can never be
+        # self-certified). ``evidence_items`` is the proposed-digitized-EXCLUDED set of
+        # bearings on this hypothesis. A halt propagates out of the updater; the CLI
+        # turns it into a friendly non-zero exit.
+        #
+        # The digitized self-certification gate (figure-digitization §5) runs FIRST so a
+        # COUNTED digitized item that is unverified / self-certified surfaces the precise
+        # digitized reason rather than the generic "no measured-grade item" message (both
+        # would halt -- a self-certified digitized item is also not measured-grade -- but
+        # the specific diagnostic is the useful one). Then the evidence-validity gate
+        # (evidence-validity.md E3) enforces referent-typed adequacy. The two COMPOSE;
+        # neither is weakened.
+        check_digitized_adequacy(hypothesis, evidence_items, verdict.direction)
         check_evidence_adequacy(hypothesis, evidence_items, verdict.direction)
 
         raw_directions = {b.direction for _, b in results.pairs}
@@ -402,6 +445,8 @@ def update_claims(
 __all__ = [
     "DIRECTION_TO_STATUS",
     "status_for_verdict",
+    "is_proposed_digitized",
+    "counted_evidence",
     "ClaimUpdater",
     "update_claims",
 ]

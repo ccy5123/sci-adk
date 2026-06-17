@@ -51,7 +51,8 @@ from typing import Dict, List, Optional
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem
 from sci_adk.core.spec import Hypothesis, Spec
-from sci_adk.loop.claim_updater import status_for_verdict
+from sci_adk.core.validity import ValidityHalt, check_digitized_adequacy
+from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
@@ -186,21 +187,52 @@ def _audit_hypothesis(
     the bearings on this hypothesis, call ``engine.evaluate``, then map the verdict via
     the shared public ``status_for_verdict``) but performs NO load-or-create and NO
     persistence -- it only re-derives and compares.
+
+    To re-derive FAITHFULLY it applies the same belief-time filters the updater does:
+    proposed digitized items are EXCLUDED (figure-digitization §5), and the digitized
+    self-certification gate is re-checked over the COUNTED set. A recorded binding Claim
+    whose only support is a proposed / unverified / self-certified digitized item
+    therefore does NOT reproduce -- the audit reports it (UNRESOLVED when there is
+    nothing left to count, DIVERGED when a counted digitized fails the verifier check).
     """
     relevant = [
         ev for ev in evidence
         if any(b.target_id == hypothesis.id for b in ev.bears_on)
     ]
+    # Exclude non-evidence-grade items (proposed digitized) exactly as the persister
+    # does (shared ``counted_evidence``) -- a faithful re-derivation must not count what
+    # the updater would not have counted.
+    counted = counted_evidence(relevant)
     results = EvidenceForHypothesis(
         pairs=[
             (ev, b)
-            for ev in relevant
+            for ev in counted
             for b in ev.bears_on
             if b.target_id == hypothesis.id
         ]
     )
 
     verdict = engine.evaluate(hypothesis.decision_rule, results)
+
+    # Re-apply the digitized self-certification gate over the counted set. If a counted
+    # digitized item is unverified / self-certified, the recorded Claim could not have
+    # been validly derived (the updater would have HALTED) -- so the record's belief does
+    # NOT follow from a properly-verified record: report DIVERGED. This is read-only (no
+    # raise escapes the audit) -- the gate is consulted, not enforced as a stop.
+    try:
+        check_digitized_adequacy(hypothesis, counted, verdict.direction)
+    except ValidityHalt as halt:
+        return VerifyOutcome(
+            hypothesis_id=hypothesis.id,
+            recorded_status=recorded_claim.status,
+            rederived_status=None,
+            result=DIVERGED,
+            rederived_basis=(
+                "recorded claim relies on a digitized item that fails the "
+                f"independent-verification gate (not reproducible from record): {halt.reason}"
+            ),
+        )
+
     raw_directions = {b.direction for _, b in results.pairs}
     # SINGLE source of truth (Fix 1): the SAME public derivation ClaimUpdater uses to
     # persist -- mapping + CONTESTED override -- so a faithful record re-derives exactly

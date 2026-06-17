@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from sci_adk.core.evidence import BearingDirection, EvidenceItem
+from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Hypothesis
 
 # The data_source value that satisfies an empirical claim. A property of WHAT the
@@ -46,6 +46,57 @@ _SYNTHETIC_PROXY = "synthetic_proxy"
 # "no measured data" halt is scoped to binding verdicts only (belief is gated; the
 # record is not -- design/evidence-validity.md §2 Guard 3).
 _BINDING = frozenset({BearingDirection.SUPPORTS, BearingDirection.REFUTES})
+
+# Digitized lifecycle states (design/figure-digitization.md §3). Only a VERIFIED
+# digitized item is evidence-grade; a PROPOSED one is a candidate (excluded upstream).
+_VERIFIED = "verified"
+
+
+def _is_digitized(ev: EvidenceItem) -> bool:
+    """True iff this EvidenceItem is the gated ``digitized`` kind with its payload."""
+    return ev.kind == EvidenceKind.DIGITIZED and ev.digitized is not None
+
+
+def _is_verified_independent_digitized(ev: EvidenceItem) -> bool:
+    """True iff ``ev`` is a digitized item that is properly evidence-grade:
+    ``state==verified`` AND an independent-verifier record (``verifier_id`` present and
+    != the extractor).
+
+    This is the single predicate that decides whether a digitized item is admissible as
+    a counted, measured-grade item (design/figure-digitization.md §5). A proposed,
+    unverified, or self-certified digitized item is NOT measured-grade.
+    """
+    if not _is_digitized(ev):
+        return False
+    d = ev.digitized
+    if d.state != _VERIFIED:
+        return False
+    # Defense-in-depth (the extractor=None bypass): a digitized item with no recorded
+    # extractor can NEVER count as independently verified -- without it, the
+    # ``verifier_id != extractor`` check below would falsely pass (e.g. 'agent-B' != None
+    # -> True). The schema makes this unreachable for constructed items, but a forged /
+    # tampered / deserialized record must still be refused here. Fail-closed.
+    if not (d.extractor or "").strip():
+        return False
+    verification = d.verification
+    if verification is None or not (verification.verifier_id or "").strip():
+        return False
+    # Self-certification ban for this kind: the extractor may not certify their own read.
+    return verification.verifier_id != d.extractor
+
+
+def _is_measured_grade(ev: EvidenceItem) -> bool:
+    """True iff ``ev`` satisfies the empirical "needs >=1 measured item" requirement.
+
+    Two ways to be measured-grade (design/evidence-validity.md §3 + figure-digitization
+    §5): a real ``data_source=='measured'`` item, OR a VERIFIED digitized item with an
+    independent verifier (figure-recovered value that has passed independent
+    verification). A digitized item NEVER auto-promotes to ``measured`` -- it stays
+    ``kind=digitized`` -- but a verified one COUNTS as measured-grade for this check.
+    """
+    if ev.provenance.data_source == _MEASURED:
+        return True
+    return _is_verified_independent_digitized(ev)
 
 
 class ValidityHalt(Exception):
@@ -114,18 +165,22 @@ def check_evidence_adequacy(
                 "claim is genuinely about a formal/generated object). See "
                 "design/evidence-validity.md Guard 3.",
             )
-        # Guard 3 item 2: a binding empirical verdict needs at least one measured item.
-        # data_source=None counts as "not measured" (fail-closed). The rice failure
-        # (all generated/synthetic, would-be SUPPORTED) stops here.
-        if binding and not any(src == _MEASURED for src in sources):
+        # Guard 3 item 2: a binding empirical verdict needs at least one measured-grade
+        # item. data_source=None counts as "not measured" (fail-closed). The rice failure
+        # (all generated/synthetic, would-be SUPPORTED) stops here. A VERIFIED digitized
+        # item (independent verifier) is measured-GRADE here (figure-digitization §5) --
+        # it never becomes kind=measured, but a verified figure value satisfies the
+        # requirement; a PROPOSED digitized item does NOT (and is excluded upstream).
+        if binding and not any(_is_measured_grade(ev) for ev in bearing_evidence):
             raise ValidityHalt(
                 hypothesis.id,
                 "empirical hypothesis would be "
                 f"{verdict_direction.value} but no bearing Evidence is "
-                "data_source='measured' (all generated/synthetic_proxy/None) -- an "
+                "data_source='measured' (or a verified digitized item) -- an "
                 "empirical claim cannot be affirmed without real measured data "
-                "(acquire measured data, or restrict the hypothesis to a "
-                "method/calibration claim). See design/evidence-validity.md Guard 3.",
+                "(acquire measured data, verify a digitized figure value, or restrict "
+                "the hypothesis to a method/calibration claim). See "
+                "design/evidence-validity.md Guard 3 + design/figure-digitization.md §5.",
             )
         return
 
@@ -148,7 +203,88 @@ def check_evidence_adequacy(
             )
 
 
+def check_digitized_adequacy(
+    hypothesis: Hypothesis,
+    bearing_evidence: Sequence[EvidenceItem],
+    verdict_direction: BearingDirection,
+) -> None:
+    """Enforce the digitized self-certification ban for COUNTED digitized items.
+
+    Composes WITH ``check_evidence_adequacy`` at the same chokepoint
+    (design/figure-digitization.md §5): a digitized item that would COUNT (bears on a
+    binding SUPPORTS/REFUTES verdict) MUST be ``state==verified`` AND carry an
+    independent-verifier record (``verifier_id`` present and != the extractor). A
+    proposed digitized item is EXCLUDED upstream (it is not evidence-grade and does not
+    reach a binding verdict on its own), so it never trips this; a digitized item that
+    DOES bind but is proposed / unverified / self-certified is refused here.
+
+    This is the kernel-side, deterministic, no-LLM application of the
+    "agents propose, the engine judges, no self-certification" rule
+    (design/evidence-validity.md §7) to the digitized kind. It NEVER weakens the
+    existing adequacy gate -- it only ADDS a refusal path for inadequate digitized
+    items. Raises ``ValidityHalt`` on refusal; returns ``None`` otherwise.
+
+    Args:
+        hypothesis: the hypothesis under evaluation (only its ``id`` is used here).
+        bearing_evidence: the EvidenceItems whose bearings target this hypothesis
+            (already pre-filtered + proposed-digitized-excluded by the caller).
+        verdict_direction: the engine's verdict direction. Only a BINDING direction
+            (SUPPORTS/REFUTES) makes a digitized item "counted"; a non-binding verdict
+            affirms nothing, so no digitized verifier requirement applies.
+    """
+    # @MX:ANCHOR: [AUTO] the digitized self-certification gate (figure-digitization §5).
+    # @MX:REASON: [AUTO] ClaimUpdater calls this alongside check_evidence_adequacy for
+    #   EVERY hypothesis before persisting a Claim. A COUNTED digitized value (one that
+    #   moves a binding verdict) MUST carry an independent-verifier record (verifier_id
+    #   present and != extractor). Weakening it -- letting a proposed/self-certified
+    #   figure read count -- re-opens self-certification of a reconstruction, the exact
+    #   thing the proposed->verified lifecycle exists to prevent.
+    if verdict_direction not in _BINDING:
+        return
+    for ev in bearing_evidence:
+        if not _is_digitized(ev):
+            continue
+        # This digitized item is part of a binding verdict (it survived the upstream
+        # proposed-exclusion and reached a binding direction) -> it is COUNTED, so it
+        # must be verified + independently certified.
+        if _is_verified_independent_digitized(ev):
+            continue
+        d = ev.digitized
+        if not (d.extractor or "").strip():
+            # Defense-in-depth (the extractor=None bypass): no recorded extractor means
+            # the self-certification ban cannot be enforced -- refuse with a precise
+            # reason rather than the misleading "verifier == extractor" message.
+            reason = (
+                f"a counted digitized item ({ev.id}) has no recorded extractor identity "
+                "-- the self-certification ban (verifier != extractor) cannot be "
+                "enforced, so the item can never count as independently verified"
+            )
+        elif d.state != _VERIFIED:
+            reason = (
+                f"a counted digitized item ({ev.id}) is in state '{d.state}', not "
+                "'verified' -- a figure-recovered value cannot count toward a binding "
+                "verdict before independent verification"
+            )
+        elif d.verification is None or not (d.verification.verifier_id or "").strip():
+            reason = (
+                f"a counted digitized item ({ev.id}) is marked verified but carries no "
+                "independent-verifier record (verification.verifier_id) -- a counted "
+                "digitized value must record who certified it"
+            )
+        else:
+            reason = (
+                f"a counted digitized item ({ev.id}) is self-certified: its "
+                f"verifier_id ('{d.verification.verifier_id}') equals the extractor -- "
+                "the one who read the value off the plot may not also certify it"
+            )
+        raise ValidityHalt(
+            hypothesis.id,
+            reason + ". See design/figure-digitization.md §5 (no self-certification).",
+        )
+
+
 __all__ = [
     "ValidityHalt",
     "check_evidence_adequacy",
+    "check_digitized_adequacy",
 ]
