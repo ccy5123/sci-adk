@@ -17,7 +17,7 @@ Scope (two-environment separation, design/tool-policy.md addendum 2026-06-16):
     (recorded acquisition tool, user-approved) -- it acquires the record
     (papers), it does not judge belief. No success metric is hardcoded here.
 
-Pin: ccy5123/paperforge @ 60fefedacb7349c755c29b2c2f26873464158c12
+Pin: ccy5123/paperforge @ 2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e
     (feature branch tip: metadata enrichment + citation-style filenames).
     Declared in pyproject.toml as the optional ``tools`` dependency group;
     install with ``pip install -e ".[tools]"``.
@@ -37,7 +37,7 @@ from typing import Any, Optional, Sequence
 # The git SHA paperforge is pinned to (pyproject.toml [tools]). Recorded in
 # provenance so a run is traceable to an exact tool version, not "whatever was
 # installed". Keep in sync with pyproject.toml.
-PINNED_SHA = "60fefedacb7349c755c29b2c2f26873464158c12"
+PINNED_SHA = "2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e"
 
 # Columns paperforge writes to manifest.csv (paperforge orchestrator.py).
 _MANIFEST_FIELDS = ("index", "doi", "status", "source", "license",

@@ -26,7 +26,7 @@ dependencies = [
 # Private repo -- installing this group needs access to ccy5123/paperforge.
 #   pip install -e ".[tools]"
 tools = [
-    "paperforge @ git+https://github.com/ccy5123/paperforge.git@60fefedacb7349c755c29b2c2f26873464158c12",
+    "paperforge @ git+https://github.com/ccy5123/paperforge.git@2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e",
 ]
 
 [project.scripts]

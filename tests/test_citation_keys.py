@@ -421,6 +421,102 @@ def test_failed_records_are_not_keyed(tmp_path):
     assert res.mapping == {"10.1/ok": "Joe2026"}
 
 
+# === swap/cycle-safe rename (paperforge's a/b order need not match sci-adk's) ==
+#
+# paperforge now emits its OWN <surname><year>a/b names, but in paperforge's
+# acquisition order -- which need NOT match sci-adk's canonical DOI-ascending
+# order. So the DOI -> key mapping can be a SWAP (A->B, B->A) or a longer CYCLE.
+# A one-pass ``Path.replace`` would clobber a not-yet-moved source file -> silent
+# DATA LOSS. apply_citation_keys MUST rename as a swap/cycle-safe batch.
+
+
+def _no_temp_leftover(pdfs: Path) -> bool:
+    """True when no temp/scratch file from the two-stage rename survives.
+
+    Checks the flat ``pdfs/`` level only (non-recursive); the rename writes temps
+    only there, so a flat scan covers every path ``_move_pair`` can touch.
+    """
+    return not any(p.name.startswith("__sciadk") for p in pdfs.iterdir())
+
+
+def test_apply_is_swap_safe_no_data_loss_on_ab_reorder(tmp_path):
+    # Two Jager 1998 papers. paperforge wrote the HIGHER-DOI paper as
+    # ``Jager1998a.pdf`` and the LOWER-DOI paper as ``Jager1998b.pdf`` (paperforge
+    # order). sci-adk keys by DOI ascending -> lower-DOI -> Jager1998a,
+    # higher-DOI -> Jager1998b. That is a SWAP. A naive record-by-record
+    # ``Path.replace`` renames Jager1998a.pdf -> Jager1998b.pdf, clobbering the
+    # other paper BEFORE it is moved -> a lost PDF + sidecar.
+    lit, records = _build_acquired_dir(tmp_path, [
+        {"doi": "10.9/zzz", "author": "Jager", "year": "1998",
+         "filename": "Jager1998a.pdf"},   # paperforge a/, but HIGHER doi
+        {"doi": "10.1/aaa", "author": "Jager", "year": "1998",
+         "filename": "Jager1998b.pdf"},   # paperforge b/, but LOWER doi
+    ])
+    pdfs = lit / "pdfs"
+    # Give each on-disk PDF DISTINCT content so a lost paper is visible
+    # (_build_acquired_dir writes the same PDF_BYTES to every PDF).
+    lower_content = b"%PDF-1.4\nDOI-10.1-aaa\n"
+    higher_content = b"%PDF-1.4\nDOI-10.9-zzz\n"
+    (pdfs / "Jager1998b.pdf").write_bytes(lower_content)    # holds the LOWER-DOI paper
+    (pdfs / "Jager1998a.pdf").write_bytes(higher_content)   # holds the HIGHER-DOI paper
+
+    res = assign_citation_keys(records, pdfs)
+    # the mapping is the swap: lower DOI -> a, higher DOI -> b
+    assert res.mapping == {"10.1/aaa": "Jager1998a", "10.9/zzz": "Jager1998b"}
+
+    apply_citation_keys(lit, records, res.mapping)
+
+    # BOTH papers survive under the correct key (no clobber / no loss)
+    assert (pdfs / "Jager1998a.pdf").read_bytes() == lower_content
+    assert (pdfs / "Jager1998b.pdf").read_bytes() == higher_content
+    # each sidecar follows its PDF (parse the doi field back)
+    a_doi = json.loads((pdfs / "Jager1998a.json").read_text(encoding="utf-8"))["doi"]
+    b_doi = json.loads((pdfs / "Jager1998b.json").read_text(encoding="utf-8"))["doi"]
+    assert a_doi == "10.1/aaa"   # Jager1998a carries the lower-DOI paper
+    assert b_doi == "10.9/zzz"   # Jager1998b carries the higher-DOI paper
+    # no scratch file from the two-stage rename is left behind
+    assert _no_temp_leftover(pdfs), "a temp rekey file leaked into pdfs/"
+
+
+def test_apply_is_cycle_safe_three_way(tmp_path):
+    # Three Smith 2000 papers forming a 3-CYCLE. paperforge order vs sci-adk's
+    # DOI-ascending order:
+    #   Smith2000b.pdf (doi 10.1/a)  -> key Smith2000a
+    #   Smith2000c.pdf (doi 10.2/b)  -> key Smith2000b
+    #   Smith2000a.pdf (doi 10.3/c)  -> key Smith2000c
+    # i.e. b->a, c->b, a->c : a 3-cycle. A one-pass rename loses papers.
+    lit, records = _build_acquired_dir(tmp_path, [
+        {"doi": "10.1/a", "author": "Smith", "year": "2000", "filename": "Smith2000b.pdf"},
+        {"doi": "10.2/b", "author": "Smith", "year": "2000", "filename": "Smith2000c.pdf"},
+        {"doi": "10.3/c", "author": "Smith", "year": "2000", "filename": "Smith2000a.pdf"},
+    ])
+    pdfs = lit / "pdfs"
+    content = {
+        "Smith2000b.pdf": b"%PDF-1.4\nDOI-10.1-a\n",
+        "Smith2000c.pdf": b"%PDF-1.4\nDOI-10.2-b\n",
+        "Smith2000a.pdf": b"%PDF-1.4\nDOI-10.3-c\n",
+    }
+    for fn, body in content.items():
+        (pdfs / fn).write_bytes(body)
+
+    res = assign_citation_keys(records, pdfs)
+    assert res.mapping == {
+        "10.1/a": "Smith2000a", "10.2/b": "Smith2000b", "10.3/c": "Smith2000c",
+    }
+
+    apply_citation_keys(lit, records, res.mapping)
+
+    # each final file holds the content of the record that maps to it
+    assert (pdfs / "Smith2000a.pdf").read_bytes() == content["Smith2000b.pdf"]  # 10.1/a
+    assert (pdfs / "Smith2000b.pdf").read_bytes() == content["Smith2000c.pdf"]  # 10.2/b
+    assert (pdfs / "Smith2000c.pdf").read_bytes() == content["Smith2000a.pdf"]  # 10.3/c
+    # sidecars follow their PDFs
+    assert json.loads((pdfs / "Smith2000a.json").read_text(encoding="utf-8"))["doi"] == "10.1/a"
+    assert json.loads((pdfs / "Smith2000b.json").read_text(encoding="utf-8"))["doi"] == "10.2/b"
+    assert json.loads((pdfs / "Smith2000c.json").read_text(encoding="utf-8"))["doi"] == "10.3/c"
+    assert _no_temp_leftover(pdfs), "a temp rekey file leaked into pdfs/"
+
+
 # === Fix 1: bib regex tolerates an indented closing brace ===================
 
 def test_apply_rewrites_bib_entry_with_indented_closing_brace(tmp_path):

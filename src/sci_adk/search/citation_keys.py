@@ -1,16 +1,20 @@
 """
 sci-adk's citation-key naming convention for acquired Open-Access PDFs.
 
-paperforge (the external pinned acquisition tool) already writes
-``<FirstAuthorSurname><Year>.pdf`` filenames, but it has **no a/b disambiguation**
-when two acquired papers map to the same surname+year. sci-adk OWNS that
-convention as a *post-acquisition* step (paperforge is never modified):
+paperforge (the external pinned acquisition tool) now emits its own
+``<FirstAuthorSurname><Year>[a/b]`` filenames, but its a/b suffixes follow
+*paperforge's acquisition order*, which need not match sci-adk's. sci-adk OWNS
+the *canonical* convention and re-keys deterministically as a *post-acquisition*
+step (paperforge is never modified):
 
   * key = ``<NormalizedSurname><Year>`` (e.g. ``McKay2013``, ``Joe2026``);
   * when >= 2 acquired papers share the same base key, an ``a/b/c…`` suffix is
     appended, ordered by **DOI ascending** -- so the assignment is deterministic
     and stable across runs, independent of acquisition order
-    (``Jager1998a`` for the lower DOI, ``Jager1998b`` for the higher);
+    (``Jager1998a`` for the lower DOI, ``Jager1998b`` for the higher). Because
+    paperforge's own a/b order may differ from this DOI order, the DOI -> key
+    mapping can be a swap or cycle, so it is applied as a **swap/cycle-safe batch
+    rename** (a one-pass rename would clobber a not-yet-moved file);
   * fallbacks: a missing/empty author -> ``Anon``; a missing/empty year -> ``nd``
     (``Anon2026``, ``McKaynd``, ``Anonnd``); fallback keys disambiguate the same
     way;
@@ -247,26 +251,28 @@ def assign_citation_keys(
     return KeyingResult(mapping=mapping, collisions=collisions)
 
 
-def _rename_pair(pdf_dir: Path, old_filename: str, key: str) -> None:
-    """Rename ``<old>.pdf`` -> ``<key>.pdf`` and its ``<old>.json`` sidecar.
+# Temp-name prefix used only during the two-stage rename. A real citation key is
+# bare ASCII alphanumerics with a trailing a/b suffix, so it can never contain an
+# underscore -- thus a temp stem (underscore + index) never collides with a key
+# nor with any acquired source filename (also alphanumeric). A stale temp left by
+# a run that crashed between the two stages is therefore an orphan scratch file,
+# not a real paper -- the next run's stage 1 harmlessly overwrites it.
+_REKEY_TMP_PREFIX = "__sciadk_rekey_"
 
-    Idempotent: when the file is already at ``<key>`` nothing happens; a missing
-    source (e.g. a second DOI whose file was overwritten away) is skipped.
+
+def _move_pair(pdf_dir: Path, src_stem: str, dst_stem: str, suffix: str) -> None:
+    """Move ``<src_stem><suffix>`` and ``<src_stem>.json`` to ``<dst_stem>``.
+
+    The PDF and its ``.json`` sidecar are each moved only when present (a record
+    whose file paperforge overwrote away has no source to move). Helper for the
+    two-stage rename in :func:`apply_citation_keys`.
     """
-    old_stem = Path(old_filename).stem
-    suffix = Path(old_filename).suffix or ".pdf"
-    if old_stem == key:
-        return  # already keyed -> no-op
-
-    old_pdf = pdf_dir / old_filename
-    new_pdf = pdf_dir / f"{key}{suffix}"
-    if old_pdf.exists():
-        old_pdf.replace(new_pdf)
-
-    old_sidecar = pdf_dir / f"{old_stem}.json"
-    new_sidecar = pdf_dir / f"{key}.json"
-    if old_sidecar.exists():
-        old_sidecar.replace(new_sidecar)
+    src_pdf = pdf_dir / f"{src_stem}{suffix}"
+    if src_pdf.exists():
+        src_pdf.replace(pdf_dir / f"{dst_stem}{suffix}")
+    src_sidecar = pdf_dir / f"{src_stem}.json"
+    if src_sidecar.exists():
+        src_sidecar.replace(pdf_dir / f"{dst_stem}.json")
 
 
 # Matches a BibTeX entry head and captures (@type{, oldkey, rest-of-entry-until-})
@@ -348,6 +354,12 @@ def apply_citation_keys(
     PDF stem == sidecar stem == .bib key == manifest filename. Idempotent:
     re-running on already-keyed files is a safe no-op.
 
+    The PDF/sidecar rename is a **two-stage, swap/cycle-safe batch**: paperforge's
+    own a/b filename order need not match sci-adk's DOI-ascending keys, so the
+    mapping can be a swap (A->B, B->A) or a longer cycle. Every source is first
+    moved to a unique temp name, then each temp to its final key -- so no source
+    is ever clobbered by a not-yet-moved file (a one-pass rename would lose data).
+
     Args:
         literature_dir: the run's ``literature/`` dir (holds ``pdfs/``,
             ``manifest.csv``, ``references.bib``).
@@ -357,11 +369,29 @@ def apply_citation_keys(
     literature_dir = Path(literature_dir)
     pdf_dir = literature_dir / "pdfs"
 
+    # Plan the renames: a record that names a file, is mapped, and is not already
+    # at its key (idempotent no-op when old stem == key).
+    planned: list[tuple[str, str, str]] = []  # (old_stem, key, suffix)
     for r in records:
         key = mapping.get(r.doi)
         if not key or not r.filename:
             continue
-        _rename_pair(pdf_dir, r.filename, key)
+        old_stem = Path(r.filename).stem
+        if old_stem == key:
+            continue
+        suffix = Path(r.filename).suffix or ".pdf"
+        planned.append((old_stem, key, suffix))
+
+    # Two-stage swap/cycle-safe rename. paperforge now emits its OWN a/b names,
+    # whose order need not match sci-adk's DOI-ascending keys -- so the mapping
+    # can be a swap (A->B, B->A) or a longer cycle. A one-pass ``Path.replace``
+    # would clobber a not-yet-moved source. Stage 1 moves every source to a unique
+    # temp name; stage 2 moves each temp to its final key. No final name is ever
+    # the live source of a pending move, so no artifact is overwritten/lost.
+    for i, (old_stem, _key, suffix) in enumerate(planned):
+        _move_pair(pdf_dir, old_stem, f"{_REKEY_TMP_PREFIX}{i}", suffix)
+    for i, (_old_stem, key, suffix) in enumerate(planned):
+        _move_pair(pdf_dir, f"{_REKEY_TMP_PREFIX}{i}", key, suffix)
 
     _rewrite_bib(literature_dir / "references.bib", mapping)
     _rewrite_manifest(literature_dir / "manifest.csv", mapping)
