@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -181,11 +181,28 @@ class Hypothesis(BaseModel):
 
     Invariant S2: Every Hypothesis has exactly one mode and one DecisionRule.
 
+    Evidence-validity (design/evidence-validity.md E1): every Hypothesis declares a
+    frozen ``referent`` class -- whether its claim is about a ``formal`` object (math,
+    algorithms, ML algorithm-behavior; generated instances ARE the referent, e.g. T-1)
+    or an ``empirical`` referent (physical/biological phenomena; the referent lives
+    outside the program and must be MEASURED). It defaults to ``empirical`` (fail-closed:
+    an unmarked hypothesis is treated as the strictest case, so forgetting to declare a
+    referent can never silently weaken the adequacy gate). It is frozen in the Spec
+    (anti-HARKing): an empirical hypothesis cannot be relabelled formal AFTER seeing
+    results to dodge the real-data requirement.
+
     Attributes:
         id: Unique identifier for this hypothesis
         statement: The hypothesis statement (e.g., "molecule graphs admit encoding")
         mode: confirmatory or exploratory - honest pre-declaration
         decision_rule: Rule for evaluating evidence against this hypothesis
+        referent: ``formal`` | ``empirical`` -- the claim's referent class (default
+            ``empirical``, fail-closed). Frozen with the Spec.
+        non_circularity: for a ``formal`` hypothesis backed by ``generated`` Evidence,
+            a non-empty statement of what the verifier tests that is NOT baked into the
+            generator (design/evidence-validity.md Guard 2). Recorded/surfaced, never
+            auto-proven. ``None`` for empirical hypotheses or where no generated
+            evidence binds.
     """
 
     model_config = {
@@ -198,6 +215,16 @@ class Hypothesis(BaseModel):
     mode: HypothesisMode = Field(..., description="Research mode (confirmatory/exploratory)")
     decision_rule: DecisionRule = Field(
         ..., description="Rule for evaluating evidence"
+    )
+    referent: Literal["formal", "empirical"] = Field(
+        default="empirical",
+        description="Referent class (formal=generated instances are genuine evidence; "
+        "empirical=needs measured data). Default empirical (fail-closed); frozen.",
+    )
+    non_circularity: Optional[str] = Field(
+        default=None,
+        description="Non-circularity attestation for a formal/generated claim: what "
+        "the verifier tests that is not baked into the generator (recorded, not proven).",
     )
 
     # @MX:ANCHOR: Hypothesis uniquely maps evidence to claim via one mode + one rule

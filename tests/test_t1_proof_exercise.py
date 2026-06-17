@@ -90,6 +90,10 @@ def _t1_proof_spec(spec_id: str) -> Spec:
             ),
         ),
         hypotheses=[
+            # referent='formal': a universal injectivity claim is about the encoding
+            # map (a formal object). Its proof-step Evidence is 'generated' (computed),
+            # and it carries a non-circularity attestation, so the evidence-validity
+            # gate allows the binding (counterexample REFUTES) verdict under test.
             Hypothesis(
                 id=_T1_PROOF_HYP,
                 statement=(
@@ -100,6 +104,9 @@ def _t1_proof_spec(spec_id: str) -> Spec:
                 decision_rule=DecisionRule(
                     kind=DecisionRuleKind.PROOF, expression=_T1_PROOF_EXPR
                 ),
+                referent="formal",
+                non_circularity="a counterexample search probes collisions the "
+                "construction does not preclude",
             )
         ],
         method=MethodPlan(approaches=["general injectivity proof"], tools=[]),
@@ -119,7 +126,8 @@ def _fixture_experiment(finding: str):
                 id="ev-t1-proof",
                 spec_id=spec.id,
                 kind=EvidenceKind.PROOF_STEP,
-                provenance=Provenance(code_ref="fixture:t1-proof-exercise"),
+                provenance=Provenance(code_ref="fixture:t1-proof-exercise",
+                                      data_source="generated"),
                 result=Result(type="qualitative", finding=finding),
                 bears_on=[Bearing(target_id=_T1_PROOF_HYP,
                                   direction=BearingDirection.NEUTRAL)],

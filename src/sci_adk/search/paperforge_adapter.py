@@ -122,6 +122,41 @@ class PaperforgeAdapter:
         self.email = email
         self.timeout = timeout
 
+    # -- contact email resolution (evidence-validity E4) -------------------
+
+    def resolve_email(
+        self,
+        *,
+        require: bool = False,
+        config_root: Optional[Path] = None,
+    ) -> Optional[str]:
+        """Resolve the contact email from (this adapter's ``email`` -> sci-adk config
+        -> ``$UNPAYWALL_EMAIL``).
+
+        design/evidence-validity.md E4: when ``require`` is True and no source supplies
+        an email, this raises ``ConfigHalt`` (a clear, how-to-fix message) rather than
+        letting acquisition run silently degraded (no ``--email`` -> weaker OA results,
+        the failure the rice run rode past). When ``require`` is False it returns
+        ``None`` on absence (the legacy permissive behavior, for callers that tolerate
+        the degraded pool).
+
+        Args:
+            require: halt with ``ConfigHalt`` when no email can be resolved.
+            config_root: override the config root (tests).
+
+        Returns:
+            The resolved email, or ``None`` when absent and ``require`` is False.
+        """
+        # Imported lazily so importing the adapter never requires the config module.
+        from sci_adk.config import ConfigHalt, resolve_contact_email
+
+        try:
+            return resolve_contact_email(self.email, config_root=config_root)
+        except ConfigHalt:
+            if require:
+                raise
+            return None
+
     # -- command construction (pure; unit-tested without network) ----------
 
     def build_command(

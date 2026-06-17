@@ -42,6 +42,9 @@ from sci_adk.loop.verdict import (
 
 
 def _numeric_spec(spec_id: str, hyp_id: str = "hyp-n", value: float = 0.9) -> Spec:
+    # referent='formal' + attestation: a computational claim whose recorded Evidence is
+    # 'generated' (see _seed_numeric). Lets the evidence-validity gate allow the binding
+    # SUPPORTS verdict during seeding (design/evidence-validity.md); verify then audits.
     return Spec(
         id=spec_id,
         version=1,
@@ -55,6 +58,8 @@ def _numeric_spec(spec_id: str, hyp_id: str = "hyp-n", value: float = 0.9) -> Sp
                     expression="point >= threshold => support",
                     params={"statistic": "point", "op": ">=", "value": value},
                 ),
+                referent="formal",
+                non_circularity="the verifier checks a property not baked into the generator",
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -67,7 +72,7 @@ def _seed_numeric(workspace: Path, spec: Spec, point: float, hyp_id: str = "hyp-
         return [
             EvidenceItem(
                 id="ev-num", spec_id=s.id, kind=EvidenceKind.EXPERIMENT_RUN,
-                provenance=Provenance(code_ref="fixture"),
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
                 result=Result(type="quantitative", point=point),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.SUPPORTS)],
             )

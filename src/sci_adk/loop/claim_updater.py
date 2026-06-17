@@ -27,6 +27,7 @@ from sci_adk.core.claim import (
 )
 from sci_adk.core.evidence import EvidenceItem, BearingDirection
 from sci_adk.core.spec import Spec
+from sci_adk.core.validity import check_evidence_adequacy
 
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.judge import Judge
@@ -194,6 +195,16 @@ class ClaimUpdater:
         # Delegate: the per-Spec DecisionRule is the sole authority for direction
         # and confidence (D1). The vote-count is gone.
         verdict = self.engine.evaluate(hypothesis.decision_rule, results)
+
+        # Evidence-validity adequacy gate (design/evidence-validity.md E3): refuse to
+        # turn an inadequate record into a Claim. This runs AFTER the engine renders a
+        # verdict (so the gate knows whether it is binding) but BEFORE any Claim is
+        # assembled or persisted, so a halt means NO Claim is written -- an ungrounded
+        # empirical result can never be self-certified. ``evidence_items`` is already
+        # pre-filtered to the bearings on this hypothesis (line 146-149). A halt
+        # propagates out of the updater; the CLI turns it into a friendly non-zero exit.
+        check_evidence_adequacy(hypothesis, evidence_items, verdict.direction)
+
         raw_directions = {b.direction for _, b in results.pairs}
         status = self._status_for_verdict(verdict, raw_directions)
         confidence = verdict.confidence  # kind-correct type + required basis (Decision 5/C3)

@@ -66,7 +66,15 @@ _SPEC_ID = "spec-d4-001"
 
 
 def _spec_with_rule(rule: DecisionRule, hyp_id: str = _HYP_ID) -> Spec:
-    """A minimal valid Spec carrying a single hypothesis with ``rule``."""
+    """A minimal valid Spec carrying a single hypothesis with ``rule``.
+
+    The hypothesis is ``formal`` with a non-circularity attestation: these tests
+    pin the engine-delegation contract over a molecular-encoding (formal) claim whose
+    Evidence is ``generated`` (see ``_evidence``). Declaring formal/generated lets the
+    evidence-validity gate ALLOW the binding verdicts under test
+    (design/evidence-validity.md §1) -- this is the legitimate computational case, not
+    a synthetic proxy for an external phenomenon.
+    """
     return Spec(
         id=_SPEC_ID,
         created_at=datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc),
@@ -83,6 +91,9 @@ def _spec_with_rule(rule: DecisionRule, hyp_id: str = _HYP_ID) -> Spec:
                 statement="Molecule graphs admit a bijective encoding",
                 mode=HypothesisMode.CONFIRMATORY,
                 decision_rule=rule,
+                referent="formal",
+                non_circularity="collisions could occur; the verifier independently "
+                "checks the generated set for them",
             )
         ],
         method=MethodPlan(approaches=["a"]),
@@ -102,8 +113,13 @@ def _evidence(
     weight: Optional[float] = None,
     target_id: str = _HYP_ID,
     kind: EvidenceKind = EvidenceKind.EXPERIMENT_RUN,
+    data_source: Optional[str] = "generated",
 ) -> EvidenceItem:
-    """Build one EvidenceItem with a single bearing on ``target_id``."""
+    """Build one EvidenceItem with a single bearing on ``target_id``.
+
+    data_source defaults to ``generated`` (an in-silico genuine instance of the formal
+    referent under test), so the gate allows the binding verdicts these tests exercise.
+    """
     if finding is not None:
         result = Result(type="qualitative", finding=finding)
     else:
@@ -113,7 +129,7 @@ def _evidence(
         created_at=created_at,
         spec_id=_SPEC_ID,
         kind=kind,
-        provenance=Provenance(code_ref="src/x.py:1"),
+        provenance=Provenance(code_ref="src/x.py:1", data_source=data_source),
         result=result,
         bears_on=[Bearing(target_id=target_id, direction=direction, weight=weight)],
     )

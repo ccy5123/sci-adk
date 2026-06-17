@@ -61,6 +61,10 @@ _PROOF_RULE = DecisionRule(kind=DecisionRuleKind.PROOF, expression=_PROOF_EXPR)
 
 
 def _spec(spec_id: str, rule: DecisionRule, hyp_id: str = "hyp-1") -> Spec:
+    # referent='formal' with a non-circularity attestation: the checkpoint-loop tests
+    # exercise computational (formal) claims whose Evidence is 'generated' (see the
+    # experiment helpers). This lets the evidence-validity gate ALLOW the binding
+    # verdicts under test -- the legitimate computational case (design/evidence-validity.md).
     return Spec(
         id=spec_id,
         version=1,
@@ -69,7 +73,10 @@ def _spec(spec_id: str, rule: DecisionRule, hyp_id: str = "hyp-1") -> Spec:
         ),
         hypotheses=[
             Hypothesis(id=hyp_id, statement="the claim under test",
-                       mode=HypothesisMode.CONFIRMATORY, decision_rule=rule)
+                       mode=HypothesisMode.CONFIRMATORY, decision_rule=rule,
+                       referent="formal",
+                       non_circularity="the verifier checks a property not baked into "
+                       "the generator")
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
         target_claims=[TargetClaim(id="tc", statement="t", answers=hyp_id)],
@@ -83,7 +90,7 @@ def _point_experiment(point: float, hyp_id: str = "hyp-1"):
                 id="ev-num",
                 spec_id=spec.id,
                 kind=EvidenceKind.EXPERIMENT_RUN,
-                provenance=Provenance(code_ref="fake"),
+                provenance=Provenance(code_ref="fake", data_source="generated"),
                 result=Result(type="quantitative", point=point),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.NEUTRAL)],
             )
@@ -98,7 +105,7 @@ def _finding_experiment(finding: str, hyp_id: str = "hyp-1"):
                 id="ev-find",
                 spec_id=spec.id,
                 kind=EvidenceKind.PROOF_STEP,
-                provenance=Provenance(code_ref="fake"),
+                provenance=Provenance(code_ref="fake", data_source="generated"),
                 result=Result(type="qualitative", finding=finding),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.NEUTRAL)],
             )

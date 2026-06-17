@@ -121,6 +121,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-id", default=None,
         help="optional Hypothesis/Claim id the survey relates to (searched path)",
     )
+    prior_work.add_argument(
+        "--allow-no-email", action="store_true",
+        help="searched path only: proceed with DEGRADED Open-Access acquisition when "
+             "no contact email is set (default: refuse and halt). By default the "
+             "searched path requires a contact email (arg/config/$UNPAYWALL_EMAIL)",
+    )
     return parser
 
 
@@ -194,8 +200,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
         proposal_text = proposal_path.read_text(encoding="utf-8")
 
     compiler = ResearchCompiler(workspace_dir=Path(args.output))
-    result = compiler.compile(
-        proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment)
+    # Evidence-validity halt (design/evidence-validity.md E3): an inadequate record
+    # (e.g. synthetic data fed to an empirical claim) raises before any Claim is
+    # written. Surface it as a friendly non-zero exit -- never a raw traceback and
+    # never a "compiled ... supported" success line for an ungrounded result.
+    from sci_adk.core.validity import ValidityHalt
+
+    try:
+        result = compiler.compile(
+            proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment)
+    except ValidityHalt as e:
+        print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
+        return 2
 
     print(f"compiled Spec '{result.spec.id}' -> {result.run_dir}")
     print(f"  evidence: {len(result.evidence)} | claims: {len(result.claims)}")
@@ -228,8 +244,16 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     # or two hypotheses may share a rule expression; RecordedJudge raises a clear
     # ValueError in those cases. Surface it as a friendly stderr message naming the
     # offending file rather than a raw traceback (a third party authors these files).
+    # A recompile inside the loop can raise the evidence-validity halt (E3) -- e.g. a
+    # recorded run whose Evidence is inadequate for an empirical Claim. Surface it as a
+    # friendly non-zero exit alongside the malformed-verdict ValueError.
+    from sci_adk.core.validity import ValidityHalt
+
     try:
         result = run_checkpoint_loop(run_dir=run_dir, spec=spec)
+    except ValidityHalt as e:
+        print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
+        return 2
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -329,8 +353,22 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
         return 0
 
     # searched path: discovery (DOIs) is upstream; acquire + record LITERATURE.
-    outcome = record_prior_work_searched(
-        spec, workspace, dois=args.searched, target_id=args.target_id)
+    # By default a contact email is REQUIRED (E4): a missing one halts BEFORE any
+    # acquisition (refusing the silently degraded OA run that the rice case rode past).
+    # --allow-no-email is the explicit escape hatch to proceed degraded.
+    from sci_adk.config import ConfigHalt
+
+    try:
+        outcome = record_prior_work_searched(
+            spec, workspace, dois=args.searched, target_id=args.target_id,
+            allow_no_email=args.allow_no_email)
+    except ConfigHalt as e:
+        # The generic config message names the env var + config file; add the verb's
+        # own escape hatch so the user sees every way to proceed.
+        print(f"error: {e}", file=sys.stderr)
+        print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
+              file=sys.stderr)
+        return 2
     ev = outcome.evidence
     print(f"recorded prior-work decision (searched) for Spec '{spec.id}' "
           f"-> {ev.kind.value} evidence {ev.id}")

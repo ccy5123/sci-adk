@@ -132,6 +132,12 @@ def t1_experiment(
             ),
         )
 
+        # data_source='generated': the molecule set is an in-silico GENUINE instance of
+        # the formal referent (the encoding map), not a synthetic proxy for an external
+        # phenomenon. The evidence-validity gate ALLOWS generated Evidence on a formal
+        # hypothesis (design/evidence-validity.md §1, Guard 3 item 3) -- T-1 is the
+        # legitimate computational result.
+
         # collision_count == 0 points toward SUPPORTS; > 0 toward REFUTES. This
         # bearing is the experiment's HONEST read of its own statistic; the binding
         # verdict still comes from the engine applying the frozen rule.
@@ -150,6 +156,7 @@ def t1_experiment(
             provenance=Provenance(
                 code_ref=prov.get("commit_hash"),
                 environment=_environment(prov),
+                data_source="generated",
             ),
             result=result,
             bears_on=[Bearing(target_id=target_id, direction=direction)],
@@ -191,6 +198,14 @@ def build_t1_spec(spec_id: str = _T1_DEFAULT_SPEC_ID) -> Spec:
     The hypothesis is ``exploratory`` (honest scoping, C6): a zero collision count is
     empirical support for injectivity ON THE TESTED SET, not a universal proof of
     bijectivity (that would be a ``proof`` rule, out of scope here).
+
+    Evidence-validity (design/evidence-validity.md §1): the referent is ``formal`` --
+    injectivity over the GENERATED molecule set IS the claim's referent (the encoding
+    map), so the generated Evidence is a genuine computational result, not a synthetic
+    proxy for an external phenomenon. It carries a non-circularity attestation: the
+    generator emits molecular graphs with no guarantee of distinct codes, and the
+    verifier independently checks for collisions -- so a zero count is informative, not
+    a tautology.
     """
     rule = DecisionRule(
         kind=DecisionRuleKind.THRESHOLD,
@@ -233,6 +248,13 @@ def build_t1_spec(spec_id: str = _T1_DEFAULT_SPEC_ID) -> Spec:
                 ),
                 mode=HypothesisMode.EXPLORATORY,
                 decision_rule=rule,
+                referent="formal",
+                non_circularity=(
+                    "the generator emits molecular graphs with no guarantee of distinct "
+                    "codes, so collisions could occur; the verifier independently checks "
+                    "the encoding for collisions over the generated set -- a zero count "
+                    "is therefore informative, not a property baked into the generator"
+                ),
             )
         ],
         method=MethodPlan(approaches=["prime-Gödel graph encoding"], tools=[]),

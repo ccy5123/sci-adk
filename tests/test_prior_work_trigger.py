@@ -337,8 +337,12 @@ def test_searched_path_closes_checkpoint_via_literature_evidence(tmp_path):
             )
 
     spec = _spec("pw-searched")
+    # The searched path now requires a contact email by default (E4); this test
+    # exercises the acquisition/decision mechanics, not the email policy, so inject a
+    # test email to satisfy the requirement (a real adapter is faked out anyway).
     outcome = record_prior_work_searched(
-        spec, tmp_path, dois=["10.1/x"], adapter=_FakeAdapter()
+        spec, tmp_path, dois=["10.1/x"], adapter=_FakeAdapter(),
+        email="prior-work-test@example.org",
     )
     # the acquisition artifact is the LITERATURE item ...
     assert outcome.evidence.kind is EvidenceKind.LITERATURE
@@ -402,7 +406,8 @@ def test_searched_path_writes_an_explicit_prior_work_decision(tmp_path):
     spec = _spec("pw-searched-decision")
     assert prior_work_open(spec, tmp_path) is True
     record_prior_work_searched(
-        spec, tmp_path, dois=["10.1/a", "10.1/b"], adapter=_make_fake_adapter())
+        spec, tmp_path, dois=["10.1/a", "10.1/b"], adapter=_make_fake_adapter(),
+        email="prior-work-test@example.org")
 
     # Scan the single append-only log: both kinds are present.
     ev_dir = tmp_path / "runs" / spec.id / "evidence"
@@ -462,7 +467,8 @@ def test_one_cycle_demo_both_outcomes(tmp_path):
     assert res_a.prior_work_checkpoint.trigger == "spec_creation"
     assert prior_work_open(spec_a, tmp_path) is True            # open at Spec time
     out = record_prior_work_searched(
-        spec_a, tmp_path, dois=["10.48550/arXiv.1706.03762"], adapter=_FakeAdapter())
+        spec_a, tmp_path, dois=["10.48550/arXiv.1706.03762"], adapter=_FakeAdapter(),
+        email="prior-work-test@example.org")
     assert out.evidence.kind is EvidenceKind.LITERATURE
     assert prior_work_open(spec_a, tmp_path) is False           # now closed
 

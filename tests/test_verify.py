@@ -55,6 +55,13 @@ _PROOF_EXPR = "verified derivation => support; counterexample => refute"
 
 # -- spec builders -----------------------------------------------------------
 
+# These verify tests audit computational (formal) claims whose recorded Evidence is
+# 'generated' (the experiment seeders below). referent='formal' + a non-circularity
+# attestation let the evidence-validity gate ALLOW the binding verdicts during seeding
+# (design/evidence-validity.md); verify then re-derives belief from the recorded run.
+_NON_CIRC = "the verifier checks a property not baked into the generator"
+
+
 def _numeric_spec(spec_id: str, hyp_id: str = "hyp-n", value: float = 0.9) -> Spec:
     return Spec(
         id=spec_id,
@@ -69,6 +76,8 @@ def _numeric_spec(spec_id: str, hyp_id: str = "hyp-n", value: float = 0.9) -> Sp
                     expression="point >= threshold => support",
                     params={"statistic": "point", "op": ">=", "value": value},
                 ),
+                referent="formal",
+                non_circularity=_NON_CIRC,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -86,6 +95,8 @@ def _proof_spec(spec_id: str, hyp_id: str = "hyp-p") -> Spec:
                 id=hyp_id, statement="the universal claim",
                 mode=HypothesisMode.CONFIRMATORY,
                 decision_rule=DecisionRule(kind=DecisionRuleKind.PROOF, expression=_PROOF_EXPR),
+                referent="formal",
+                non_circularity=_NON_CIRC,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -100,7 +111,7 @@ def _numeric_experiment(point: float, hyp_id: str = "hyp-n"):
         return [
             EvidenceItem(
                 id="ev-num", spec_id=s.id, kind=EvidenceKind.EXPERIMENT_RUN,
-                provenance=Provenance(code_ref="fixture"),
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
                 result=Result(type="quantitative", point=point),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.SUPPORTS)],
             )
@@ -113,7 +124,7 @@ def _proof_experiment(hyp_id: str = "hyp-p"):
         return [
             EvidenceItem(
                 id="ev-proof", spec_id=s.id, kind=EvidenceKind.PROOF_STEP,
-                provenance=Provenance(code_ref="fixture"),
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
                 result=Result(type="qualitative", finding="the attempted proof body"),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.NEUTRAL)],
             )
@@ -296,13 +307,13 @@ def test_verify_reproduces_contested_claim(tmp_path):
         return [
             EvidenceItem(
                 id="ev-sup", spec_id=s.id, kind=EvidenceKind.EXPERIMENT_RUN,
-                provenance=Provenance(code_ref="fixture"),
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
                 result=Result(type="quantitative", point=0.95),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.SUPPORTS)],
             ),
             EvidenceItem(
                 id="ev-ref", spec_id=s.id, kind=EvidenceKind.EXPERIMENT_RUN,
-                provenance=Provenance(code_ref="fixture"),
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
                 result=Result(type="quantitative", point=0.95),
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.REFUTES)],
             ),

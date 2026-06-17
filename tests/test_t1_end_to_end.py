@@ -62,11 +62,17 @@ def _t1_spec(rule: DecisionRule) -> Spec:
             expected_output="A unique integer per molecule; injectivity demonstrated.",
         ),
         hypotheses=[
+            # referent='formal': the T-1 injectivity claim is about the encoding map
+            # (a formal object); the CI-carrying Evidence below is 'generated'. The
+            # evidence-validity gate allows generated->formal (design/evidence-validity.md).
             Hypothesis(
                 id=_HYP,
                 statement="Molecule graphs admit a bijective Gödel-style encoding",
                 mode=HypothesisMode.CONFIRMATORY,
                 decision_rule=rule,
+                referent="formal",
+                non_circularity="the encoding is checked for collisions on a generated "
+                "set; collisions are not precluded by construction",
             )
         ],
         method=MethodPlan(approaches=["prime-factor encoding"], tools=[]),
@@ -97,7 +103,9 @@ def _ci_evidence(
         created_at=created_at,
         spec_id=_SPEC_ID,
         kind=EvidenceKind.EXPERIMENT_RUN,
-        provenance=Provenance(code_ref="synthetic:d5"),
+        # data_source='generated': an in-silico instance of the formal referent (the
+        # encoding's behavior), not a synthetic proxy for an external phenomenon.
+        provenance=Provenance(code_ref="synthetic:d5", data_source="generated"),
         result=Result(type="quantitative", ci=[lower, upper]),
         bears_on=[Bearing(target_id=_HYP, direction=direction)],
     )

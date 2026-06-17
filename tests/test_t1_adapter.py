@@ -124,6 +124,26 @@ class TestAdapterExperimentFn:
         # Bearing targets the hypothesis (so ClaimUpdater pre-filters it correctly).
         assert any(b.target_id == _HYP for b in ev.bears_on)
 
+    def test_t1_spec_declares_formal_referent_and_attestation(self):
+        """T-1 is the legitimate formal/generated case (design/evidence-validity.md
+        §1): the hypothesis is formal (injectivity over generated molecules IS the
+        referent) and carries a non-empty non-circularity attestation."""
+        spec = _t1_spec()
+        hyp = spec.hypotheses[0]
+        assert hyp.referent == "formal"
+        assert hyp.non_circularity and hyp.non_circularity.strip()
+        # The attestation names the informative-not-circular property: collisions
+        # could occur, the verifier independently checks for them.
+        assert "collision" in hyp.non_circularity.lower()
+
+    def test_t1_experiment_evidence_is_generated(self, tmp_path):
+        """The T-1 experiment marks its Evidence data_source='generated' (an in-silico
+        genuine instance of the formal referent), so the gate ALLOWS it on a formal
+        hypothesis -- and the autonomous verdict below succeeds end-to-end."""
+        fn = t1_experiment(_clean_set(), executor=_PureExecutor())
+        ev = fn(_t1_spec(), tmp_path)[0]
+        assert ev.provenance.data_source == "generated"
+
     def test_collision_makes_point_positive(self, tmp_path):
         # Two isomorphic graphs => 1 collision => Result.point == 1.0 (=> refute later).
         iso_a = Molecule(atoms=["O", "H", "H"], bonds=[(0, 1, 1), (0, 2, 1)])
@@ -196,6 +216,7 @@ class TestSeamIsOneWay:
         "sci_adk.core.evidence",
         "sci_adk.core.claim",
         "sci_adk.core.parser",
+        "sci_adk.core.validity",
         "sci_adk.render.paper",
     ]
 

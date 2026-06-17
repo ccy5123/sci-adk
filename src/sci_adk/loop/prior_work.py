@@ -162,6 +162,8 @@ def record_prior_work_searched(
     adapter: Optional[PaperforgeAdapter] = None,
     email: Optional[str] = None,
     target_id: Optional[str] = None,
+    allow_no_email: bool = False,
+    config_root: Optional[Path] = None,
     **options: Any,
 ) -> AcquisitionOutcome:
     """Record the *searched* decision: acquire via the EXISTING acquirer, then write
@@ -179,10 +181,38 @@ def record_prior_work_searched(
     a search *was performed* regardless of acquisition success. The returned
     :class:`AcquisitionOutcome` still carries any ``halt`` for the orchestrator.
 
+    Contact-email policy (design/evidence-validity.md E4): the searched path uses the
+    Unpaywall/OpenAlex polite pool, so by DEFAULT it REQUIRES a contact email,
+    resolved from (``email`` arg -> ``~/.config/sci-adk/config.toml`` ->
+    ``$UNPAYWALL_EMAIL``). When none is configured it raises ``ConfigHalt`` BEFORE any
+    acquisition is attempted -- silent degradation is refused (it is how the rice run
+    rode past the literature gate). Pass ``allow_no_email=True`` to proceed in the
+    degraded mode (no ``--email``). The resolution happens here (not only in the
+    acquirer/adapter) so the requirement holds even when a fake ``adapter`` is injected
+    for tests.
+
     F7 seam: a finding here that implies a *frozen* Spec element must change goes
     through the human-only amendment path -- never a silent mutation. This function
     records evidence and does not touch the Spec, so that seam holds by construction.
+
+    Raises:
+        ConfigHalt: when ``allow_no_email`` is False and no contact email resolves.
     """
+    # Resolve+require the contact email FIRST, so a missing email halts before any
+    # acquisition is attempted (E4). require=True is the default; allow_no_email flips
+    # it off for the rare "I accept degraded OA" case.
+    from sci_adk.config import resolve_contact_email
+
+    if allow_no_email:
+        # Degraded path: use whatever resolves (may be None), never halt.
+        try:
+            email = resolve_contact_email(email, config_root=config_root)
+        except Exception:  # ConfigHalt -- proceed degraded as requested.
+            email = None
+    else:
+        # Default path: REQUIRE an email (raises ConfigHalt if none resolves).
+        email = resolve_contact_email(email, config_root=config_root)
+
     acquirer = LiteratureAcquirer(
         spec, workspace_dir, adapter=adapter, email=email
     )

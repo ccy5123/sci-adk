@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -104,9 +104,22 @@ class Provenance(BaseModel):
     Invariant E3: Every EvidenceItem carries enough Provenance to attempt
     reproduction, or explicitly marks what is missing.
 
+    Evidence-validity (design/evidence-validity.md E2): ``data_source`` records WHAT
+    the data is about, which the adequacy gate uses to decide whether the Evidence can
+    bear on a Claim:
+      - ``measured``        -- real empirical data (the only kind that satisfies an
+                               empirical claim).
+      - ``generated``       -- an in-silico/computed GENUINE instance of a formal
+                               referent (T-1's molecule set).
+      - ``synthetic_proxy`` -- a FABRICATED stand-in for an external referent the data
+                               does not contain (the rice numbers).
+      - ``None``            -- unstated; the gate treats it as "not measured"
+                               (fail-closed).
+
     Attributes:
         code_ref: Commit/worktree/script path + line reference
         data_ref: Dataset id + version reference
+        data_source: measured | generated | synthetic_proxy | None (evidence-validity)
         seed: RNG seed for stochastic reproducibility
         environment: Toolchain/container/library versions
         cost: Resource cost telemetry
@@ -119,6 +132,12 @@ class Provenance(BaseModel):
 
     code_ref: Optional[str] = Field(default=None, description="Commit/worktree/script reference")
     data_ref: Optional[str] = Field(default=None, description="Dataset id + version")
+    data_source: Optional[Literal["measured", "generated", "synthetic_proxy"]] = Field(
+        default=None,
+        description="What the data is about: measured (real empirical), generated "
+        "(genuine in-silico instance), synthetic_proxy (fabricated stand-in). None = "
+        "not measured (fail-closed in the adequacy gate).",
+    )
     seed: Optional[int] = Field(default=None, ge=0, description="RNG seed")
     environment: Optional[str] = Field(default=None, description="Toolchain/container versions")
     cost: Optional[Cost] = Field(default=None, description="Resource cost telemetry")

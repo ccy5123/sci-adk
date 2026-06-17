@@ -54,12 +54,17 @@ def _proof_spec(spec_id: str, hyp_id: str = "hyp-1") -> Spec:
             background="bg", goal="goal", method="m", expected_output="o"
         ),
         hypotheses=[
+            # referent='formal' + attestation: a computational/universal claim whose
+            # proof-step Evidence is 'generated', so the evidence-validity gate allows
+            # the binding (counterexample REFUTES) verdict (design/evidence-validity.md).
             Hypothesis(
                 id=hyp_id, statement="the universal claim",
                 mode=HypothesisMode.CONFIRMATORY,
                 decision_rule=DecisionRule(
                     kind=DecisionRuleKind.PROOF, expression=_PROOF_EXPR
                 ),
+                referent="formal",
+                non_circularity="the verifier checks a property not baked into the generator",
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -73,7 +78,7 @@ def _seed_run(workspace: Path, spec: Spec, hyp_id: str = "hyp-1") -> Path:
         return [
             EvidenceItem(
                 id="ev-1", spec_id=s.id, kind=EvidenceKind.PROOF_STEP,
-                provenance=Provenance(code_ref="fixture"),
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
                 result=Result(type="qualitative", finding="the attempted proof body"),
                 bears_on=[Bearing(target_id=hyp_id,
                                   direction=BearingDirection.NEUTRAL)],
