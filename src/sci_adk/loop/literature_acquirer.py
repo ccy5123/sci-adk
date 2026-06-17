@@ -53,6 +53,17 @@ from sci_adk.search.paperforge_adapter import (
     AcquisitionResult,
     PaperforgeAdapter,
 )
+from sci_adk.search.pdf_normalize import (
+    NormalizeResult,
+    NormalizeStatus,
+    normalize_pdf,
+)
+
+# How many EXTRA re-download attempts to spend on an acquired PDF that cannot be
+# parsed (corrupt/truncated/HTML-saved-as-pdf) before giving up and marking it
+# ``error``. Total attempts = 1 original + PDF_REDOWNLOAD_RETRIES. A user-password
+# lock is NOT retried (a re-download yields the same lock) -- only parse errors.
+PDF_REDOWNLOAD_RETRIES = 2
 
 
 class HaltReason(str, Enum):
@@ -136,15 +147,37 @@ class AcquisitionOutcome:
 
     Bundles the persisted record (``evidence``), the raw per-DOI result
     (``result``), and -- when the loop should stop -- a structured ``halt``.
+
+    ``normalizations`` holds the per-PDF normalization outcomes (one
+    :class:`~sci_adk.search.pdf_normalize.NormalizeResult` per acquired PDF).
+    ``locked_pdfs`` lists the filenames of any acquired PDFs that turned out to be
+    real user-password locks -- surfaced (never silently treated as readable) so
+    the orchestrator can ask the human for the password or another source.
+    ``unreadable_pdfs`` lists the filenames of any acquired PDFs that could not be
+    parsed even after re-download retries (corrupt/truncated/HTML-as-pdf) --
+    surfaced the same way; the batch was not aborted for them.
     """
 
     evidence: EvidenceItem
     result: AcquisitionResult
     halt: Optional[AcquisitionHalt] = None
+    normalizations: list[NormalizeResult] = field(default_factory=list)
+    locked_pdfs: list[str] = field(default_factory=list)
+    unreadable_pdfs: list[str] = field(default_factory=list)
 
     @property
     def should_halt(self) -> bool:
         return self.halt is not None
+
+    @property
+    def has_locked_pdfs(self) -> bool:
+        """True when at least one acquired PDF is a user-password lock to surface."""
+        return bool(self.locked_pdfs)
+
+    @property
+    def has_unreadable_pdfs(self) -> bool:
+        """True when at least one acquired PDF stayed unreadable after retries."""
+        return bool(self.unreadable_pdfs)
 
 
 class LiteratureAcquirer:
@@ -223,7 +256,27 @@ class LiteratureAcquirer:
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
 
         result = self.adapter.fetch(dois, self.literature_dir, **options)
-        evidence = self._build_evidence(result, target_id)
+
+        # Auto-normalize each acquired PDF: owner/permission-restricted-but-
+        # openable PDFs are re-written extractable; a real user-password lock is
+        # left untouched and surfaced (never bypassed); a corrupt/unparseable PDF
+        # is re-downloaded up to PDF_REDOWNLOAD_RETRIES times and, if still
+        # unreadable, surfaced (the batch is not aborted). IO only -- no belief.
+        normalizations, retries_spent = self._normalize_acquired(result, options)
+        locked_pdfs = [
+            n.path.name
+            for n in normalizations
+            if n.status == NormalizeStatus.LOCKED
+        ]
+        unreadable_pdfs = [
+            n.path.name
+            for n in normalizations
+            if n.status == NormalizeStatus.ERROR
+        ]
+
+        evidence = self._build_evidence(
+            result, target_id, normalizations, retries_spent
+        )
         self._save_evidence(evidence)
 
         halt = (
@@ -231,7 +284,74 @@ class LiteratureAcquirer:
             if result.failed
             else None
         )
-        return AcquisitionOutcome(evidence=evidence, result=result, halt=halt)
+        return AcquisitionOutcome(
+            evidence=evidence,
+            result=result,
+            halt=halt,
+            normalizations=normalizations,
+            locked_pdfs=locked_pdfs,
+            unreadable_pdfs=unreadable_pdfs,
+        )
+
+    # -- normalization -----------------------------------------------------
+
+    def _normalize_acquired(
+        self,
+        result: AcquisitionResult,
+        options: dict[str, Any],
+    ) -> tuple[list[NormalizeResult], dict[str, int]]:
+        """Normalize each successfully-acquired PDF on disk, retrying corrupt ones.
+
+        paperforge writes acquired PDFs into ``<literature_dir>/pdfs/<filename>``.
+        Only successful records have a file; failed DOIs are skipped (a missing
+        OA PDF is recorded by the existing halt, not normalized). A file that is
+        named in the manifest but missing on disk is skipped defensively.
+
+        When ``normalize_pdf`` returns ``error`` (the file could not be parsed --
+        truncated download, HTML error page saved as .pdf, corrupt bytes), the
+        single owning DOI is re-downloaded (overwrite) up to
+        ``PDF_REDOWNLOAD_RETRIES`` more times and re-normalized each time; the
+        first readable result wins. A ``locked`` result is NOT retried (a
+        re-download yields the same user-password lock).
+
+        Returns the final per-PDF results and a ``retries_spent`` map
+        (filename -> number of re-download retries actually used).
+        """
+        pdf_dir = self.literature_dir / "pdfs"
+        normalizations: list[NormalizeResult] = []
+        retries_spent: dict[str, int] = {}
+        for record in result.succeeded:
+            if not record.filename:
+                continue
+            pdf_path = pdf_dir / record.filename
+            if not pdf_path.exists():
+                continue
+
+            outcome = normalize_pdf(pdf_path)
+            used = 0
+            # Only a parse error is retryable; locked/normalized/already are final.
+            while (
+                outcome.status == NormalizeStatus.ERROR
+                and used < PDF_REDOWNLOAD_RETRIES
+            ):
+                used += 1
+                self._redownload(record.doi, options)
+                outcome = normalize_pdf(pdf_path)
+
+            normalizations.append(outcome)
+            if used:
+                retries_spent[record.filename] = used
+        return normalizations, retries_spent
+
+    def _redownload(self, doi: str, options: dict[str, Any]) -> None:
+        """Re-fetch a single DOI into the literature dir, overwriting the file.
+
+        Used to retry a corrupt acquired PDF. ``overwrite=True`` is forced so the
+        fresh download replaces the unparseable file in place; other options carry
+        through unchanged.
+        """
+        retry_options = {**options, "overwrite": True}
+        self.adapter.fetch([doi], self.literature_dir, **retry_options)
 
     # -- evidence assembly -------------------------------------------------
 
@@ -239,8 +359,18 @@ class LiteratureAcquirer:
         self,
         result: AcquisitionResult,
         target_id: Optional[str],
+        normalizations: Optional[Sequence[NormalizeResult]] = None,
+        retries_spent: Optional[dict[str, int]] = None,
     ) -> EvidenceItem:
-        """Assemble a LITERATURE EvidenceItem from a paperforge result."""
+        """Assemble a LITERATURE EvidenceItem from a paperforge result.
+
+        The ``normalization`` block honestly records the PDF transformation
+        (sci-adk records what happened): which acquired PDFs were ``normalized``
+        (owner-restriction stripped), ``already_extractable`` (no-op), ``locked``
+        (a user-password lock left untouched), or ``error`` (unreadable even after
+        re-download retries), whether an original was preserved, and how many
+        re-download retries were spent on each.
+        """
         summary = {
             "acquired": [
                 {"doi": r.doi, "source": r.source,
@@ -254,6 +384,9 @@ class LiteratureAcquirer:
                 "succeeded": len(result.succeeded),
                 "failed": len(result.failed),
             },
+            "normalization": self._normalization_summary(
+                normalizations or [], retries_spent or {}
+            ),
         }
 
         bears_on: list[Bearing] = []
@@ -283,6 +416,32 @@ class LiteratureAcquirer:
             ),
             bears_on=bears_on,
         )
+
+    @staticmethod
+    def _normalization_summary(
+        normalizations: Sequence[NormalizeResult],
+        retries_spent: dict[str, int],
+    ) -> dict[str, Any]:
+        """Build the JSON-able ``normalization`` block for the evidence finding."""
+        pdfs = [
+            {
+                "filename": n.path.name,
+                "status": n.status.value,
+                "original_preserved": n.original_path is not None,
+                "retries_spent": retries_spent.get(n.path.name, 0),
+                "note": n.note,
+            }
+            for n in normalizations
+        ]
+        counts = {
+            "normalized": 0,
+            "already_extractable": 0,
+            "locked": 0,
+            "error": 0,
+        }
+        for n in normalizations:
+            counts[n.status.value] += 1
+        return {"pdfs": pdfs, "counts": counts}
 
     @staticmethod
     def _generate_evidence_id() -> str:

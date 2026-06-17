@@ -176,3 +176,361 @@ def test_supporting_info_halt_factory():
     assert "Supporting Information" in fb
     assert "10.1/a" in fb and "table S3" in fb
     assert "dataset lives only in the SI." in fb
+
+
+# -- auto-normalization of acquired PDFs -------------------------------------
+#
+# paperforge writes each acquired PDF into ``<output_dir>/pdfs/<filename>``
+# (confirmed against runs/.../literature/pdfs/). The acquirer must, after
+# fetch, normalize each acquired PDF in place: owner/permission-restricted-but-
+# openable PDFs get re-written extractable; a real user-password lock is
+# surfaced (never bypassed). The outcome must record what happened per PDF.
+
+import io  # noqa: E402  (kept local to this PDF-fixture section)
+
+from pypdf import PdfReader, PdfWriter  # noqa: E402
+from pypdf.constants import UserAccessPermissions as UAP  # noqa: E402
+from pypdf.generic import (  # noqa: E402
+    DecodedStreamObject,
+    DictionaryObject,
+    NameObject,
+)
+
+PDF_MARKER = "ACQUIRED PAPER TEXT"
+
+
+def _text_pdf_bytes(text: str = PDF_MARKER) -> bytes:
+    """A one-page PDF whose page draws ``text`` (pypdf only, no reportlab)."""
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=200, height=200)
+    content = f"BT /F1 18 Tf 20 100 Td ({text}) Tj ET".encode("latin-1")
+    stream = DecodedStreamObject()
+    stream.set_data(content)
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    font = DictionaryObject()
+    font[NameObject("/Type")] = NameObject("/Font")
+    font[NameObject("/Subtype")] = NameObject("/Type1")
+    font[NameObject("/BaseFont")] = NameObject("/Helvetica")
+    fonts = DictionaryObject()
+    fonts[NameObject("/F1")] = writer._add_object(font)
+    resources = DictionaryObject()
+    resources[NameObject("/Font")] = fonts
+    page[NameObject("/Resources")] = resources
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _owner_restricted_bytes(raw: bytes) -> bytes:
+    writer = PdfWriter(clone_from=io.BytesIO(raw))
+    writer.encrypt(user_password="", owner_password="x", permissions_flag=UAP.PRINT)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _user_locked_bytes(raw: bytes) -> bytes:
+    writer = PdfWriter(clone_from=io.BytesIO(raw))
+    writer.encrypt(user_password="secret", owner_password="x")
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+class FileDroppingAdapter:
+    """A fake adapter that writes real PDF files into ``<output_dir>/pdfs/``.
+
+    ``files`` maps a filename -> bytes; each becomes a successful record whose
+    ``filename`` points at the dropped file (paperforge's contract).
+    """
+
+    def __init__(self, files: dict, extra_records=None, returncode=0):
+        self.files = files
+        self.extra_records = extra_records or []
+        self.returncode = returncode
+        self.calls = []
+
+    def fetch(self, dois, output_dir, **options):
+        output_dir = Path(output_dir)
+        self.calls.append((list(dois), output_dir, options))
+        pdf_dir = output_dir / "pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        for i, (filename, data) in enumerate(self.files.items(), start=1):
+            (pdf_dir / filename).write_bytes(data)
+            records.append(
+                AcquisitionRecord(
+                    doi=f"10.{i}/x", status="success",
+                    source="arxiv", filename=filename,
+                )
+            )
+        records.extend(self.extra_records)
+        return AcquisitionResult(
+            returncode=self.returncode,
+            output_dir=output_dir,
+            manifest_path=output_dir / "manifest.csv",
+            records=records,
+            provenance={"tool": "paperforge", "pinned_sha": PIN,
+                        "installed_version": "0.1.0", "returncode": self.returncode},
+        )
+
+
+def _pdfs_dir(tmp_path, spec_id="test-spec"):
+    return tmp_path / "runs" / spec_id / "literature" / "pdfs"
+
+
+def test_acquire_normalizes_owner_restricted_pdf(tmp_path):
+    raw = _text_pdf_bytes()
+    adapter = FileDroppingAdapter({"restricted.pdf": _owner_restricted_bytes(raw)})
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x"])
+
+    pdf = _pdfs_dir(tmp_path) / "restricted.pdf"
+    # auto-normalized in place: no longer encrypted, text extracts
+    assert PdfReader(str(pdf)).is_encrypted is False
+    assert PDF_MARKER in PdfReader(str(pdf)).pages[0].extract_text()
+    # original preserved alongside
+    assert (_pdfs_dir(tmp_path) / "restricted.orig.pdf").exists()
+
+    # the LITERATURE evidence honestly records the normalization
+    summary = json.loads(outcome.evidence.result.finding)
+    norm = summary["normalization"]
+    assert norm["counts"]["normalized"] == 1
+    entry = norm["pdfs"][0]
+    assert entry["filename"] == "restricted.pdf"
+    assert entry["status"] == "normalized"
+    assert entry["original_preserved"] is True
+    # not a locked-surfacing situation
+    assert outcome.locked_pdfs == []
+
+
+def test_acquire_noop_for_already_extractable_pdf(tmp_path):
+    raw = _text_pdf_bytes()
+    adapter = FileDroppingAdapter({"plain.pdf": raw})
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x"])
+
+    pdf = _pdfs_dir(tmp_path) / "plain.pdf"
+    # untouched
+    assert pdf.read_bytes() == raw
+    assert not (_pdfs_dir(tmp_path) / "plain.orig.pdf").exists()
+
+    summary = json.loads(outcome.evidence.result.finding)
+    norm = summary["normalization"]
+    assert norm["counts"]["already_extractable"] == 1
+    assert norm["pdfs"][0]["status"] == "already_extractable"
+    assert outcome.locked_pdfs == []
+
+
+def test_acquire_surfaces_user_locked_pdf(tmp_path):
+    raw = _text_pdf_bytes()
+    locked = _user_locked_bytes(raw)
+    # one normal + one locked in the same batch
+    adapter = FileDroppingAdapter(
+        {"good.pdf": _owner_restricted_bytes(raw), "locked.pdf": locked}
+    )
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x", "10.2/x"])
+
+    # the locked file is surfaced (never silently passed) ...
+    assert "locked.pdf" in outcome.locked_pdfs
+    # ... and ETHICS: it is left byte-for-byte unmodified, still encrypted
+    locked_path = _pdfs_dir(tmp_path) / "locked.pdf"
+    assert locked_path.read_bytes() == locked
+    assert PdfReader(str(locked_path)).is_encrypted is True
+
+    # recorded in provenance/finding honestly
+    summary = json.loads(outcome.evidence.result.finding)
+    norm = summary["normalization"]
+    assert norm["counts"]["locked"] == 1
+    assert norm["counts"]["normalized"] == 1
+    locked_entry = next(p for p in norm["pdfs"] if p["filename"] == "locked.pdf")
+    assert locked_entry["status"] == "locked"
+    assert locked_entry["note"]  # a clear reason
+
+    # the good one was still normalized
+    assert PdfReader(str(_pdfs_dir(tmp_path) / "good.pdf")).is_encrypted is False
+
+
+def test_acquire_locked_surfacing_visible_in_outcome_helper(tmp_path):
+    raw = _text_pdf_bytes()
+    adapter = FileDroppingAdapter({"locked.pdf": _user_locked_bytes(raw)})
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x"])
+    # a convenience flag the orchestrator can check, parallel to should_halt
+    assert outcome.has_locked_pdfs is True
+    assert outcome.locked_pdfs == ["locked.pdf"]
+
+
+def test_acquire_failed_record_is_not_normalized(tmp_path):
+    # A failed DOI has no file on disk; normalization must skip it cleanly.
+    raw = _text_pdf_bytes()
+    adapter = FileDroppingAdapter(
+        {"ok.pdf": raw},
+        extra_records=[AcquisitionRecord(doi="10.9/miss", status="failed",
+                                         error="no OA PDF")],
+        returncode=1,
+    )
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x", "10.9/miss"])
+    # the unacquired-papers halt still fires (existing behavior preserved)
+    assert outcome.should_halt is True
+    # normalization only covered the one acquired file
+    norm = json.loads(outcome.evidence.result.finding)["normalization"]
+    assert norm["counts"]["already_extractable"] == 1
+    assert {p["filename"] for p in norm["pdfs"]} == {"ok.pdf"}
+
+
+# -- corrupt acquired PDF: re-download retry (exactly 2 extra attempts) -------
+#
+# When an acquired PDF cannot be PARSED (truncated, HTML-as-pdf, corrupt), the
+# acquirer re-downloads that single DOI up to 2 more times (total 3 attempts),
+# re-normalizing each fresh file. Stays-corrupt -> status ``error``, surfaced via
+# ``unreadable_pdfs``, recorded in provenance; the batch continues. Corrupt-then-
+# good -> ends ``normalized``. A ``locked`` (user-password) PDF is NOT retried.
+
+CORRUPT = b"%PDF-1.4\nnot a real pdf body at all"
+
+
+class RetryAdapter:
+    """A fake adapter that maps DOI -> (filename, [bytes_per_attempt]).
+
+    Each ``fetch`` call writes, for every requested DOI, the payload for that
+    DOI's current attempt (the last payload sticks once exhausted). It counts how
+    many times each DOI was fetched -- so a test can assert "3x total" (1 original
+    + 2 retries). The original batch fetch requests all DOIs; each retry requests
+    exactly one DOI.
+    """
+
+    def __init__(self, plan: dict, returncode: int = 0):
+        # plan: doi -> {"filename": str, "payloads": [bytes, bytes, ...]}
+        self.plan = plan
+        self.returncode = returncode
+        self.calls = []                  # list of (dois, options)
+        self.fetch_count = {}            # doi -> times fetched
+
+    def fetch(self, dois, output_dir, **options):
+        output_dir = Path(output_dir)
+        dois = list(dois)
+        self.calls.append((dois, options))
+        pdf_dir = output_dir / "pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        for doi in dois:
+            spec = self.plan[doi]
+            n = self.fetch_count.get(doi, 0)        # 0-based attempt index
+            payloads = spec["payloads"]
+            data = payloads[min(n, len(payloads) - 1)]
+            (pdf_dir / spec["filename"]).write_bytes(data)
+            self.fetch_count[doi] = n + 1
+            records.append(
+                AcquisitionRecord(doi=doi, status="success",
+                                  source="arxiv", filename=spec["filename"])
+            )
+        return AcquisitionResult(
+            returncode=self.returncode,
+            output_dir=output_dir,
+            manifest_path=output_dir / "manifest.csv",
+            records=records,
+            provenance={"tool": "paperforge", "pinned_sha": PIN,
+                        "installed_version": "0.1.0", "returncode": self.returncode},
+        )
+
+
+def test_corrupt_pdf_retried_exactly_twice_then_error_batch_not_aborted(tmp_path):
+    good = _text_pdf_bytes()
+    # "bad" DOI is corrupt on every attempt; "ok" DOI is a fine owner-restricted
+    # paper (so we also prove the batch is NOT aborted by the bad one).
+    adapter = RetryAdapter({
+        "10.1/bad": {"filename": "bad.pdf", "payloads": [CORRUPT]},   # always corrupt
+        "10.2/ok": {"filename": "ok.pdf",
+                    "payloads": [_owner_restricted_bytes(good)]},
+    })
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/bad", "10.2/ok"])
+
+    # the bad DOI was fetched 3x total: 1 original + exactly 2 retries
+    assert adapter.fetch_count["10.1/bad"] == 3
+    # the good DOI was fetched once (no spurious retry)
+    assert adapter.fetch_count["10.2/ok"] == 1
+
+    # the corrupt file ends as an error, surfaced via unreadable_pdfs
+    assert outcome.unreadable_pdfs == ["bad.pdf"]
+    assert outcome.has_unreadable_pdfs is True
+
+    # the OTHER good PDF in the same batch was still normalized -- batch NOT aborted
+    ok_pdf = _pdfs_dir(tmp_path) / "ok.pdf"
+    assert PdfReader(str(ok_pdf)).is_encrypted is False
+    assert PDF_MARKER in PdfReader(str(ok_pdf)).pages[0].extract_text()
+
+    # the evidence records the error count + retries spent
+    norm = json.loads(outcome.evidence.result.finding)["normalization"]
+    assert norm["counts"]["error"] == 1
+    assert norm["counts"]["normalized"] == 1
+    bad_entry = next(p for p in norm["pdfs"] if p["filename"] == "bad.pdf")
+    assert bad_entry["status"] == "error"
+    assert bad_entry["retries_spent"] == 2
+
+
+def test_corrupt_then_good_on_retry_ends_normalized(tmp_path):
+    good = _text_pdf_bytes()
+    # corrupt on attempt 1, then a valid owner-restricted PDF on retry 1
+    adapter = RetryAdapter({
+        "10.1/x": {"filename": "paper.pdf",
+                   "payloads": [CORRUPT, _owner_restricted_bytes(good)]},
+    })
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x"])
+
+    # exactly 2 fetches: original (corrupt) + 1 retry (good) -> stop early
+    assert adapter.fetch_count["10.1/x"] == 2
+    # ended normalized, nothing surfaced as unreadable
+    assert outcome.unreadable_pdfs == []
+    assert outcome.has_unreadable_pdfs is False
+    pdf = _pdfs_dir(tmp_path) / "paper.pdf"
+    assert PdfReader(str(pdf)).is_encrypted is False
+    assert PDF_MARKER in PdfReader(str(pdf)).pages[0].extract_text()
+    norm = json.loads(outcome.evidence.result.finding)["normalization"]
+    assert norm["counts"]["normalized"] == 1
+    assert norm["counts"]["error"] == 0
+
+
+def test_corrupt_then_good_on_second_retry_ends_normalized(tmp_path):
+    good = _text_pdf_bytes()
+    # corrupt, corrupt, then good on the 2nd (final allowed) retry
+    adapter = RetryAdapter({
+        "10.1/x": {"filename": "paper.pdf",
+                   "payloads": [CORRUPT, CORRUPT, _owner_restricted_bytes(good)]},
+    })
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x"])
+
+    # 3 fetches: original + 2 retries, the last one succeeds
+    assert adapter.fetch_count["10.1/x"] == 3
+    assert outcome.unreadable_pdfs == []
+    pdf = _pdfs_dir(tmp_path) / "paper.pdf"
+    assert PdfReader(str(pdf)).is_encrypted is False
+    norm = json.loads(outcome.evidence.result.finding)["normalization"]
+    assert norm["counts"]["normalized"] == 1
+
+
+def test_locked_pdf_is_not_retried(tmp_path):
+    # A user-password lock would re-download to the same lock; surface it
+    # immediately WITHOUT spending retries (re-fetch called exactly once).
+    adapter = RetryAdapter({
+        "10.1/x": {"filename": "locked.pdf",
+                   "payloads": [_user_locked_bytes(_text_pdf_bytes())]},
+    })
+    outcome = LiteratureAcquirer(_spec(), workspace_dir=tmp_path,
+                                 adapter=adapter).acquire(["10.1/x"])
+
+    # NOT retried: exactly one fetch for the locked DOI
+    assert adapter.fetch_count["10.1/x"] == 1
+    # surfaced as locked (unchanged behavior), not as unreadable
+    assert outcome.locked_pdfs == ["locked.pdf"]
+    assert outcome.unreadable_pdfs == []
+    # ETHICS: still encrypted, never bypassed
+    locked_path = _pdfs_dir(tmp_path) / "locked.pdf"
+    assert PdfReader(str(locked_path)).is_encrypted is True
+    norm = json.loads(outcome.evidence.result.finding)["normalization"]
+    assert norm["counts"]["locked"] == 1

@@ -15,8 +15,14 @@ networkx>=3.0
 # Symbolic math (for number theory - optional, milestone 2+)
 # sympy>=1.11
 
-# Data validation (already in sci-adk core)
-pydantic>=1.10.0,<2.0.0
+# Data validation (Pydantic v2 for compatibility with sci-adk core)
+pydantic>=2.0.0
+
+# NOTE: pypdf[crypto] is intentionally NOT here. PDF normalization
+# (sci_adk.search.pdf_normalize, driven by loop/literature_acquirer) runs
+# host-side during acquisition, not inside this Docker experiment container.
+# It is a core dependency of sci-adk itself (pyproject.toml), so the container
+# does not need a PDF library.
 
 # Development tools (optional, for engineering layer)
 # pytest>=7.0.0

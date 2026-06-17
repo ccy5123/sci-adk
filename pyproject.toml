@@ -10,6 +10,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0.0",
+    # PDF normalization (src/sci_adk/search/pdf_normalize.py): acquired OA papers
+    # are sometimes owner-permission restricted (open fine, but text extraction
+    # disabled). pypdf re-writes such PDFs extractable so the agent can read them.
+    # Core (not optional): the env-lacks-a-PDF-lib pain is exactly what breaks
+    # downstream reading, so "pip install -e ." must bring it. The crypto extra
+    # (-> cryptography) is required to handle AES-encrypted PDFs.
+    "pypdf[crypto]>=6.0.0",
 ]
 
 [project.optional-dependencies]
