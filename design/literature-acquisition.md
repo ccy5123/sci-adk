@@ -210,8 +210,48 @@ judgment) — only novelty (a recordable literature-absence claim).
 | CLI | `sci-adk novelty <run> --hypothesis <id> ...` | `... --kind {result\|method}` |
 | (future) render markup | `\novelty{hyp}{text}` | `\novelty{result\|method}{hyp}{text}` |
 
-The render-time novelty gate (detection + action on an unsupported assertion) is the next
-design step (still DEFERRED in code).
+### Render-time novelty gate (design agreed 2026-06-18; implementation pending)
+
+The gate enforces that the paper (belief) never asserts a novelty/priority claim the record
+does not back. Same family as the evidence-validity gate (synthetic data cannot make a
+SUPPORTED empirical claim) and the paper-consistency gate (a dangling `\ref` fails verify).
+
+**Detection — explicit markup only (deterministic).** A novelty/priority claim is asserted
+in the paper ONLY via `\novelty{result|method}{hyp-id}{text}` (never inferred from free
+prose — no keyword scan, no NLP). This mirrors the `\ref`↔`\label` gate: the engine checks
+markup against the record deterministically. The honest limit (as with `\ref`): a "first"
+written as plain prose is not governed — the discipline is "assert novelty via the command".
+
+**Action — HARD fail on unsupported + scoped-render on supported.** For each
+`\novelty{kind}{hyp}{text}` the engine looks up `claim-novelty-{kind}-{hyp}`:
+- **SUPPORTED** → render `text` **plus an honest scope auto-derived FROM the record** — "to
+  our knowledge, as of <search date from the backing `NOVELTY_DECISION`>". This is the
+  engine rendering FROM the record (the good kind of "hedge"), not editing belief: the
+  intrinsic "to our knowledge, as of the search" bound (definition property 2) is attached
+  deterministically from the recorded search, never invented.
+- **NOT SUPPORTED** → HARD fail: a render error / non-zero `sci-adk verify`, naming
+  {hyp, kind} and the remedy (record a `found_nothing` search via
+  `sci-adk novelty <run> --hypothesis <hyp> --kind <kind> --searched ... --outcome found-nothing`,
+  or remove the assertion). The engine never softens or rewrites the author's claim — it
+  refuses to emit an unbacked one. (Auto-"hedging" an unsearched claim with "to our
+  knowledge" would be dishonest — it implies a search that never happened — so it is NOT a
+  fallback; hedging belongs only to the SUPPORTED render above.)
+
+**Placement (O-B-style):** a PURE checker used at render time (compiler) AND re-run by
+`sci-adk verify` headless. Recommended so verify can re-scan: emit `\novelty{}` as a
+preamble `\newcommand` macro that survives into the persisted `.tex` (LaTeX expands it; the
+record-derived scope string is baked in at render), so `verify` re-derives the novelty claim
+statuses from the persisted `NOVELTY_DECISION`s and re-checks every `\novelty{}` in the
+`.tex` against them — symmetry with the `\ref`↔`\label` re-scan. (Stage note: "the run never
+HALTs on novelty" is the experiment LOOP; this render/verify gate is the OUTPUT stage — no
+contradiction.)
+
+**Boundary unchanged:** the gate checks only that a `found_nothing` search of the right
+{hyp, kind} is on record — never semantic "same-ness" (the searcher's recorded judgment) or
+significance.
+
+Implementation depends on the 2-kind migration above (markup carries `kind`; the gate keys
+on `claim-novelty-{kind}-{hyp}`).
 
 **Implementation (v0.3).** The novelty (High) and contested (Medium) triggers are
 now built, on top of the Spec-creation anchor. Each recording-type checkpoint
