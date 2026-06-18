@@ -1,13 +1,15 @@
 # sci-adk Literature Acquisition
 
-> Status: v0.4 (2026-06-17). How sci-adk surveys and acquires prior work.
+> Status: v0.5 (2026-06-18). How sci-adk surveys and acquires prior work.
 > Discovery = Claude's web_search (allowed tool); acquisition = paperforge.
 > v0.2 added the discovery **trigger model** (graded triggers + a recorded
 > search/skip decision + an F7 link). v0.3 IMPLEMENTS the novelty (High) and
 > contested (Medium) triggers (the Spec-creation anchor was already implemented).
 > **v0.4 reshapes the novelty trigger (A->B-replace):** novelty is no longer a
 > run-HALT coupled to the experiment verdict -- it is a 1st-class revisable Claim
-> derived by rule. The paper-render (Low) trigger remains deferred.
+> derived by rule. **v0.5 lays down the 2-kind Novelty definition** (result-novelty +
+> method-novelty, independent; see "Novelty -- definition") as the agreed refinement of
+> the single-flag implementation. The paper-render (Low) novelty gate remains deferred.
 
 sci-adk acquires the literature the way a researcher does: when starting, when
 unsure, or when checking whether something has already been done, you *search*
@@ -155,6 +157,61 @@ This decision checkpoint is **proactive** (recorded at a trigger, before/around
 discovery); the "Halt gates" above are **reactive** (raised after an acquisition
 attempt -- an OA miss, or SI needed). They are complementary surfaces, not the
 same mechanism.
+
+## Novelty — definition (2-kind; agreed 2026-06-18)
+
+> This is the AGREED conceptual definition. It REFINES the single-flag implementation
+> described under "Implementation" below (one `Hypothesis.novelty` flag + one
+> `claim-novelty-<hyp>`); the migration to the 2-kind model is pending.
+
+**Novelty** in sci-adk is a revisable, **literature-referent** Claim that, as of a
+recorded prior-art search, **no prior published work establishes a specified aspect of a
+hypothesis**. It is a claim ABOUT the state of published knowledge (referent = the
+literature) — distinct from the experiment claim (referent = nature) and from formal
+claims — and independent of the experiment verdict (B-replace).
+
+Two **independent** kinds, each separately pre-registered, searched, derived, and revised:
+
+- **result-novelty(hyp)** — no prior published work has established hyp's RESULT (its
+  `statement`/conclusion).
+- **method-novelty(hyp)** — no prior published work has used hyp's METHOD (its approach).
+
+The axes are orthogonal — all four quadrants are meaningful: known-result/new-method
+(e.g. a simpler proof of a known theorem), new-result/known-method (e.g. a known technique
+applied to a new target), both-new, neither.
+
+Defining properties (per kind):
+1. **Referent = the literature** (state of published knowledge), not nature — so a "novel
+   refutation" is naturally experiment-REFUTED + novelty-SUPPORTED.
+2. **Absence claim → searched, never proven.** Intrinsically scoped "to our knowledge, as
+   of the recorded search"; never absolute priority.
+3. **SUPPORTED iff** a `NOVELTY_DECISION` bound to {hyp, kind} recorded outcome
+   `found_nothing` (safety floor — `found_something`/skip/absent → PROPOSED).
+4. **Pre-registered (anti-HARKing):** the {hyp, kind} flag is frozen in the Spec before
+   results; dropping it is a human-only F7 amendment, never a silent edit.
+5. **Revisable / non-monotone:** new prior art demotes it; `sci-adk verify` re-derives the
+   status from the record (deleted/tampered decision → DIVERGED).
+
+**Boundary — what the gate does NOT adjudicate.** sci-adk does not decide whether a found
+paper is *really* "the same" result/method — that semantic judgment lives in the recorded
+search (the searched DOIs + the searcher's recorded outcome). The (future) gate is purely
+deterministic: it checks that a `found_nothing` search of the right {hyp, kind} is on
+record. Likewise sci-adk does not adjudicate **significance/importance** (a value
+judgment) — only novelty (a recordable literature-absence claim).
+
+**Structural changes from the single-flag model (migration target):**
+
+| element | current (single) | 2-kind |
+|---------|------------------|--------|
+| Spec `Hypothesis` | `novelty: bool` | `novelty_result: bool` + `novelty_method: bool` (frozen) |
+| Claim | `claim-novelty-<hyp>` | `claim-novelty-result-<hyp>` / `claim-novelty-method-<hyp>` (flagged kinds only) |
+| `NOVELTY_DECISION` | hyp-bound | + `kind: result \| method` |
+| `derive_novelty_status` | per hyp | per {hyp, kind} |
+| CLI | `sci-adk novelty <run> --hypothesis <id> ...` | `... --kind {result\|method}` |
+| (future) render markup | `\novelty{hyp}{text}` | `\novelty{result\|method}{hyp}{text}` |
+
+The render-time novelty gate (detection + action on an unsupported assertion) is the next
+design step (still DEFERRED in code).
 
 **Implementation (v0.3).** The novelty (High) and contested (Medium) triggers are
 now built, on top of the Spec-creation anchor. Each recording-type checkpoint
