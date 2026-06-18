@@ -1,8 +1,17 @@
 # Paper Figures and Supporting Information — Design
 
-> Status: v0.1 DESIGN (2026-06-18) — decisions D1-D5 resolved; implementation pending
+> Status: v0.2 — decisions D1-D5 resolved; Phases 1-4 IMPLEMENTED (4c deferred). 2026-06-18.
 > Purpose: generate the paper's important **figures** (with captions/labels consistent with the body) and its **Supporting Information (SI)**, deterministically and as a self-contained Overleaf folder-upload
-> Scope: design only. No code is changed by this document.
+
+## Implementation status
+
+- **Phase 1** (4be6ea7): figure-spec hook + native pgfplots data-plot renderer + stable labels + folder co-location + prose↔figure `\ref` consistency report.
+- **Phase 2** (aa9e850): SI auto record-dump renderer (`si.tex`).
+- **Phase 3** (249df7b): within-document `\ref`↔`\label` consistency as a `sci-adk verify` HARD gate.
+- **Phase 4-1** (69c0133): image-path figure RENDER mechanism — `ImageFigureSpec` (kind-discriminated union; native stays byte-identical) + `render_image_figure` + compiler co-location into `paper/figures/`.
+- **Phase 4-2** (5fdf79b): the deterministic image SOURCE (O-A) — an RDKit-in-docker molecule-structure plotter (`adapter/t1_figures.py`, F4-seam capability); byte-identical PNG VERIFIED against the rebuilt `sci-adk-python-base` image.
+- **Phase 4-3** (1dadf33): the optional agent `SIProse` hook (mirrors `PaperProse`) around the SI record dump.
+- **4c DEFERRED** (cross-document main↔SI `\ref` via `xr`): not built — the Overleaf folder-upload compile-order wrinkle (si.tex must compile first to emit si.aux) outweighs the value. The authoring convention stays: refer to SI figures as plain text ("Figure S1"), not `\ref{fig:SI-...}`.
 
 ---
 
@@ -105,11 +114,15 @@ render-purity invariant already locked by the evidence-validity/render tests.
 
 ## 5. Open sub-decisions (resolve during implementation)
 
-- **O-A — image-path source.** For the IMAGE path (diagrams), where does the image come from?
-  (agent-provided file? a domain-specific deterministic plotter, e.g. RDKit for molecules?
-  digitized?). Recommendation: **Phase 1 ships ONLY the native data-plot path** (covers the
-  common case — plotting Evidence series); the image path (arbitrary diagrams) is a later phase
-  because it needs a per-domain image source and a reproducibility story.
+- **O-A — image-path source. RESOLVED (Phase 4-2).** The IMAGE source is a per-domain
+  deterministic plotter living in the capability adapter (F4 seam), NOT the kernel: the first is
+  an RDKit-in-docker molecule-structure plotter (`adapter/t1_figures.py`) that draws a `Molecule`
+  to a fixed-canvas PNG inside `sci-adk-python-base`. The reproducibility story (D2) is satisfied
+  and VERIFIED: the same molecule renders byte-identical across runs (pinned `rdkit==2024.9.6`,
+  no timestamp in cairo PNG). The kernel render path (Phase 4-1) is domain-free — it only emits
+  `\includegraphics{figures/<id><ext>}` from an `ImageFigureSpec`; the compiler co-locates the
+  file. An agent-provided file is also accepted by that same render path (the spec just points at
+  a file). digitized images remain a later option.
 - **O-B — where the consistency gate lives.** Extend `sci-adk verify` (so a third party
   re-checks consistency headless) vs a render-time check vs both. Recommendation: a PURE checker
   used at render time AND surfaced in `verify`.
@@ -127,8 +140,10 @@ render-purity invariant already locked by the evidence-validity/render tests.
   co-location + prose↔figure `\ref` consistency (the user's headline need).
 - **Phase 2**: SI auto record-dump renderer (`si.tex`) + main↔SI cross-ref consistency.
 - **Phase 3**: consistency as a verify-style gate (extend `verify`).
-- **Phase 4** (deferred-ish): the image path (domain diagrams, O-A) + the optional agent
-  SI-prose hook.
+- **Phase 4** (DONE, except 4c): 4-1 the image render path (`ImageFigureSpec` + co-location);
+  4-2 the deterministic image source (RDKit-in-docker molecule plotter, O-A resolved); 4-3 the
+  optional agent SI-prose hook. **4c** (cross-document main↔SI `\ref` via `xr`) is DEFERRED — the
+  Overleaf compile-order wrinkle outweighs the value; plain-text "Figure S1" stays the convention.
 
 ---
 
@@ -155,8 +170,8 @@ render-purity invariant already locked by the evidence-validity/render tests.
 
 ---
 
-Version: 0.1.0
-Status: DESIGN (decisions D1-D5 resolved; implementation pending)
+Version: 0.2.0
+Status: IMPLEMENTED (Phases 1-4; 4c cross-document `\ref` deferred)
 Relates to: `design/research-session-enforcement.md` (sibling render-layer design pattern),
 `design/literature-acquisition.md` (SI here is OUTPUT-side, vs the INPUT-side SI-acquisition
 there), `design/figure-digitization.md` (the INVERSE — reading data from figures).
