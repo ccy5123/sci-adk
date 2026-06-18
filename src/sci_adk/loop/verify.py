@@ -60,6 +60,16 @@ from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
+from sci_adk.render.consistency import (
+    LatexRefReport,
+    check_latex_ref_consistency,
+)
+
+# The rendered paper documents verify re-checks for internal \ref<->\label integrity
+# (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN themselves; the
+# cross-DOCUMENT main<->SI \ref is DEFERRED (it needs the LaTeX xr package + a
+# compile-order dependency). A document absent from paper/ is simply skipped.
+_PAPER_DOCS: tuple[str, ...] = ("draft.tex", "si.tex")
 
 # Per-hypothesis audit results. Strings (not an enum) keep the report trivially
 # printable/serializable; the set is closed and small.
@@ -98,13 +108,25 @@ class VerifyReport:
         spec_id: the recorded Spec id.
         outcomes: one :class:`VerifyOutcome` per recorded Claim.
         digest: the record digest (tamper-evidence companion, §8 F6).
-        all_reproduced: True iff every recorded claim REPRODUCED (the exit gate).
+        all_reproduced: True iff every recorded claim REPRODUCED -- the CLAIMS-only
+            signal. Its meaning is UNCHANGED by Phase 3 (existing callers read it as the
+            belief-reproduction signal); the paper gate lives in the fields below.
+        paper_consistency: per-paper-document (``draft.tex`` / ``si.tex``) internal
+            ``\\ref``<->``\\label`` reports (D4, Phase 3), keyed by file name. EMPTY when
+            the run has no ``paper/`` directory (or neither document is present).
+        paper_consistent: True iff EVERY present paper document's report is ``ok`` --
+            and True (vacuously) when there is no paper to check. The paper HARD gate.
+        passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent``. This
+            is what the CLI exits on; ``all_reproduced`` alone is the claim signal.
     """
 
     spec_id: str
     outcomes: List[VerifyOutcome]
     digest: str
     all_reproduced: bool = field(default=False)
+    paper_consistency: Dict[str, LatexRefReport] = field(default_factory=dict)
+    paper_consistent: bool = field(default=True)
+    passed: bool = field(default=False)
 
 
 def verify_run(run_dir: Path) -> VerifyReport:
@@ -188,11 +210,22 @@ def verify_run(run_dir: Path) -> VerifyReport:
         )
 
     all_reproduced = bool(outcomes) and all(o.result == REPRODUCED for o in outcomes)
+
+    # Phase 3 (D4): re-check the RENDERED paper's internal \ref<->\label integrity, as a
+    # third party would -- READ-ONLY (read each .tex; never recompile, never write, no
+    # LLM). draft.tex AND si.tex, each WITHIN itself. A document not on disk is skipped;
+    # a run with no paper/ -> empty map -> paper_consistent True (gate unchanged).
+    paper_consistency = _check_paper_consistency(run_dir)
+    paper_consistent = all(rep.ok for rep in paper_consistency.values())
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
         digest=record_digest(run_dir),
         all_reproduced=all_reproduced,
+        paper_consistency=paper_consistency,
+        paper_consistent=paper_consistent,
+        passed=all_reproduced and paper_consistent,
     )
 
 
@@ -335,6 +368,33 @@ def _audit_novelty_claim(
         result=result,
         rederived_basis=basis,
     )
+
+
+# -- read-only paper-consistency check (Phase 3, D4) -------------------------
+
+def _check_paper_consistency(run_dir: Path) -> Dict[str, LatexRefReport]:
+    """Re-check each rendered paper document's internal ``\\ref``<->``\\label`` integrity.
+
+    READ-ONLY: reads ``run_dir/paper/<doc>.tex`` for each of ``_PAPER_DOCS`` that EXISTS
+    and runs the pure :func:`check_latex_ref_consistency` over it. No recompile, no LLM,
+    no write -- this is the same headless, third-party spirit as the claim re-derivation.
+
+    Returns a map keyed by file name (``draft.tex`` / ``si.tex``) -> its
+    :class:`LatexRefReport`. EMPTY when the run has no ``paper/`` directory or neither
+    document is present -- the caller treats an empty map as "nothing to gate" (vacuously
+    consistent), preserving the pre-Phase-3 exit behavior for runs without a paper.
+    """
+    paper_dir = run_dir / "paper"
+    reports: Dict[str, LatexRefReport] = {}
+    if not paper_dir.is_dir():
+        return reports
+    for name in _PAPER_DOCS:
+        doc = paper_dir / name
+        if doc.is_file():
+            reports[name] = check_latex_ref_consistency(
+                doc.read_text(encoding="utf-8")
+            )
+    return reports
 
 
 # -- read-only loaders -------------------------------------------------------

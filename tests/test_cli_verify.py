@@ -199,3 +199,46 @@ def test_verify_ambiguous_criterion_friendly_error_no_traceback(tmp_path, capsys
     assert "ambiguous" in captured.err.lower()
     assert "hyp-a" in captured.err and "hyp-b" in captured.err
     assert "Traceback (most recent call last)" not in captured.err
+
+
+# -- Phase 3: the paper-consistency gate via the CLI (D4) ---------------------
+
+def _write_paper(run_dir: Path, name: str, tex: str) -> None:
+    paper = run_dir / "paper"
+    paper.mkdir(parents=True, exist_ok=True)
+    (paper / name).write_text(tex, encoding="utf-8")
+
+
+def test_verify_inconsistent_paper_exits_nonzero_and_prints_unresolved(tmp_path, capsys):
+    # A reproducing run whose RENDERED draft.tex has a dangling \ref must exit non-zero
+    # (the combined gate) and print the unresolved reference so a third party sees why.
+    spec = _numeric_spec("cli-paper-bad", value=0.9)
+    run_dir = _seed_numeric(tmp_path, spec, 0.95)  # claim genuinely reproduces
+    _write_paper(run_dir, "draft.tex", r"See Figure~\ref{fig:ghost}.")  # no \label
+
+    rc = main(["verify", str(run_dir)])
+    captured = capsys.readouterr()
+    assert rc != 0
+    # The claim still reproduces, but the paper gate fails -- and the report names the
+    # broken reference + the offending file.
+    combined = captured.out + captured.err
+    assert "fig:ghost" in combined
+    assert "draft.tex" in combined
+
+
+def test_verify_consistent_paper_exits_zero(tmp_path, capsys):
+    spec = _numeric_spec("cli-paper-ok", value=0.9)
+    run_dir = _seed_numeric(tmp_path, spec, 0.95)
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a} See Figure~\ref{fig:a}.")
+    _write_paper(run_dir, "si.tex", r"\label{tab:s1}\ref{tab:s1}")
+
+    rc = main(["verify", str(run_dir)])
+    assert rc == 0
+
+
+def test_verify_no_paper_exits_zero_unchanged(tmp_path, capsys):
+    # No paper/ -> the paper gate is vacuously satisfied; exit behavior is unchanged.
+    spec = _numeric_spec("cli-paper-none", value=0.9)
+    run_dir = _seed_numeric(tmp_path, spec, 0.95)
+    rc = main(["verify", str(run_dir)])
+    assert rc == 0

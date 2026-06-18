@@ -335,3 +335,133 @@ def test_verify_outcome_is_frozen(tmp_path):
     assert isinstance(outcome, VerifyOutcome)
     with pytest.raises(Exception):
         outcome.result = "DIVERGED"  # frozen dataclass -> mutation refused
+
+
+# -- Phase 3: paper consistency as a verify-style HARD gate (D4) --------------
+# verify becomes a third party that re-checks the RENDERED paper's internal
+# \ref<->\label integrity (draft.tex AND si.tex), read-only, and fails the gate on a
+# broken reference -- EVEN IF every claim reproduces. The claim signal (all_reproduced)
+# keeps its meaning; the new fields (paper_consistency, paper_consistent, passed) sit
+# alongside, and the combined exit gate is all_reproduced AND paper_consistent.
+
+from sci_adk.render.consistency import LatexRefReport  # noqa: E402
+
+
+def _write_paper(run_dir: Path, name: str, tex: str) -> None:
+    paper = run_dir / "paper"
+    paper.mkdir(parents=True, exist_ok=True)
+    (paper / name).write_text(tex, encoding="utf-8")
+
+
+def test_verify_no_paper_is_consistent(tmp_path):
+    # A run with NO paper/ dir: paper_consistent is True (nothing to check), exit gate
+    # unchanged. The new fields exist; paper_consistency is empty. (_seed renders a
+    # paper/ via the compiler, so remove it to exercise the genuine no-paper path.)
+    spec = _numeric_spec("v-nopaper", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    import shutil
+    shutil.rmtree(run_dir / "paper")
+    report = verify_run(run_dir)
+    assert report.paper_consistency == {}
+    assert report.paper_consistent is True
+    assert report.all_reproduced is True
+    assert report.passed is True
+
+
+def test_verify_seeded_skeletal_paper_is_consistent(tmp_path):
+    # The real compiler-rendered draft.tex + si.tex (no figures, no broken refs) MUST be
+    # internally consistent -- the gate does not false-fail on a clean skeleton.
+    spec = _numeric_spec("v-skeleton", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))  # compiler writes paper/
+    report = verify_run(run_dir)
+    assert set(report.paper_consistency) == {"draft.tex", "si.tex"}
+    assert report.paper_consistent is True
+    assert report.passed is True
+
+
+def test_verify_consistent_paper_passes(tmp_path):
+    spec = _numeric_spec("v-goodpaper", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\label{fig:a} See Figure~\ref{fig:a}.")
+    _write_paper(run_dir, "si.tex",
+                 r"\label{tab:s1} Table~\ref{tab:s1}.")
+    report = verify_run(run_dir)
+    assert set(report.paper_consistency) == {"draft.tex", "si.tex"}
+    assert all(isinstance(r, LatexRefReport) for r in report.paper_consistency.values())
+    assert report.paper_consistency["draft.tex"].ok is True
+    assert report.paper_consistent is True
+    assert report.all_reproduced is True
+    assert report.passed is True
+
+
+def test_verify_dangling_ref_in_draft_fails_gate_even_if_claims_reproduce(tmp_path):
+    # The headline Phase-3 gate: a dangling \ref in draft.tex makes paper_consistent
+    # False and passed False, EVEN THOUGH the claim reproduces (all_reproduced True).
+    spec = _numeric_spec("v-ghostref", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))  # claim genuinely supported
+    _write_paper(run_dir, "draft.tex", r"See Figure~\ref{fig:ghost}.")  # no \label
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True            # claim signal UNCHANGED in meaning
+    assert "draft.tex" in report.paper_consistency
+    assert report.paper_consistency["draft.tex"].unresolved_refs == ["fig:ghost"]
+    assert report.paper_consistency["draft.tex"].ok is False
+    assert report.paper_consistent is False
+    assert report.passed is False                   # combined gate fails
+
+
+def test_verify_dangling_ref_in_si_fails_gate(tmp_path):
+    # The gate covers si.tex too (both documents are checked WITHIN themselves).
+    spec = _numeric_spec("v-sighost", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a}")  # draft is clean
+    _write_paper(run_dir, "si.tex", r"Table~\ref{tab:ghost}.")        # si is broken
+    report = verify_run(run_dir)
+    assert report.paper_consistency["draft.tex"].ok is True
+    assert report.paper_consistency["si.tex"].ok is False
+    assert report.paper_consistency["si.tex"].unresolved_refs == ["tab:ghost"]
+    assert report.paper_consistent is False
+    assert report.passed is False
+
+
+def test_verify_duplicate_label_fails_gate(tmp_path):
+    spec = _numeric_spec("v-duplabel", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a}\label{fig:a}")
+    report = verify_run(run_dir)
+    assert report.paper_consistency["draft.tex"].duplicate_labels == ["fig:a"]
+    assert report.paper_consistent is False
+    assert report.passed is False
+
+
+def test_verify_paper_check_is_read_only(tmp_path):
+    # Adding the paper check must not break the read-only invariant: verify reads the
+    # .tex, never writes/recompiles.
+    spec = _numeric_spec("v-paper-ro", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"See \ref{fig:ghost}.")  # broken on purpose
+
+    def _snapshot(d: Path) -> dict:
+        return {
+            p.relative_to(d).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in sorted(d.rglob("*")) if p.is_file()
+        }
+
+    before = _snapshot(run_dir)
+    verify_run(run_dir)
+    after = _snapshot(run_dir)
+    assert before.keys() == after.keys(), "verify created or deleted a file"
+    for k in before:
+        assert before[k][0] == after[k][0], f"verify modified file contents: {k}"
+
+
+def test_verify_all_reproduced_unchanged_when_no_paper(tmp_path):
+    # Regression guard: existing callers/tests read all_reproduced as the CLAIMS-only
+    # signal. It must keep that meaning regardless of paper presence.
+    spec = _numeric_spec("v-meaning", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.10))  # 0.10 < 0.9 -> refuted, but
+    # the claim still reproduces (recorded refuted == re-derived refuted).
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True   # the claim reproduces (refuted==refuted)
+    assert report.paper_consistent is True
+    assert report.passed is True

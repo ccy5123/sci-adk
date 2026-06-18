@@ -39,10 +39,14 @@ recorded verdicts resolved. No LLM is invoked.
 READ-ONLY belief audit: it re-applies the frozen ``DecisionRule`` to the RECORDED
 Evidence (numeric autonomously; non-numeric via a ``RecordedJudge`` re-reading the
 recorded trails + the F2 gate -- still no LLM) and reports, per recorded Claim,
-REPRODUCED / DIVERGED / UNRESOLVED. It re-runs no experiment, calls no LLM/capability,
-and overwrites no recorded file. It also prints the record digest (tamper-evidence).
-Exit 0 iff every recorded claim is reproduced -- CI-style re-verification a third
-party can run without Claude Code.
+REPRODUCED / DIVERGED / UNRESOLVED. It ALSO re-checks the rendered paper's internal
+``\\ref``<->``\\label`` integrity for ``paper/draft.tex`` and ``paper/si.tex`` (each
+WITHIN itself; the cross-DOCUMENT main<->SI ref is deferred) -- a Phase-3 HARD gate
+(design/paper-figures-and-si.md D4). It re-runs no experiment, calls no LLM/capability,
+reads the ``.tex`` read-only, and overwrites no recorded file. It also prints the
+record digest (tamper-evidence). Exit 0 iff every recorded claim reproduces AND the
+paper is internally consistent -- CI-style re-verification a third party can run
+without Claude Code.
 """
 
 from __future__ import annotations
@@ -480,9 +484,35 @@ def _cmd_verify(args: argparse.Namespace) -> int:
               f"(recorded={o.recorded_status.value}, re-derived={rederived})")
     if report.all_reproduced:
         print("  all recorded claims reproduced from the record")
+    else:
+        print("  NOT reproduced: at least one claim DIVERGED or is UNRESOLVED "
+              "(see above)", file=sys.stderr)
+
+    # Phase 3 (design/paper-figures-and-si.md D4): paper-consistency is a HARD gate.
+    # Report each rendered document's internal \ref<->\label integrity; a broken
+    # reference (unresolved \ref) or a duplicate \label fails the combined exit gate
+    # EVEN IF every claim reproduces. A run with no paper/ -> empty map -> consistent.
+    if report.paper_consistency:
+        if report.paper_consistent:
+            print("  paper consistency: OK (internal \\ref<->\\label integrity) for "
+                  f"{', '.join(sorted(report.paper_consistency))}")
+        else:
+            print("  paper consistency FAILED (internal \\ref<->\\label integrity):",
+                  file=sys.stderr)
+            for name in sorted(report.paper_consistency):
+                rep = report.paper_consistency[name]
+                if rep.ok:
+                    continue
+                if rep.unresolved_refs:
+                    print(f"    - {name}: unresolved \\ref (no such \\label): "
+                          f"{', '.join(rep.unresolved_refs)}", file=sys.stderr)
+                if rep.duplicate_labels:
+                    print(f"    - {name}: duplicate \\label (multiply defined): "
+                          f"{', '.join(rep.duplicate_labels)}", file=sys.stderr)
+
+    # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent.
+    if report.passed:
         return 0
-    print("  NOT reproduced: at least one claim DIVERGED or is UNRESOLVED "
-          "(see above)", file=sys.stderr)
     return 1
 
 
