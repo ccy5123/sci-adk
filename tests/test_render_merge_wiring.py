@@ -506,3 +506,60 @@ def test_cli_run_figures_invalid_spec_errors(tmp_path):
         "--spec-id", "t-cli-fig-badspec", "--figures", str(f),
     ])
     assert rc == 2
+
+
+# ---------------------------------------------------------------------------
+# Supporting Information (paper-figures Phase 2, D3): the compiler also emits a
+# standalone si.tex next to draft.tex; CompileResult.si_path points at it.
+# ---------------------------------------------------------------------------
+
+def test_compile_emits_si_next_to_draft(tmp_path):
+    """The compiler writes paper/si.tex next to paper/draft.tex; si.tex is a
+    standalone compilable document and CompileResult.si_path points at it."""
+    result = ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-si-wire", experiment=_point_experiment)
+
+    paper_dir = tmp_path / "runs" / "t-si-wire" / "paper"
+    si_path = paper_dir / "si.tex"
+    draft_path = paper_dir / "draft.tex"
+    assert si_path.exists(), "paper/si.tex must be emitted next to draft.tex"
+    assert draft_path.exists()
+
+    # CompileResult.si_path points at the standalone SI.
+    assert result.si_path == si_path
+    assert result.si_path.name == "si.tex"
+
+    si = si_path.read_text(encoding="utf-8")
+    # Standalone doc: parses on its own (own \documentclass + \end{document}).
+    assert r"\documentclass{article}" in si
+    assert r"\end{document}" in si
+    assert "Supporting Information" in si
+    # The record dump carries the run's evidence id.
+    assert "ev-pt-0" in si
+
+
+def test_compile_si_dumps_record_with_figures(tmp_path):
+    """When figures are supplied, si.tex renders ALL of them (the SI shows every
+    figure) with the pgfplots preamble; y pulled from the recorded Evidence."""
+    from sci_adk.render.figures import PaperFigures
+
+    figs = PaperFigures.model_validate(_figures_json("growth", "ev-pt-0")).figures
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-si-fig", experiment=_point_experiment, figures=figs)
+
+    si = (tmp_path / "runs" / "t-si-fig" / "paper" / "si.tex").read_text(
+        encoding="utf-8")
+    assert r"\usepackage{pgfplots}" in si
+    assert r"\label{fig:growth}" in si
+    assert "(1, 1)" in si  # ev-pt-0 point=1.0 at x=1
+
+
+def test_compile_si_integrity_points_to_verify(tmp_path):
+    """Phase 2 passes digest=None at compile time (evidence not yet persisted), so the
+    SI's integrity section points to ``sci-adk verify`` rather than a fake digest."""
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-si-verify", experiment=_point_experiment)
+    si = (tmp_path / "runs" / "t-si-verify" / "paper" / "si.tex").read_text(
+        encoding="utf-8")
+    assert "sci-adk verify" in si
+    assert "Record digest (sha256):" not in si

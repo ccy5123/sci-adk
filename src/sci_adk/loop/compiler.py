@@ -65,6 +65,7 @@ from sci_adk.render.figures import (
 )
 from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.prose import PaperProse
+from sci_adk.render.si import render_si_latex
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
 ExperimentFn = Callable[[Spec, Path], Sequence[EvidenceItem]]
@@ -108,6 +109,7 @@ class CompileResult:
     checkpoints: List[Checkpoint]
     run_dir: Path
     paper_path: Path
+    si_path: Optional[Path] = None
     prior_work_checkpoint: Optional[PriorWorkCheckpoint] = None
     contested_checkpoints: List[ContestedCheckpoint] = field(default_factory=list)
     novelty_checkpoints: List[NoveltyCheckpoint] = field(default_factory=list)
@@ -252,6 +254,26 @@ class ResearchCompiler:
         paper_path = paper_dir / "draft.tex"
         paper_path.write_text(paper_tex, encoding="utf-8")
 
+        # Supporting Information (design/paper-figures-and-si.md Phase 2 / D3): a
+        # STANDALONE si.tex = the deterministic record dump (every Evidence item, the
+        # numeric data tables, ALL figures, the verdicts + frozen decision rules). It
+        # uploads alongside draft.tex as a second compilable document in paper/.
+        #
+        # digest=None on purpose: at COMPILE time the evidence is NOT yet persisted to
+        # disk (the loop persists AFTER compile), so record_digest(run_dir) here would
+        # digest an INCOMPLETE run dir. So Phase 2 does NOT embed the digest -- the SI's
+        # integrity section points to `sci-adk verify` (which recomputes the digest over
+        # the persisted run). Embedding the real digest at render time is a later
+        # refinement. (Cross-DOCUMENT main<->SI \ref -- e.g. "Fig. S2" in the main paper
+        # resolving into the SI -- is deferred to Phase 3: separate compiles would need
+        # the `xr` package + a compile-order dependency; the SI is INTERNALLY consistent
+        # here via figure_labels' unique-id enforcement.)
+        si_tex = render_si_latex(
+            spec, claims, evidence, figures=figures, digest=None
+        )
+        si_path = paper_dir / "si.tex"
+        si_path.write_text(si_tex, encoding="utf-8")
+
         # Prose<->figure ref consistency (design/paper-figures-and-si.md D4): scan the
         # RENDERED body for \ref{fig:...}/\label integrity. NON-BLOCKING -- surfaced in
         # the result (a warning channel, like the contested/novelty checkpoints), never
@@ -271,6 +293,7 @@ class ResearchCompiler:
             checkpoints=checkpoints,
             run_dir=run_dir,
             paper_path=paper_path,
+            si_path=si_path,
             prior_work_checkpoint=pw_checkpoint,
             contested_checkpoints=contested_checkpoints,
             novelty_checkpoints=novelty_checkpoints,
