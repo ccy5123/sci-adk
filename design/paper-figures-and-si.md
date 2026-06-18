@@ -1,6 +1,6 @@
 # Paper Figures and Supporting Information — Design
 
-> Status: v0.2 — decisions D1-D5 resolved; Phases 1-4 IMPLEMENTED (4c deferred). 2026-06-18.
+> Status: v0.3 — decisions D1-D5 resolved; Phases 1-4 IMPLEMENTED (4c deferred); de-domain-specialized. 2026-06-18.
 > Purpose: generate the paper's important **figures** (with captions/labels consistent with the body) and its **Supporting Information (SI)**, deterministically and as a self-contained Overleaf folder-upload
 
 ## Implementation status
@@ -9,8 +9,8 @@
 - **Phase 2** (aa9e850): SI auto record-dump renderer (`si.tex`).
 - **Phase 3** (249df7b): within-document `\ref`↔`\label` consistency as a `sci-adk verify` HARD gate.
 - **Phase 4-1** (69c0133): image-path figure RENDER mechanism — `ImageFigureSpec` (kind-discriminated union; native stays byte-identical) + `render_image_figure` + compiler co-location into `paper/figures/`.
-- **Phase 4-2** (5fdf79b): the deterministic image SOURCE (O-A) — an RDKit-in-docker molecule-structure plotter (`adapter/t1_figures.py`, F4-seam capability); byte-identical PNG VERIFIED against the rebuilt `sci-adk-python-base` image.
 - **Phase 4-3** (1dadf33): the optional agent `SIProse` hook (mirrors `PaperProse`) around the SI record dump.
+- **Correction** (7d7e368): the figure feature is DOMAIN-GENERAL. The earlier molecule/RDKit image source (commit 5fdf79b, `adapter/t1_figures.py` + a `--molecule-figures` CLI flag + an rdkit pin in the shared base image) was a domain leak and is REMOVED. A non-data figure is now produced by the experiment/agent with whatever tool fits its domain and supplied via the general `--figures` JSON (`ImageFigureSpec.image`); the kernel carries zero domain code. Figure NUMBERING is by body order — `order_figures_by_reference` numbers a figure by its first `\ref{fig:<id>}` in the paper body (unreferenced appended) and the image file is saved generically as `paper/figures/fig<N><ext>` (never an agent/domain id). Note: body-order auto-detection activates when real `\ref` reach the body; `PaperProse` is currently LaTeX-escaped, so without that, ordering = supply order (which the agent sets to the paper's discussion order). Reproducibility is recorded via provenance, not a global tool-version pin.
 - **4c DEFERRED** (cross-document main↔SI `\ref` via `xr`): not built — the Overleaf folder-upload compile-order wrinkle (si.tex must compile first to emit si.aux) outweighs the value. The authoring convention stays: refer to SI figures as plain text ("Figure S1"), not `\ref{fig:SI-...}`.
 
 ---
@@ -114,15 +114,15 @@ render-purity invariant already locked by the evidence-validity/render tests.
 
 ## 5. Open sub-decisions (resolve during implementation)
 
-- **O-A — image-path source. RESOLVED (Phase 4-2).** The IMAGE source is a per-domain
-  deterministic plotter living in the capability adapter (F4 seam), NOT the kernel: the first is
-  an RDKit-in-docker molecule-structure plotter (`adapter/t1_figures.py`) that draws a `Molecule`
-  to a fixed-canvas PNG inside `sci-adk-python-base`. The reproducibility story (D2) is satisfied
-  and VERIFIED: the same molecule renders byte-identical across runs (pinned `rdkit==2024.9.6`,
-  no timestamp in cairo PNG). The kernel render path (Phase 4-1) is domain-free — it only emits
-  `\includegraphics{figures/<id><ext>}` from an `ImageFigureSpec`; the compiler co-locates the
-  file. An agent-provided file is also accepted by that same render path (the spec just points at
-  a file). digitized images remain a later option.
+- **O-A — image-path source. RESOLVED (general, domain-free).** The IMAGE source is whatever the
+  experiment/agent produces with the tool that fits its domain (matplotlib, a domain plotter,
+  digitization, …) — supplied via the general `--figures` JSON as an `ImageFigureSpec` whose
+  `image` points at the produced file. sci-adk's kernel render path (Phase 4-1) is domain-free: it
+  emits `\includegraphics{figures/fig<N>}` and the compiler co-locates the file as
+  `paper/figures/fig<N><ext>`. There is NO domain-specific plotter, CLI flag, or tool baked into
+  the core or the shared base image (an earlier RDKit-molecule attempt was reverted as a domain
+  leak, commit 7d7e368). Reproducibility (D2) is recorded via provenance (the experiment records
+  the tool/version that produced the figure), not enforced by a global version pin.
 - **O-B — where the consistency gate lives.** Extend `sci-adk verify` (so a third party
   re-checks consistency headless) vs a render-time check vs both. Recommendation: a PURE checker
   used at render time AND surfaced in `verify`.
@@ -141,9 +141,11 @@ render-purity invariant already locked by the evidence-validity/render tests.
 - **Phase 2**: SI auto record-dump renderer (`si.tex`) + main↔SI cross-ref consistency.
 - **Phase 3**: consistency as a verify-style gate (extend `verify`).
 - **Phase 4** (DONE, except 4c): 4-1 the image render path (`ImageFigureSpec` + co-location);
-  4-2 the deterministic image source (RDKit-in-docker molecule plotter, O-A resolved); 4-3 the
-  optional agent SI-prose hook. **4c** (cross-document main↔SI `\ref` via `xr`) is DEFERRED — the
-  Overleaf compile-order wrinkle outweighs the value; plain-text "Figure S1" stays the convention.
+  4-3 the optional agent SI-prose hook; a correction (7d7e368) made figures domain-general —
+  body-order `fig<N>` numbering + a general image source (the experiment/agent supplies the file
+  via `--figures`), removing the molecule/RDKit plotter that had leaked the domain into the core.
+  **4c** (cross-document main↔SI `\ref` via `xr`) is DEFERRED — the Overleaf compile-order wrinkle
+  outweighs the value; plain-text "Figure S1" stays the convention.
 
 ---
 
@@ -170,8 +172,8 @@ render-purity invariant already locked by the evidence-validity/render tests.
 
 ---
 
-Version: 0.2.0
-Status: IMPLEMENTED (Phases 1-4; 4c cross-document `\ref` deferred)
+Version: 0.3.0
+Status: IMPLEMENTED (Phases 1-4, domain-general; 4c cross-document `\ref` deferred)
 Relates to: `design/research-session-enforcement.md` (sibling render-layer design pattern),
 `design/literature-acquisition.md` (SI here is OUTPUT-side, vs the INPUT-side SI-acquisition
 there), `design/figure-digitization.md` (the INVERSE — reading data from figures).
