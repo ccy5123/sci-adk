@@ -30,6 +30,7 @@ from typing import Any, Optional, Sequence
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Hypothesis, Spec
+from sci_adk.render.figures import FigureSpec, render_native_figure
 from sci_adk.render.prose import PaperProse
 
 # LaTeX special characters and their escaped forms. Several replacements (the
@@ -474,6 +475,7 @@ def render_paper_latex(
     prose: Optional[PaperProse] = None,
     cited_dois: Optional[Sequence[str]] = None,
     bib_path: Optional[str] = None,
+    figures: Optional[Sequence[FigureSpec]] = None,
 ) -> str:
     """
     Render a compilable LaTeX paper draft -- the deterministic, OFFLINE twin of
@@ -503,12 +505,22 @@ def render_paper_latex(
             ``.bib`` is wired with ``\\bibliographystyle{plain}`` +
             ``\\bibliography{<stem>}`` + ``\\nocite{*}`` (so its entries render).
             ``None`` emits no ``\\bibliography``. No BibTeX is generated or fetched here.
+        figures: optional agent-authored ``FigureSpec`` list
+            (design/paper-figures-and-si.md, Phase 1). When non-empty: the
+            ``pgfplots`` package + ``\\pgfplotsset{compat=1.18}`` are added to the
+            preamble and a ``\\section{Figures}`` of LaTeX-native (pgfplots) ``figure``
+            envs is emitted before the References, each with a stable
+            ``\\label{fig:<id>}`` so the body's ``\\ref`` resolves and numbering is
+            automatic. The y values are pulled from ``evidence`` (record fidelity).
+            ``None``/empty -> NOTHING new is emitted: the output stays byte-identical
+            to the figure-less skeleton (a regression invariant, like ``prose=None``).
 
     Returns:
         A LaTeX document string (``\\documentclass`` ... ``\\end{document}``).
     """
     evidence = list(evidence or [])
     pending = list(pending or [])
+    figures = list(figures or [])
     rp = spec.raw_proposal
     claim_by_hyp = {c.answers: c for c in claims}
 
@@ -520,6 +532,12 @@ def render_paper_latex(
     lines.append(r"\usepackage[utf8]{inputenc}")
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
+    # pgfplots is added ONLY when figures are present, so a figure-less render stays
+    # byte-identical to the pre-figures skeleton (the regression invariant). pgfplots
+    # is a LaTeX package Overleaf ships -- no Python/pip dependency.
+    if figures:
+        lines.append(r"\usepackage{pgfplots}")
+        lines.append(r"\pgfplotsset{compat=1.18}")
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     lines.append(r"\author{sci-adk (deterministic render)}")
     lines.append(r"\date{\today}")
@@ -642,6 +660,17 @@ def render_paper_latex(
         lines.append(r"\section{Discussion}")
         lines.append(_latex_sanitize(prose.discussion.strip()))
         lines.append("")
+
+    # Figures (LaTeX-native pgfplots), when supplied -- before References. Each figure
+    # carries a stable \label{fig:<id>} so the body's \ref resolves and numbering is
+    # automatic; the y values are pulled from `evidence` (record fidelity). Absent ->
+    # nothing emitted (byte-identical skeleton, like prose).
+    if figures:
+        lines.append(r"\section{Figures}")
+        lines.append("")
+        for fig in figures:
+            lines.append(render_native_figure(fig, evidence))
+            lines.append("")
 
     # References: a DOI list (no BibTeX generation). Always emitted.
     lines.append(r"\section{References}")

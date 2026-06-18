@@ -92,6 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
              "safety net is a fallback, not a license to rely on unicode). Never "
              "LLM-generated. Omit -> structural skeleton only",
     )
+    run.add_argument(
+        "--figures", default=None, metavar="PATH",
+        help="optional JSON file: a PaperFigures object {\"figures\": [...]} OR a bare "
+             "list of FigureSpecs. Each spec names which Evidence series to plot, the "
+             "plot kind (line|scatter|bar), a caption, and a stable id (-> "
+             "\\label{fig:<id>}); the engine renders a LaTeX-native pgfplots figure, "
+             "pulling y FROM the recorded Evidence (record fidelity). Never "
+             "LLM-generated. Omit -> no figures",
+    )
 
     resolve = sub.add_parser(
         "resolve",
@@ -324,6 +333,33 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"error: invalid prose JSON ({prose_path}): {e}", file=sys.stderr)
             return 2
 
+    # Optional agent-authored figure specs (paper-figures Phase 1). Accepts either a
+    # PaperFigures object ({"figures": [...]}) or a bare list of FigureSpecs -- both
+    # normalize to a figure list. Input, NOT autonomous generation (no LLM at render
+    # time; the engine pulls each y FROM the recorded Evidence).
+    figures = None
+    if args.figures:
+        figures_path = Path(args.figures)
+        if not figures_path.exists():
+            print(f"error: figures file not found: {figures_path}", file=sys.stderr)
+            return 2
+        from sci_adk.render.figures import FigureSpec, PaperFigures
+
+        raw = figures_path.read_text(encoding="utf-8")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"error: invalid figures JSON ({figures_path}): {e}", file=sys.stderr)
+            return 2
+        try:
+            if isinstance(parsed, list):
+                figures = [FigureSpec.model_validate(item) for item in parsed]
+            else:
+                figures = list(PaperFigures.model_validate(parsed).figures)
+        except ValueError as e:
+            print(f"error: invalid figures spec ({figures_path}): {e}", file=sys.stderr)
+            return 2
+
     compiler = ResearchCompiler(workspace_dir=Path(args.output))
     # Evidence-validity halt (design/evidence-validity.md E3): an inadequate record
     # (e.g. synthetic data fed to an empirical claim) raises before any Claim is
@@ -334,7 +370,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     try:
         result = compiler.compile(
             proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
-            prose=prose)
+            prose=prose, figures=figures)
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
         return 2
@@ -350,6 +386,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for c in result.checkpoints:
             print(f"    - {c.hypothesis_id} ({c.kind}): {c.expression[:60]}")
     print(f"  paper draft: {result.paper_path}")
+    fc = result.figure_consistency
+    if fc is not None and not fc.ok:
+        # Non-blocking prose<->figure ref report (D4): a warning, not a gate.
+        print("  figure consistency warnings (non-blocking):")
+        if fc.dangling:
+            print(f"    - dangling \\ref (no such figure): {', '.join(fc.dangling)}")
+        if fc.orphan:
+            print(f"    - orphan figure (never \\ref'd): {', '.join(fc.orphan)}")
     return 0
 
 

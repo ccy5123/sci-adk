@@ -1,0 +1,453 @@
+"""
+paper-figures Phase 1 (RED-first): an agent-authored figure-spec hook + a
+deterministic LaTeX-NATIVE (pgfplots) data-plot renderer + stable figure labels +
+a prose<->figure ref consistency check (design/paper-figures-and-si.md, D1/D4).
+
+Record fidelity is the spine: the AGENT authors WHAT to plot (the spec -- caption,
+plot kind, which Evidence ids, the x of each point), and the ENGINE pulls the y
+value FROM the Evidence record (no invented/silently-dropped points). The renderer
+is PURE (data in, string out), deterministic (re-render byte-identical), and emits
+NO image/external-file ref (native = text-only, so the paper/ folder stays
+self-contained).
+
+These pin the behavior before any implementation exists.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+
+from sci_adk.core.evidence import (
+    Bearing,
+    BearingDirection,
+    EvidenceItem,
+    EvidenceKind,
+    Provenance,
+    Result,
+)
+from sci_adk.render.figures import (
+    FigureConsistencyReport,
+    FigureSpec,
+    NativePlot,
+    PaperFigures,
+    PlotPoint,
+    PlotSeries,
+    check_figure_consistency,
+    figure_labels,
+    render_native_figure,
+)
+
+_T0 = datetime(2026, 6, 18, 10, 0, 0, tzinfo=timezone.utc)
+
+
+def _ev(
+    ev_id: str,
+    *,
+    point=None,
+    effect_size=None,
+    p_value=None,
+    finding=None,
+    hyp_id: str = "hyp-1",
+):
+    """An EvidenceItem whose Result carries the scalar(s) under test."""
+    return EvidenceItem(
+        id=ev_id,
+        created_at=_T0,
+        spec_id="t-fig",
+        kind=EvidenceKind.EXPERIMENT_RUN,
+        provenance=Provenance(code_ref="x", data_source="generated"),
+        result=Result(
+            type="quantitative",
+            point=point,
+            effect_size=effect_size,
+            p_value=p_value,
+            finding=finding,
+        ),
+        bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.SUPPORTS)],
+    )
+
+
+def _series_evidence():
+    """Three items contributing one (x, y=point) point each: a SERIES across items."""
+    return [
+        _ev("ev-a", point=1.0),
+        _ev("ev-b", point=4.0),
+        _ev("ev-c", point=9.0),
+    ]
+
+
+def _line_spec(fig_id: str = "growth") -> FigureSpec:
+    return FigureSpec(
+        id=fig_id,
+        caption="Point estimate across runs.",
+        plot=NativePlot(
+            type="line",
+            xlabel="run index",
+            ylabel="point estimate",
+            series=[
+                PlotSeries(
+                    name="point",
+                    y_field="point",
+                    points=[
+                        PlotPoint(evidence_id="ev-a", x=1.0),
+                        PlotPoint(evidence_id="ev-b", x=2.0),
+                        PlotPoint(evidence_id="ev-c", x=3.0),
+                    ],
+                )
+            ],
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# render_native_figure: a pgfplots figure env pulled FROM the Evidence record.
+# ---------------------------------------------------------------------------
+
+class TestRenderNativeFigure:
+    def test_emits_figure_axis_caption_label(self):
+        spec = _line_spec("growth")
+        tex = render_native_figure(spec, _series_evidence())
+
+        assert r"\begin{figure}" in tex
+        assert r"\end{figure}" in tex
+        assert r"\begin{axis}" in tex
+        assert r"\end{axis}" in tex
+        assert r"\begin{tikzpicture}" in tex
+        # Caption + stable label.
+        assert r"\caption{Point estimate across runs.}" in tex
+        assert r"\label{fig:growth}" in tex
+
+    def test_addplot_coordinates_pulled_from_evidence(self):
+        spec = _line_spec()
+        tex = render_native_figure(spec, _series_evidence())
+        # y comes from the EVIDENCE point (1, 4, 9), paired with the spec x (1, 2, 3).
+        assert r"\addplot" in tex
+        assert "(1, 1)" in tex
+        assert "(2, 4)" in tex
+        assert "(3, 9)" in tex
+
+    def test_y_comes_from_record_not_spec(self):
+        """Change the EVIDENCE value -> the rendered coordinate changes (the engine
+        pulls y from the record, the spec only supplies x + which id)."""
+        spec = _line_spec()
+        ev_low = [_ev("ev-a", point=1.0), _ev("ev-b", point=4.0), _ev("ev-c", point=9.0)]
+        ev_high = [_ev("ev-a", point=1.0), _ev("ev-b", point=4.0), _ev("ev-c", point=99.0)]
+
+        tex_low = render_native_figure(spec, ev_low)
+        tex_high = render_native_figure(spec, ev_high)
+
+        assert "(3, 9)" in tex_low
+        assert "(3, 99)" in tex_high
+        assert tex_low != tex_high
+
+    def test_xlabel_ylabel_present(self):
+        spec = _line_spec()
+        tex = render_native_figure(spec, _series_evidence())
+        assert "xlabel=" in tex
+        assert "ylabel=" in tex
+        assert "run index" in tex
+        assert "point estimate" in tex
+
+    def test_xlabel_with_specials_is_escaped(self):
+        spec = FigureSpec(
+            id="esc",
+            caption="A 100% pass & cost $5.",
+            plot=NativePlot(
+                type="line",
+                xlabel="cost $ per 100%",
+                ylabel="effect_size",
+                series=[
+                    PlotSeries(
+                        y_field="point",
+                        points=[PlotPoint(evidence_id="ev-a", x=1.0)],
+                    )
+                ],
+            ),
+        )
+        tex = render_native_figure(spec, [_ev("ev-a", point=1.0)])
+        # Caption + labels are sanitized (LaTeX specials neutralized).
+        assert r"100\%" in tex
+        assert r"\&" in tex
+        assert r"\$5" in tex
+        # No raw underscore leaked from "effect_size".
+        assert "_" not in tex.replace(r"\_", "")
+
+
+class TestYFieldSelection:
+    def test_point_vs_effect_size(self):
+        ev = [
+            _ev("ev-a", point=1.0, effect_size=0.5),
+            _ev("ev-b", point=2.0, effect_size=0.8),
+        ]
+        spec_point = FigureSpec(
+            id="p",
+            caption="c",
+            plot=NativePlot(
+                type="line",
+                series=[PlotSeries(
+                    y_field="point",
+                    points=[PlotPoint(evidence_id="ev-a", x=0.0),
+                            PlotPoint(evidence_id="ev-b", x=1.0)],
+                )],
+            ),
+        )
+        spec_eff = FigureSpec(
+            id="e",
+            caption="c",
+            plot=NativePlot(
+                type="line",
+                series=[PlotSeries(
+                    y_field="effect_size",
+                    points=[PlotPoint(evidence_id="ev-a", x=0.0),
+                            PlotPoint(evidence_id="ev-b", x=1.0)],
+                )],
+            ),
+        )
+        tex_point = render_native_figure(spec_point, ev)
+        tex_eff = render_native_figure(spec_eff, ev)
+        # point series uses 1, 2; effect_size series uses 0.5, 0.8.
+        assert "(0, 1)" in tex_point and "(1, 2)" in tex_point
+        assert "0.5" in tex_eff and "0.8" in tex_eff
+        assert "(0, 1)" not in tex_eff  # did not fall back to point
+
+
+class TestPlotTypeMapping:
+    def test_line_default_addplot(self):
+        spec = _line_spec()
+        tex = render_native_figure(spec, _series_evidence())
+        # line -> a plain \addplot (no only-marks / ybar option block).
+        assert r"\addplot" in tex
+        assert "only marks" not in tex
+        assert "ybar" not in tex
+
+    def test_scatter_only_marks(self):
+        spec = _line_spec()
+        spec = spec.model_copy(update={"plot": spec.plot.model_copy(update={"type": "scatter"})})
+        tex = render_native_figure(spec, _series_evidence())
+        assert "only marks" in tex
+
+    def test_bar_ybar(self):
+        spec = _line_spec()
+        spec = spec.model_copy(update={"plot": spec.plot.model_copy(update={"type": "bar"})})
+        tex = render_native_figure(spec, _series_evidence())
+        assert "ybar" in tex
+
+
+# ---------------------------------------------------------------------------
+# Record fidelity: never silently invent or drop a point.
+# ---------------------------------------------------------------------------
+
+class TestRecordFidelity:
+    def test_missing_evidence_id_raises(self):
+        spec = FigureSpec(
+            id="m",
+            caption="c",
+            plot=NativePlot(
+                type="line",
+                series=[PlotSeries(
+                    y_field="point",
+                    points=[PlotPoint(evidence_id="ev-NOPE", x=1.0)],
+                )],
+            ),
+        )
+        with pytest.raises(ValueError):
+            render_native_figure(spec, [_ev("ev-a", point=1.0)])
+
+    def test_none_y_field_raises(self):
+        # The item exists but its effect_size is None -> must not silently drop.
+        spec = FigureSpec(
+            id="n",
+            caption="c",
+            plot=NativePlot(
+                type="line",
+                series=[PlotSeries(
+                    y_field="effect_size",
+                    points=[PlotPoint(evidence_id="ev-a", x=1.0)],
+                )],
+            ),
+        )
+        with pytest.raises(ValueError):
+            render_native_figure(spec, [_ev("ev-a", point=3.0, effect_size=None)])
+
+    def test_nan_y_raises(self):
+        # pydantic accepts float('nan') and isinstance(nan, float) is True, so the
+        # numeric guard passes -- but '%g' emits the literal 'nan' into the coordinate,
+        # which pgfplots refuses to compile (defeating the folder-upload goal). A
+        # non-finite y must fail loud, like the None/unknown-id record-fidelity errors.
+        spec = _line_spec("nanfig")
+        spec = spec.model_copy(update={"plot": spec.plot.model_copy(update={
+            "series": [PlotSeries(
+                y_field="point", points=[PlotPoint(evidence_id="ev-a", x=1.0)],
+            )],
+        })})
+        with pytest.raises(ValueError):
+            render_native_figure(spec, [_ev("ev-a", point=float("nan"))])
+
+    def test_inf_y_raises(self):
+        # float('inf') / -inf are the same trap: '%g' emits 'inf'/'-inf', which
+        # pgfplots cannot draw -> the figure point is not a plottable coordinate.
+        spec = _line_spec("inffig")
+        spec = spec.model_copy(update={"plot": spec.plot.model_copy(update={
+            "series": [PlotSeries(
+                y_field="point", points=[PlotPoint(evidence_id="ev-a", x=1.0)],
+            )],
+        })})
+        with pytest.raises(ValueError):
+            render_native_figure(spec, [_ev("ev-a", point=float("inf"))])
+        with pytest.raises(ValueError):
+            render_native_figure(spec, [_ev("ev-a", point=float("-inf"))])
+
+
+# ---------------------------------------------------------------------------
+# Self-containment: native = text-only, NO image / external-file ref.
+# ---------------------------------------------------------------------------
+
+class TestSelfContainment:
+    def test_no_includegraphics_or_external_file(self):
+        spec = _line_spec()
+        tex = render_native_figure(spec, _series_evidence())
+        assert r"\includegraphics" not in tex
+        assert ".pdf" not in tex
+        assert ".png" not in tex
+
+
+# ---------------------------------------------------------------------------
+# Determinism + stable labels.
+# ---------------------------------------------------------------------------
+
+class TestDeterminismAndLabels:
+    def test_render_is_byte_identical(self):
+        spec = _line_spec()
+        ev = _series_evidence()
+        a = render_native_figure(spec, ev)
+        b = render_native_figure(spec, ev)
+        assert a == b
+
+    def test_label_is_stable_across_renders(self):
+        spec = _line_spec("stable_id")
+        ev = _series_evidence()
+        assert r"\label{fig:stable_id}" in render_native_figure(spec, ev)
+        assert r"\label{fig:stable_id}" in render_native_figure(spec, ev)
+
+    def test_figure_labels_returns_fig_prefixed_ids(self):
+        figs = [_line_spec("a"), _line_spec("b")]
+        assert figure_labels(figs) == ["fig:a", "fig:b"]
+
+    def test_duplicate_figure_id_raises(self):
+        figs = [_line_spec("dup"), _line_spec("dup")]
+        with pytest.raises(ValueError):
+            figure_labels(figs)
+
+
+# ---------------------------------------------------------------------------
+# FigureSpec id validation: must be a LaTeX-safe label slug.
+# ---------------------------------------------------------------------------
+
+class TestFigureSpecValidation:
+    def test_empty_id_rejected(self):
+        with pytest.raises(ValueError):
+            FigureSpec(
+                id="",
+                caption="c",
+                plot=NativePlot(
+                    type="line",
+                    series=[PlotSeries(points=[PlotPoint(evidence_id="ev-a", x=1.0)])],
+                ),
+            )
+
+    def test_unsafe_id_rejected(self):
+        # A space / brace / backslash would break \label{fig:<id>}.
+        for bad in ["has space", "with{brace", "back\\slash", "_leading"]:
+            with pytest.raises(ValueError):
+                FigureSpec(
+                    id=bad,
+                    caption="c",
+                    plot=NativePlot(
+                        type="line",
+                        series=[PlotSeries(points=[PlotPoint(evidence_id="ev-a", x=1.0)])],
+                    ),
+                )
+
+    def test_safe_ids_accepted(self):
+        for ok in ["growth", "fig_2", "panel-A", "A1"]:
+            FigureSpec(
+                id=ok,
+                caption="c",
+                plot=NativePlot(
+                    type="line",
+                    series=[PlotSeries(points=[PlotPoint(evidence_id="ev-a", x=1.0)])],
+                ),
+            )
+
+    def test_series_requires_at_least_one_point(self):
+        with pytest.raises(ValueError):
+            PlotSeries(points=[])
+
+    def test_plot_requires_at_least_one_series(self):
+        with pytest.raises(ValueError):
+            NativePlot(type="line", series=[])
+
+
+# ---------------------------------------------------------------------------
+# PaperFigures: the top-level hook (mirrors PaperProse).
+# ---------------------------------------------------------------------------
+
+class TestPaperFiguresHook:
+    def test_empty_default(self):
+        pf = PaperFigures()
+        assert pf.figures == []
+
+    def test_holds_specs(self):
+        pf = PaperFigures(figures=[_line_spec("a")])
+        assert len(pf.figures) == 1
+        assert pf.figures[0].id == "a"
+
+    def test_roundtrips_json(self):
+        pf = PaperFigures(figures=[_line_spec("rt")])
+        rt = PaperFigures.model_validate_json(pf.model_dump_json())
+        assert rt.figures[0].id == "rt"
+        assert rt.figures[0].plot.series[0].points[0].evidence_id == "ev-a"
+
+
+# ---------------------------------------------------------------------------
+# check_figure_consistency: dangling \ref + orphan figure (a report, not a gate).
+# ---------------------------------------------------------------------------
+
+class TestFigureConsistency:
+    def test_known_ref_is_ok(self):
+        body = r"As shown in Fig.~\ref{fig:known}, the trend holds."
+        report = check_figure_consistency(["fig:known"], body)
+        assert isinstance(report, FigureConsistencyReport)
+        assert report.ok is True
+        assert report.dangling == []
+        assert report.orphan == []
+
+    def test_dangling_ref(self):
+        body = r"See \ref{fig:missing}."
+        report = check_figure_consistency(["fig:known"], body)
+        assert report.ok is False
+        assert "fig:missing" in report.dangling
+        # fig:known is defined but never referenced -> also an orphan.
+        assert "fig:known" in report.orphan
+
+    def test_orphan_figure(self):
+        body = r"No references at all here."
+        report = check_figure_consistency(["fig:lonely"], body)
+        assert report.ok is False
+        assert "fig:lonely" in report.orphan
+        assert report.dangling == []
+
+    def test_ignores_non_fig_refs(self):
+        # A \ref to a non-figure label (e.g. a section) is not a figure dangling ref.
+        body = r"Section~\ref{sec:intro} and Fig.~\ref{fig:known}."
+        report = check_figure_consistency(["fig:known"], body)
+        assert report.ok is True
+        assert report.dangling == []
+
+    def test_is_pure(self):
+        body = r"\ref{fig:a}"
+        a = check_figure_consistency(["fig:a"], body)
+        b = check_figure_consistency(["fig:a"], body)
+        assert a == b

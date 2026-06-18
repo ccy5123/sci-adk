@@ -57,6 +57,12 @@ from sci_adk.loop.verdict import (
     NoveltyCheckpoint,
     PriorWorkCheckpoint,
 )
+from sci_adk.render.figures import (
+    FigureConsistencyReport,
+    FigureSpec,
+    check_figure_consistency,
+    figure_labels,
+)
 from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.prose import PaperProse
 
@@ -105,6 +111,7 @@ class CompileResult:
     prior_work_checkpoint: Optional[PriorWorkCheckpoint] = None
     contested_checkpoints: List[ContestedCheckpoint] = field(default_factory=list)
     novelty_checkpoints: List[NoveltyCheckpoint] = field(default_factory=list)
+    figure_consistency: Optional[FigureConsistencyReport] = None
 
     @property
     def needs_agent(self) -> bool:
@@ -137,6 +144,7 @@ class ResearchCompiler:
         spec: Optional[Spec] = None,
         experiment: Optional[ExperimentFn] = None,
         prose: Optional[PaperProse] = None,
+        figures: Optional[Sequence[FigureSpec]] = None,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -158,6 +166,13 @@ class ResearchCompiler:
                 discussion) injected into BOTH the Markdown and LaTeX drafts. Never
                 LLM-generated -- it is input the in-session agent (or a --prose file)
                 supplies, the same spirit as ``pending``.
+            figures: optional agent-authored ``FigureSpec`` list
+                (design/paper-figures-and-si.md, Phase 1). Threaded into the LaTeX
+                renderer (pgfplots-native, the y pulled from this run's Evidence). Never
+                LLM-generated -- input, the same spirit as ``prose``. After rendering,
+                a NON-BLOCKING ``check_figure_consistency`` over the rendered body is
+                surfaced in ``CompileResult.figure_consistency`` (a report, not a gate;
+                the hard verify-gate is Phase 3). Absent -> no figures.
 
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
@@ -225,15 +240,26 @@ class ResearchCompiler:
         # The .tex is THE paper artifact (Overleaf default pdflatex). Deterministic and
         # offline -- no LLM, no network (render_paper_latex is pure). The Markdown
         # render_paper remains a library function but is no longer auto-emitted.
+        figures = list(figures or [])
         paper_tex = render_paper_latex(
             spec, claims, evidence,
             pending=pending_dicts,
             prose=prose,
             cited_dois=cited_dois,
             bib_path=bib_path,
+            figures=figures,
         )
         paper_path = paper_dir / "draft.tex"
         paper_path.write_text(paper_tex, encoding="utf-8")
+
+        # Prose<->figure ref consistency (design/paper-figures-and-si.md D4): scan the
+        # RENDERED body for \ref{fig:...}/\label integrity. NON-BLOCKING -- surfaced in
+        # the result (a warning channel, like the contested/novelty checkpoints), never
+        # a hard fail (the verify-style gate is Phase 3). figure_labels enforces unique
+        # ids; rendering above would already have raised on a missing evidence id.
+        figure_consistency = check_figure_consistency(
+            figure_labels(figures), paper_tex
+        )
 
         if checkpoints:
             self._save_checkpoints(checkpoints, run_dir)
@@ -248,6 +274,7 @@ class ResearchCompiler:
             prior_work_checkpoint=pw_checkpoint,
             contested_checkpoints=contested_checkpoints,
             novelty_checkpoints=novelty_checkpoints,
+            figure_consistency=figure_consistency,
         )
 
     # -- helpers -----------------------------------------------------------

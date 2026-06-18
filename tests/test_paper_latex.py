@@ -41,6 +41,7 @@ from sci_adk.core.spec import (
     Spec,
     TargetClaim,
 )
+from sci_adk.render.figures import FigureSpec, NativePlot, PlotPoint, PlotSeries
 from sci_adk.render.paper import _latex_escape, render_paper_latex
 from sci_adk.render.prose import PaperProse
 
@@ -487,3 +488,96 @@ def test_latex_render_does_no_filesystem_access(monkeypatch):
     )
     assert r"\bibliography{references}" in tex
     assert r"\nocite{*}" in tex
+
+
+# ---------------------------------------------------------------------------
+# Figures hook (paper-figures Phase 1): figures=None is byte-identical; figures
+# present -> pgfplots preamble + a Figures section with \label{fig:...}.
+# ---------------------------------------------------------------------------
+
+def _fig_spec(fig_id: str = "growth") -> FigureSpec:
+    return FigureSpec(
+        id=fig_id,
+        caption="Point estimate across runs.",
+        plot=NativePlot(
+            type="line",
+            xlabel="run index",
+            ylabel="point estimate",
+            series=[
+                PlotSeries(
+                    y_field="point",
+                    points=[
+                        PlotPoint(evidence_id="ev-1", x=1.0),
+                    ],
+                )
+            ],
+        ),
+    )
+
+
+class TestLatexFigures:
+    def test_figures_none_is_byte_identical(self):
+        # The regression invariant: figures=None (and figures omitted) must be
+        # byte-identical to the current figure-less skeleton -- exactly like prose=None.
+        hyp = _basic_hyp()
+        spec = _spec(hyp)
+        claim = _claim(hyp, ClaimStatus.SUPPORTED)
+        ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
+
+        baseline = render_paper_latex(spec, [claim], [ev])
+        with_none = render_paper_latex(spec, [claim], [ev], figures=None)
+        with_empty = render_paper_latex(spec, [claim], [ev], figures=[])
+
+        assert with_none == baseline
+        assert with_empty == baseline
+        # And no pgfplots leaks into the figure-less skeleton.
+        assert r"\usepackage{pgfplots}" not in baseline
+        assert r"\section{Figures}" not in baseline
+
+    def test_figures_present_adds_pgfplots_and_section(self):
+        hyp = _basic_hyp()
+        spec = _spec(hyp)
+        claim = _claim(hyp, ClaimStatus.SUPPORTED)
+        ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
+
+        tex = render_paper_latex(
+            spec, [claim], [ev], figures=[_fig_spec("growth")]
+        )
+        # Preamble carries pgfplots ...
+        assert r"\usepackage{pgfplots}" in tex
+        assert r"\pgfplotsset{compat=1.18}" in tex
+        # ... and the body has the Figures section + the figure env + the stable label.
+        assert r"\section{Figures}" in tex
+        assert r"\begin{figure}" in tex
+        assert r"\label{fig:growth}" in tex
+        assert r"\begin{axis}" in tex
+        # The point (x from spec, y from evidence) is drawn.
+        assert "(1, 0)" in tex  # ev-1 point=0.0 from _evidence
+
+    def test_figures_section_before_references(self):
+        hyp = _basic_hyp()
+        spec = _spec(hyp)
+        claim = _claim(hyp, ClaimStatus.SUPPORTED)
+        ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
+
+        tex = render_paper_latex(
+            spec, [claim], [ev], figures=[_fig_spec("growth")], cited_dois=["10.1/x"]
+        )
+        assert tex.index(r"\section{Figures}") < tex.index(r"\section{References}")
+
+    def test_figures_y_pulled_from_evidence(self):
+        # Changing the evidence value changes the drawn coordinate.
+        hyp = _basic_hyp()
+        spec = _spec(hyp)
+        claim = _claim(hyp, ClaimStatus.SUPPORTED)
+        ev = EvidenceItem(
+            id="ev-1",
+            created_at=_T0,
+            spec_id="t-latex",
+            kind=EvidenceKind.EXPERIMENT_RUN,
+            provenance=Provenance(code_ref="x", data_source="generated"),
+            result=Result(type="quantitative", point=42.0),
+            bears_on=[Bearing(target_id="hyp-t1", direction=BearingDirection.SUPPORTS)],
+        )
+        tex = render_paper_latex(spec, [claim], [ev], figures=[_fig_spec("growth")])
+        assert "(1, 42)" in tex

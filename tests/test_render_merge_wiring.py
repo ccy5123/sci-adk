@@ -282,3 +282,227 @@ def test_cli_run_without_prose_has_no_abstract(tmp_path):
         encoding="utf-8")
     # No prose -> skeleton only, no abstract environment.
     assert r"\begin{abstract}" not in tex
+
+
+# ---------------------------------------------------------------------------
+# Figures hook (paper-figures Phase 1): compiler threads figures + surfaces the
+# non-blocking prose<->figure consistency report; the CLI gains --figures <json>.
+# ---------------------------------------------------------------------------
+
+def _figures_json(fig_id: str, evidence_id: str) -> dict:
+    """A PaperFigures payload plotting one point from `evidence_id`."""
+    return {
+        "figures": [
+            {
+                "id": fig_id,
+                "caption": "Recorded finding across runs.",
+                "plot": {
+                    "type": "line",
+                    "xlabel": "run",
+                    "ylabel": "point",
+                    "series": [
+                        {
+                            "y_field": "point",
+                            "points": [{"evidence_id": evidence_id, "x": 1.0}],
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+
+def _point_experiment(spec, workspace_dir):
+    """A fake experiment whose Evidence carries a numeric point (plottable)."""
+    items = []
+    for i, h in enumerate(spec.hypotheses):
+        items.append(
+            EvidenceItem(
+                id=f"ev-pt-{i}",
+                spec_id=spec.id,
+                kind=EvidenceKind.EXPERIMENT_RUN,
+                provenance=Provenance(code_ref="fake:pt", data_source="generated"),
+                result=Result(type="quantitative", point=float(i + 1)),
+                bears_on=[Bearing(target_id=h.id, direction=BearingDirection.SUPPORTS)],
+            )
+        )
+    return items
+
+
+def test_compile_threads_figures_into_tex(tmp_path):
+    from sci_adk.render.figures import PaperFigures
+
+    figs = PaperFigures.model_validate(_figures_json("growth", "ev-pt-0")).figures
+    result = ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-fig", experiment=_point_experiment, figures=figs)
+
+    tex = (tmp_path / "runs" / "t-fig" / "paper" / "draft.tex").read_text(
+        encoding="utf-8")
+    # pgfplots preamble + the Figures section + the stable label, y pulled from ev-pt-0.
+    assert r"\usepackage{pgfplots}" in tex
+    assert r"\section{Figures}" in tex
+    assert r"\label{fig:growth}" in tex
+    assert "(1, 1)" in tex  # ev-pt-0 point=1.0 at x=1
+
+    # The non-blocking consistency report is surfaced. growth is never \ref'd in the
+    # skeleton body -> an orphan, but NOT a hard failure.
+    fc = result.figure_consistency
+    assert fc is not None
+    assert "fig:growth" in fc.orphan
+    assert fc.dangling == []
+    assert fc.ok is False  # orphan -> not ok, but the compile still succeeded
+
+
+def test_compile_no_figures_byte_identical_and_no_pgfplots(tmp_path):
+    # figures omitted -> no pgfplots, no Figures section; the consistency report is ok.
+    result = ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-nofig", experiment=_point_experiment)
+    tex = (tmp_path / "runs" / "t-nofig" / "paper" / "draft.tex").read_text(
+        encoding="utf-8")
+    assert r"\usepackage{pgfplots}" not in tex
+    assert r"\section{Figures}" not in tex
+    assert result.figure_consistency is not None
+    assert result.figure_consistency.ok is True  # no figures, no refs -> ok
+
+
+def test_compile_figures_render_y_from_evidence(tmp_path):
+    """End-to-end through the compiler: an agent-authored FigureSpec renders into
+    draft.tex with the pgfplots preamble, the stable label, and y pulled from the
+    recorded Evidence point (the CLI cannot inject an experiment hook, so the
+    figure-rendering path is exercised here; the --figures FLAG parse/normalize/error
+    paths are exercised through ``main()`` below)."""
+    from sci_adk.render.figures import PaperFigures
+
+    figs = PaperFigures.model_validate(_figures_json("encoding", "ev-pt-0")).figures
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-comp-fig", experiment=_point_experiment, figures=figs)
+
+    tex = (tmp_path / "runs" / "t-comp-fig" / "paper" / "draft.tex").read_text(
+        encoding="utf-8")
+    assert r"\usepackage{pgfplots}" in tex
+    assert r"\label{fig:encoding}" in tex
+    assert r"\begin{axis}" in tex
+    assert "(1, 1)" in tex  # ev-pt-0 point=1.0
+
+
+def test_cli_run_figures_flag_renders_figure(tmp_path, monkeypatch):
+    """The --figures flag, through ``main()``, parses the file and renders the figure.
+
+    The CLI has no experiment-hook argument; the only built-in CLI experiment
+    (--t1-demo) mints non-deterministic ids and needs Docker. So we monkeypatch
+    ``ResearchCompiler.compile`` to inject a deterministic fake experiment, then assert
+    the parsed ``figures`` reach the compile and the rendered .tex carries the figure.
+    """
+    import json as _json
+
+    from sci_adk.cli import main
+    from sci_adk.loop.compiler import ResearchCompiler as _RC
+
+    real_compile = _RC.compile
+
+    def _patched_compile(self, proposal_text, **kwargs):
+        # The CLI passes experiment=None explicitly on the proposal path; override it
+        # with the deterministic fake hook so the run yields plottable evidence.
+        if kwargs.get("experiment") is None:
+            kwargs["experiment"] = _point_experiment
+        return real_compile(self, proposal_text, **kwargs)
+
+    monkeypatch.setattr(_RC, "compile", _patched_compile)
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    figures_json = tmp_path / "figures.json"
+    figures_json.write_text(
+        _json.dumps(_figures_json("encoding", "ev-pt-0")), encoding="utf-8"
+    )
+
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-fig", "--figures", str(figures_json),
+    ])
+    assert rc == 0
+    tex = (tmp_path / "runs" / "t-cli-fig" / "paper" / "draft.tex").read_text(
+        encoding="utf-8")
+    assert r"\usepackage{pgfplots}" in tex
+    assert r"\label{fig:encoding}" in tex
+    assert r"\begin{axis}" in tex
+
+
+def test_cli_run_figures_bare_list_accepted(tmp_path, monkeypatch):
+    """The --figures file may be a bare list of FigureSpecs (not only a PaperFigures);
+    the CLI normalizes both forms to a figure list."""
+    import json as _json
+
+    from sci_adk.cli import main
+    from sci_adk.loop.compiler import ResearchCompiler as _RC
+
+    real_compile = _RC.compile
+
+    def _patched_compile(self, proposal_text, **kwargs):
+        # The CLI passes experiment=None explicitly on the proposal path; override it
+        # with the deterministic fake hook so the run yields plottable evidence.
+        if kwargs.get("experiment") is None:
+            kwargs["experiment"] = _point_experiment
+        return real_compile(self, proposal_text, **kwargs)
+
+    monkeypatch.setattr(_RC, "compile", _patched_compile)
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    bare_list = _figures_json("panelA", "ev-pt-0")["figures"]  # the inner list only
+    figures_json = tmp_path / "figures_list.json"
+    figures_json.write_text(_json.dumps(bare_list), encoding="utf-8")
+
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-figlist", "--figures", str(figures_json),
+    ])
+    assert rc == 0
+    tex = (tmp_path / "runs" / "t-cli-figlist" / "paper" / "draft.tex").read_text(
+        encoding="utf-8")
+    assert r"\label{fig:panelA}" in tex
+
+
+def test_cli_run_figures_missing_file_errors(tmp_path):
+    from sci_adk.cli import main
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-fig-missing", "--figures", str(tmp_path / "nope.json"),
+    ])
+    assert rc == 2
+
+
+def test_cli_run_figures_invalid_json_errors(tmp_path):
+    from sci_adk.cli import main
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-fig-badjson", "--figures", str(bad),
+    ])
+    assert rc == 2
+
+
+def test_cli_run_figures_invalid_spec_errors(tmp_path):
+    from sci_adk.cli import main
+
+    import json as _json
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    # An unsafe figure id (space) -> FigureSpec validation rejects it -> rc 2.
+    bad_spec = {"figures": [_figures_json("bad id", "ev-x")["figures"][0]]}
+    bad_spec["figures"][0]["id"] = "bad id"
+    f = tmp_path / "badspec.json"
+    f.write_text(_json.dumps(bad_spec), encoding="utf-8")
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-fig-badspec", "--figures", str(f),
+    ])
+    assert rc == 2
