@@ -581,3 +581,28 @@ class TestLatexFigures:
         )
         tex = render_paper_latex(spec, [claim], [ev], figures=[_fig_spec("growth")])
         assert "(1, 42)" in tex
+
+    def test_image_figures_use_fig_number_filenames_in_supply_order(self):
+        # Two image figures, no live \ref in the body -> supply order; each emits a
+        # GENERIC fig<N> include path (fig1, fig2), never the agent id. (Body-reference
+        # reordering is exercised in tests/test_figures.py and the wiring renderer test;
+        # here we pin the fig<N> naming + the figure-less skeleton invariant.)
+        from sci_adk.render.figures import ImageFigureSpec
+
+        hyp = _basic_hyp()
+        spec = _spec(hyp)
+        claim = _claim(hyp, ClaimStatus.SUPPORTED)
+        ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
+        figs = [
+            ImageFigureSpec(kind="image", id="alpha", caption="A", image="a.png"),
+            ImageFigureSpec(kind="image", id="beta", caption="B", image="b.pdf"),
+        ]
+        tex = render_paper_latex(spec, [claim], [ev], figures=figs)
+        assert r"\usepackage{graphicx}" in tex
+        assert "{figures/fig1.png}" in tex  # alpha (supply order)
+        assert "{figures/fig2.pdf}" in tex  # beta
+        # The semantic labels are preserved (so a body \ref{fig:<id>} resolves).
+        assert r"\label{fig:alpha}" in tex
+        assert r"\label{fig:beta}" in tex
+        # The agent id is NEVER the include filename.
+        assert "{figures/alpha.png}" not in tex

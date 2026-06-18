@@ -8,15 +8,9 @@ scipy>=1.10.0
 # Graph theory (for molecular graphs)
 networkx>=3.0
 
-# Chemistry (for molecular structures).
-# Activated for paper-figures Phase 4-2: the adapter's RDKitDockerPlotter draws a
-# DETERMINISTIC 2D molecular-structure PNG inside this container so a molecular paper
-# can carry a real structure figure (design/paper-figures-and-si.md, O-A resolution).
-# Use the MODERN official wheel `rdkit` (NOT the legacy `rdkit-pypi`), PINNED so the
-# 2D coordinate layout + Cairo PNG bytes are reproducible across rebuilds (D2: same
-# molecule -> byte-identical PNG depends on a fixed RDKit version). cp311 manylinux
-# wheel (this image is python:3.11-slim).
-rdkit==2024.9.6
+# Chemistry (for molecular structures - optional, defer to actual need)
+# RDKit is large, defer to actual need
+# rdkit-pypi>=2022.9.0
 
 # Symbolic math (for number theory - optional, milestone 2+)
 # sympy>=1.11

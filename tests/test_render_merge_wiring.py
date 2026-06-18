@@ -420,22 +420,26 @@ def test_compile_colocates_image_figure_into_paper_figures(tmp_path):
         PROPOSAL, spec_id="t-img", experiment=_point_experiment, figures=figs)
 
     paper_dir = tmp_path / "runs" / "t-img" / "paper"
-    # The source bytes landed at paper/figures/<id><ext> (id = stem, source suffix).
-    dest = paper_dir / "figures" / "scheme.png"
-    assert dest.is_file(), "image source must be co-located into paper/figures/"
+    # The source bytes landed at paper/figures/fig<N><ext> -- the GENERIC, domain-free
+    # figure-NUMBER filename (this is the only figure, so N=1), NOT the agent id.
+    dest = paper_dir / "figures" / "fig1.png"
+    assert dest.is_file(), "image source must be co-located into paper/figures/fig<N>"
     assert dest.read_bytes() == src.read_bytes()
+    # The id is NEVER used as the filename.
+    assert not (paper_dir / "figures" / "scheme.png").exists()
 
-    # draft.tex references it via graphicx (NOT pgfplots -- image-only render) + label.
+    # draft.tex references fig1 via graphicx (NOT pgfplots -- image-only render); the
+    # \label keeps the SEMANTIC id so the body's \ref{fig:scheme} would resolve.
     draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
     assert r"\usepackage{graphicx}" in draft
     assert r"\usepackage{pgfplots}" not in draft  # no native figure here
-    assert r"\includegraphics[width=\linewidth]{figures/scheme.png}" in draft
+    assert r"\includegraphics[width=\linewidth]{figures/fig1.png}" in draft
     assert r"\label{fig:scheme}" in draft
 
-    # si.tex (the SI shows every figure) references the same co-located file.
+    # si.tex (the SI shows every figure) references the SAME co-located fig1.png file.
     si = (paper_dir / "si.tex").read_text(encoding="utf-8")
     assert r"\usepackage{graphicx}" in si
-    assert "{figures/scheme.png}" in si
+    assert "{figures/fig1.png}" in si
 
 
 def test_compile_image_figure_absolute_path(tmp_path):
@@ -452,7 +456,9 @@ def test_compile_image_figure_absolute_path(tmp_path):
     ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-img-abs", experiment=_point_experiment, figures=figs)
 
-    dest = tmp_path / "runs" / "t-img-abs" / "paper" / "figures" / "diag.pdf"
+    # Co-located by figure NUMBER (fig1), source extension preserved; the id "diag" is
+    # not the filename.
+    dest = tmp_path / "runs" / "t-img-abs" / "paper" / "figures" / "fig1.pdf"
     assert dest.is_file()
     assert dest.read_bytes() == src.read_bytes()
 
@@ -496,8 +502,93 @@ def test_compile_mixed_native_and_image_figures(tmp_path):
     assert r"\usepackage{graphicx}" in draft
     assert r"\label{fig:growth}" in draft
     assert r"\label{fig:scheme}" in draft
-    assert (tmp_path / "runs" / "t-img-mixed" / "paper" / "figures" / "scheme.pdf"
-            ).is_file()
+    # Neither figure is \ref'd in the skeleton body, so supply order holds: growth=fig1
+    # (native, no file), scheme=fig2 (image -> co-located fig2.pdf, NOT scheme.pdf).
+    figures_dir = tmp_path / "runs" / "t-img-mixed" / "paper" / "figures"
+    assert (figures_dir / "fig2.pdf").is_file()
+    assert not (figures_dir / "scheme.pdf").exists()
+    assert r"\includegraphics[width=\linewidth]{figures/fig2.pdf}" in draft
+
+
+# ---------------------------------------------------------------------------
+# Body-reference figure numbering (Part B): a figure's number + co-located filename
+# follow the order the figure is FIRST \ref'd in the body, and the SI shares that
+# numbering with the main paper. (NOTE: prose \ref is LaTeX-escaped by the renderer's
+# sanitizer, so a \ref authored in PROSE does not drive ordering through the compiler --
+# proven below. The reference-order behavior itself is exercised against a raw body in
+# tests/test_figures.py::TestOrderFiguresByReference and the renderer test below.)
+# ---------------------------------------------------------------------------
+
+def test_compile_shares_figure_numbering_and_filenames_main_and_si(tmp_path):
+    """End-to-end shared numbering: two image figures supplied [alpha, beta]. Through the
+    compiler their numbering is supply order (no live \\ref reaches the rendered body --
+    prose \\ref is sanitized), so alpha=fig1 / beta=fig2 -- and CRUCIALLY the SI reuses the
+    SAME fig<N> identity + the SAME co-located file set the main paper uses (one shared set
+    for both standalone documents)."""
+    from sci_adk.render.figures import PaperFigures
+
+    a = tmp_path / "alpha.png"
+    a.write_bytes(b"\x89PNG alpha")
+    b = tmp_path / "beta.png"
+    b.write_bytes(b"\x89PNG beta")
+
+    payload = {
+        "figures": [
+            _image_figure("alpha", "alpha.png")["figures"][0],   # supplied first
+            _image_figure("beta", "beta.png")["figures"][0],     # supplied second
+        ]
+    }
+    figs = PaperFigures.model_validate(payload).figures
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-order", experiment=_point_experiment, figures=figs)
+
+    paper_dir = tmp_path / "runs" / "t-order" / "paper"
+    draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
+    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    figures_dir = paper_dir / "figures"
+
+    # Supply order (no live ref in the body): alpha=fig1, beta=fig2. The co-located bytes
+    # and the \includegraphics paths agree (shared numbering, single name-builder).
+    assert (figures_dir / "fig1.png").read_bytes() == a.read_bytes()  # alpha
+    assert (figures_dir / "fig2.png").read_bytes() == b.read_bytes()  # beta
+    assert r"\includegraphics[width=\linewidth]{figures/fig1.png}" in draft
+    assert r"\includegraphics[width=\linewidth]{figures/fig2.png}" in draft
+    # ONE shared file set -- no id-named or extra files.
+    assert sorted(p.name for p in figures_dir.iterdir()) == ["fig1.png", "fig2.png"]
+
+    # The SI reuses the SAME fig<N> files + the SAME order (alpha fig1 before beta fig2).
+    assert "{figures/fig1.png}" in si
+    assert "{figures/fig2.png}" in si
+    assert si.index(r"\label{fig:alpha}") < si.index(r"\label{fig:beta}")
+    # The semantic labels survive in both documents so a body \ref{fig:<id>} resolves.
+    assert r"\label{fig:alpha}" in draft and r"\label{fig:beta}" in draft
+
+
+def test_render_paper_orders_figures_by_body_reference(tmp_path):
+    """At the renderer boundary (where a raw \\ref CAN be present), the Figures section is
+    emitted in body-reference order: a body that \\ref's beta before alpha numbers beta=1.
+    This pins the live-ref behavior the compiler shares; we drive a raw \\ref by calling
+    order_figures_by_reference directly against a hand-built body and asserting
+    render_image_figure agrees on fig<N>."""
+    from sci_adk.render.figures import (
+        PaperFigures,
+        order_figures_by_reference,
+        render_image_figure,
+    )
+
+    figs = PaperFigures.model_validate({
+        "figures": [
+            _image_figure("alpha", "alpha.png")["figures"][0],
+            _image_figure("beta", "beta.png")["figures"][0],
+        ]
+    }).figures
+    body = r"As \ref{fig:beta} shows, before \ref{fig:alpha}."
+    ordered = order_figures_by_reference(figs, body)
+    # beta first-\ref'd -> Figure 1 (file fig1), alpha -> Figure 2 (file fig2).
+    assert [(n, f.id) for n, f in ordered] == [(1, "beta"), (2, "alpha")]
+    # The image renderer emits the matching figures/fig<N> path for each number.
+    assert "{figures/fig1.png}" in render_image_figure(ordered[0][1], ordered[0][0])
+    assert "{figures/fig2.png}" in render_image_figure(ordered[1][1], ordered[1][0])
 
 
 def test_cli_run_figures_flag_renders_figure(tmp_path, monkeypatch):

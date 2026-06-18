@@ -30,7 +30,11 @@ from typing import Any, Optional, Sequence
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Hypothesis, Spec
-from sci_adk.render.figures import AnyFigure, render_figure
+from sci_adk.render.figures import (
+    AnyFigure,
+    order_figures_by_reference,
+    render_figure,
+)
 from sci_adk.render.prose import PaperProse
 
 # LaTeX special characters and their escaped forms. Several replacements (the
@@ -508,15 +512,22 @@ def render_paper_latex(
         figures: optional agent-authored figure list -- native (pgfplots) or image
             (``\\includegraphics``) specs (design/paper-figures-and-si.md, Phase 1/4).
             When non-empty a ``\\section{Figures}`` of ``figure`` envs is emitted before
-            the References, each with a stable ``\\label{fig:<id>}`` so the body's
-            ``\\ref`` resolves and numbering is automatic (regardless of kind). The
-            preamble pulls ``pgfplots`` ONLY when a NATIVE figure is present and
-            ``graphicx`` ONLY when an IMAGE figure is present, so a native-only render
-            stays byte-identical to the pre-image skeleton and an image-only render does
-            not load pgfplots. Native y values are pulled from ``evidence`` (record
-            fidelity); image specs reference co-located ``figures/<id><ext>``.
-            ``None``/empty -> NOTHING new is emitted: the output stays byte-identical
-            to the figure-less skeleton (a regression invariant, like ``prose=None``).
+            the References, IN BODY-REFERENCE ORDER (the standard academic convention:
+            the first figure ``\\ref``'d in the body is Figure 1, the next distinct one
+            Figure 2, ...; unreferenced figures are appended last) -- see
+            :func:`order_figures_by_reference`. Emitting the environments in that order
+            makes LaTeX's source-order auto-numbering print the right "Figure N", while
+            each figure's SEMANTIC ``\\label{fig:<id>}`` is preserved so the body's
+            existing ``\\ref{fig:<id>}`` still resolves (no ref rewriting). Image specs
+            reference co-located ``figures/fig<N><ext>`` (the GENERIC figure-number
+            filename, domain-free); native y values are pulled from ``evidence`` (record
+            fidelity). The preamble pulls ``pgfplots`` ONLY when a NATIVE figure is
+            present and ``graphicx`` ONLY when an IMAGE figure is present, so a
+            native-only render stays byte-identical to the pre-image skeleton and an
+            image-only render does not load pgfplots. ``None``/empty -> NOTHING new is
+            emitted: the output stays byte-identical to the figure-less skeleton (a
+            regression invariant, like ``prose=None``; no figures -> no ordering ->
+            unchanged output).
 
     Returns:
         A LaTeX document string (``\\documentclass`` ... ``\\end{document}``).
@@ -671,15 +682,26 @@ def render_paper_latex(
         lines.append("")
 
     # Figures (native pgfplots or image \includegraphics), when supplied -- before
-    # References. render_figure routes by kind; each figure carries a stable
-    # \label{fig:<id>} so the body's \ref resolves and numbering is automatic (native y
-    # is pulled from `evidence` for record fidelity; image refs co-located figures/).
-    # Absent -> nothing emitted (byte-identical skeleton, like prose).
+    # References. They are emitted IN BODY-REFERENCE ORDER: the body built SO FAR (every
+    # \ref{fig:...} appears in prose/hypotheses, which all precede this Figures section)
+    # is the canonical reference text, so order_figures_by_reference assigns Figure 1 =
+    # first-\ref'd, etc. Emitting in that order means LaTeX's source-order auto-numbering
+    # prints the right number; render_figure keeps each figure's semantic
+    # \label{fig:<id>} so the body's \ref still resolves, and passes the assigned NUMBER
+    # so an image figure includes figures/fig<N><ext> (native y is pulled from `evidence`
+    # for record fidelity). Absent -> nothing emitted (byte-identical skeleton, like
+    # prose: no figures -> no ordering -> no Figures section).
     if figures:
+        # The body up to here is the canonical reference text (all \ref's precede the
+        # Figures section); the compiler re-derives the SAME numbering from the full
+        # rendered draft (the Figures section adds only \label's, no \ref's) so the
+        # co-located fig<N> files match these \includegraphics paths exactly.
+        body_so_far = "\n".join(lines)
+        ordered = order_figures_by_reference(figures, body_so_far)
         lines.append(r"\section{Figures}")
         lines.append("")
-        for fig in figures:
-            lines.append(render_figure(fig, evidence))
+        for number, fig in ordered:
+            lines.append(render_figure(fig, evidence, number))
             lines.append("")
 
     # References: a DOI list (no BibTeX generation). Always emitted.

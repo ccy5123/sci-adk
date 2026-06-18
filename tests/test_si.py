@@ -415,6 +415,53 @@ class TestFigures:
         # x=1 from the spec, y=7 pulled from the Evidence record.
         assert "(1, 7)" in si
 
+    def test_image_figures_use_fig_number_filenames(self):
+        """An image figure in the SI references the GENERIC fig<N> filename (so it points
+        at the same co-located file the main paper uses), never the agent id."""
+        from sci_adk.render.figures import ImageFigureSpec
+
+        spec, claims, evidence = _basic_record()
+        figs = [
+            ImageFigureSpec(kind="image", id="alpha", caption="A", image="a.png"),
+            ImageFigureSpec(kind="image", id="beta", caption="B", image="b.pdf"),
+        ]
+        si = render_si_latex(spec, claims, evidence, figures=figs)
+        assert r"\usepackage{graphicx}" in si
+        assert "{figures/fig1.png}" in si  # alpha (supply order, no paper_body)
+        assert "{figures/fig2.pdf}" in si  # beta
+        assert "{figures/alpha.png}" not in si  # id is not the filename
+
+    def test_paper_body_drives_shared_figure_numbering(self):
+        """The SI numbers figures by the MAIN-PAPER body (paper_body), so its fig<N>
+        matches the main paper: a paper_body that \\ref's beta before alpha makes beta=fig1
+        in the SI too (the shared global numbering)."""
+        from sci_adk.render.figures import ImageFigureSpec
+
+        spec, claims, evidence = _basic_record()
+        figs = [
+            ImageFigureSpec(kind="image", id="alpha", caption="A", image="a.png"),
+            ImageFigureSpec(kind="image", id="beta", caption="B", image="b.pdf"),
+        ]
+        paper_body = r"As \ref{fig:beta} shows, see also \ref{fig:alpha}."
+        si = render_si_latex(
+            spec, claims, evidence, figures=figs, paper_body=paper_body
+        )
+        # beta first-\ref'd in the paper body -> Figure 1 (fig1) here too; alpha -> fig2.
+        assert "{figures/fig1.pdf}" in si  # beta = fig1 (its image is b.pdf)
+        assert "{figures/fig2.png}" in si  # alpha = fig2 (a.png)
+        # And emitted in that order (beta before alpha).
+        assert si.index(r"\label{fig:beta}") < si.index(r"\label{fig:alpha}")
+
+    def test_figure_less_si_byte_identical_regardless_of_paper_body(self):
+        """paper_body affects figure numbering ONLY; a figure-less SI is byte-identical
+        whether or not a paper_body is given."""
+        spec, claims, evidence = _basic_record()
+        base = render_si_latex(spec, claims, evidence)
+        with_body = render_si_latex(
+            spec, claims, evidence, paper_body=r"\ref{fig:x} \ref{fig:y}"
+        )
+        assert with_body == base
+
 
 # ---------------------------------------------------------------------------
 # Record integrity: digest embedded when given; verify-note when None.

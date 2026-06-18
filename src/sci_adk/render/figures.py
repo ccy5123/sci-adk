@@ -34,7 +34,7 @@ from __future__ import annotations
 import math
 import re
 from pathlib import Path
-from typing import Annotated, List, Literal, Sequence, Union
+from typing import Annotated, List, Literal, Sequence, Tuple, Union
 
 from pydantic import BaseModel, Discriminator, Field, Tag
 
@@ -165,22 +165,33 @@ class ImageFigureSpec(BaseModel):
     """An agent-authored IMAGE figure spec: an ``\\includegraphics`` of a co-located
     source image, for a diagram that cannot be expressed natively (D1).
 
-    The agent authors WHAT (the caption, a stable id, and the SOURCE path of an
-    EXISTING image file); the compiler co-locates that source to ``paper/figures/<id>
-    <ext>`` (the ONLY filesystem toucher) and this PURE renderer emits the matching
-    ``\\includegraphics{figures/<id><ext>}``. The renderer never reads the file -- it
-    derives ``<ext>`` from the source path's suffix as a string op; WHERE the image
-    comes from (an agent file, a deterministic domain plotter, ...) is the compiler's /
-    a later phase's concern, not the kernel's.
+    Domain-FREE: the agent/experiment produces the image with whatever tool fits its
+    domain (a plotting library, a structure drawer, an exported diagram, ...); this spec
+    only carries a path to that EXISTING file. The kernel never knows the domain.
+
+    The agent authors WHAT (the caption, a stable semantic id, and the SOURCE path of an
+    EXISTING image file); the compiler co-locates that source to ``paper/figures/fig<N>
+    <ext>`` (the ONLY filesystem toucher, ``N`` = the body-reference number assigned to
+    this figure) and this PURE renderer emits the matching
+    ``\\includegraphics{figures/fig<N><ext>}``. The renderer never reads the file -- it
+    derives ``<ext>`` from the source path's suffix as a string op; WHERE the image comes
+    from is the experiment's concern, not the kernel's.
+
+    Why ``fig<N>`` and not ``<id>`` as the filename: the saved file name follows the
+    standard academic FIGURE NUMBER (the order the figure is first referenced in the
+    paper body -- see :func:`order_figures_by_reference`), which is GENERIC and
+    domain-free. The semantic ``id`` is kept only as the ``\\label{fig:<id>}`` so the
+    body's ``\\ref{fig:<id>}`` still resolves -- the number is what the reader sees, the
+    id is the internal anchor.
 
     Attributes:
         kind: the union discriminator, fixed ``"image"``.
-        id: a LaTeX-safe slug -- the stable ``\\label{fig:<id>}`` AND the co-located
-            filename stem (so the ``.tex`` and the file agree). Same validation as
-            :class:`FigureSpec`.
+        id: a LaTeX-safe slug -- the stable ``\\label{fig:<id>}`` so the body's
+            ``\\ref{fig:<id>}`` resolves (NOT the filename -- the file is ``fig<N>``).
+            Same validation as :class:`FigureSpec`.
         caption: the figure caption (rendered LaTeX-safe).
         image: the SOURCE path/ref of an existing image file (relative or absolute).
-            Only its SUFFIX is used here (to build ``figures/<id><ext>``); the compiler
+            Only its SUFFIX is used here (to build ``figures/fig<N><ext>``); the compiler
             resolves + copies the actual bytes.
         width: an optional LaTeX width spec for ``\\includegraphics[width=...]`` (e.g.
             ``0.8\\textwidth``). Empty (the default) -> ``\\linewidth``.
@@ -387,21 +398,28 @@ def render_native_figure(
     return "\n".join(lines)
 
 
-def render_image_figure(spec: ImageFigureSpec) -> str:
+def render_image_figure(spec: ImageFigureSpec, number: int) -> str:
     """Render an agent-authored ``ImageFigureSpec`` to a LaTeX ``figure`` env.
 
     PURE: no Evidence is consulted (an image figure is a diagram, not a data plot) and
     NO filesystem access -- the ``<ext>`` is derived from ``spec.image``'s suffix as a
     string op only; the compiler co-locates the actual bytes. The included path is
-    ALWAYS ``figures/<id><ext>`` (the stable id is both the ``\\label`` and the filename
-    stem, so the ``.tex`` and the co-located file agree); the ``paper/`` folder stays
-    self-contained because the compiler lands the file under ``paper/figures/``.
+    ALWAYS ``figures/fig<number><ext>`` -- the GENERIC, domain-free figure-NUMBER
+    filename (``number`` = the body-reference order assigned by
+    :func:`order_figures_by_reference`), so the saved file is ``fig1.png`` /
+    ``fig2.pdf`` / ... never an agent-chosen id. The compiler co-locates the source to
+    EXACTLY this ``figures/fig<number><ext>`` (shared numbering), so the ``.tex`` and
+    the file agree and the ``paper/`` folder stays self-contained.
 
-    The ``<id>`` label matches the native path, so the body's ``\\ref{fig:<id>}``
-    resolves regardless of figure kind and numbering is automatic.
+    The ``\\label{fig:<id>}`` keeps the agent's SEMANTIC id (not the number), so the
+    body's ``\\ref{fig:<id>}`` resolves regardless of kind; LaTeX assigns the printed
+    number from SOURCE ORDER, and the caller emits figures in body-reference order so
+    "Figure ``<number>``" matches the file ``fig<number>`` exactly.
 
     Args:
         spec: the image figure spec (caption, stable id, source image path, width).
+        number: the 1-based body-reference figure number (the file becomes
+            ``fig<number><ext>``).
 
     Returns:
         A LaTeX ``figure`` environment string (``\\includegraphics`` + caption + label).
@@ -423,24 +441,47 @@ def render_image_figure(spec: ImageFigureSpec) -> str:
     lines: List[str] = []
     lines.append(r"\begin{figure}[htbp]")
     lines.append(r"\centering")
-    lines.append(f"\\includegraphics[width={width}]{{figures/{spec.id}{ext}}}")
+    lines.append(f"\\includegraphics[width={width}]{{figures/fig{number}{ext}}}")
     lines.append(f"\\caption{{{_sanitize(spec.caption)}}}")
     lines.append(f"\\label{{fig:{spec.id}}}")
     lines.append(r"\end{figure}")
     return "\n".join(lines)
 
 
-def render_figure(spec: AnyFigure, evidence: Sequence[EvidenceItem]) -> str:
+def image_figure_filename(spec: ImageFigureSpec, number: int) -> str:
+    """The co-located filename an image figure resolves to: ``fig<number><ext>``.
+
+    The SINGLE source of truth the compiler's ``_colocate_figures`` calls so the file it
+    writes matches the ``\\includegraphics{figures/fig<number><ext>}`` that
+    :func:`render_image_figure` emits for the SAME ``number`` -- the renderer and the
+    compiler must never derive this name divergently. PURE: ``<ext>`` is the source
+    suffix (a string op); the same extensionless-source guard as the renderer.
+
+    Raises:
+        ValueError: if ``spec.image`` has no extension (mirrors :func:`render_image_figure`).
+    """
+    ext = Path(spec.image).suffix
+    if not ext:
+        raise ValueError(
+            f"figure '{spec.id}': image source {spec.image!r} has no file extension -- "
+            r"\includegraphics needs a resolvable file (e.g. diagram.pdf / .png)"
+        )
+    return f"fig{number}{ext}"
+
+
+def render_figure(spec: AnyFigure, evidence: Sequence[EvidenceItem], number: int) -> str:
     """Render any :data:`AnyFigure` to a LaTeX ``figure`` env, routing by ``spec.kind``.
 
     The single entry point the paper/SI renderers call so they need not branch on the
     figure kind: a ``native`` spec is plotted from the Evidence record
-    (:func:`render_native_figure`), an ``image`` spec is an ``\\includegraphics``
-    (:func:`render_image_figure`, which ignores ``evidence``). PURE -- it dispatches
-    only; the underlying renderers carry the purity/record-fidelity guarantees.
+    (:func:`render_native_figure`, which ignores ``number`` -- native = inline text, no
+    file), an ``image`` spec is an ``\\includegraphics`` of ``figures/fig<number><ext>``
+    (:func:`render_image_figure`, which ignores ``evidence``). ``number`` is the figure's
+    1-based body-reference position (see :func:`order_figures_by_reference`). PURE -- it
+    dispatches only; the underlying renderers carry the purity/record-fidelity guarantees.
     """
     if spec.kind == "image":
-        return render_image_figure(spec)
+        return render_image_figure(spec, number)
     return render_native_figure(spec, evidence)
 
 
@@ -471,6 +512,73 @@ def figure_labels(figs: Sequence[AnyFigure]) -> List[str]:
 # id portion is the LaTeX-safe slug set; a ``\ref{sec:...}`` / ``\ref{tab:...}`` is
 # deliberately NOT a figure ref and is ignored.
 _FIG_REF_RE = re.compile(r"\\ref\{(fig:[A-Za-z0-9][A-Za-z0-9_-]*)\}")
+
+
+def order_figures_by_reference(
+    figures: Sequence[AnyFigure], body_latex: str
+) -> List[Tuple[int, AnyFigure]]:
+    """Assign each figure its body-reference NUMBER (the standard academic convention).
+
+    A main-paper figure's number is the order it is FIRST referenced in the paper body:
+    the first ``\\ref{fig:<id>}`` to appear -> Figure 1, the second DISTINCT one -> 2,
+    and so on. A figure NEVER referenced still gets a stable number -- those are appended
+    AFTER all referenced figures, in their given (supply) order, so every figure is
+    numbered and saved deterministically (an unreferenced figure remains orphan-flagged
+    by :func:`check_figure_consistency`, but it is not dropped).
+
+    The renderer emits figure environments IN THIS ORDER so LaTeX's source-order auto-
+    numbering yields Figure 1 = first-referenced, etc.; the semantic ``\\label{fig:<id>}``
+    is preserved so the body's existing ``\\ref{fig:<id>}`` still resolves (no ref
+    rewriting). This is also the SINGLE numbering the compiler reuses to name the
+    co-located image files ``fig<N><ext>``, so the ``\\includegraphics`` path and the
+    saved filename agree exactly (the number is computed ONCE and shared).
+
+    PURE + deterministic: same ``figures`` + same ``body_latex`` -> same ordering. A
+    duplicate figure id is rejected up front (it would make ``\\ref`` ambiguous and clobber
+    one ``fig<N>`` file with another).
+
+    Args:
+        figures: the agent-authored figure specs (native and/or image), in supply order.
+        body_latex: the rendered paper body to scan for ``\\ref{fig:<id>}`` appearance
+            order. This MUST be the same canonical body the SI orders against, so both
+            documents share one ``fig<N>`` numbering.
+
+    Returns:
+        A list of ``(number, figure)`` pairs in emission order: referenced figures first
+        (by first-reference position, lowest number first), then unreferenced figures in
+        supply order. ``number`` is 1-based and contiguous.
+
+    Raises:
+        ValueError: on a duplicate figure id (each id must be unique -- it is both a
+            ``\\label`` anchor and, for images, tied to a distinct ``fig<N>`` file).
+    """
+    figs = list(figures)
+    by_id: dict[str, AnyFigure] = {}
+    for f in figs:
+        if f.id in by_id:
+            raise ValueError(
+                f"duplicate figure id '{f.id}' -- ids must be unique "
+                r"(each becomes a \label{fig:<id>} and an image fig<N> file)"
+            )
+        by_id[f.id] = f
+
+    # First-reference order: walk the body's \ref{fig:...} in appearance, keeping the
+    # FIRST occurrence of each id that names a real figure (a dangling \ref to no figure
+    # is ignored here -- check_figure_consistency reports it).
+    referenced: List[AnyFigure] = []
+    seen: set[str] = set()
+    for match in _FIG_REF_RE.finditer(body_latex):
+        fig_id = match.group(1)[len("fig:"):]  # strip the "fig:" prefix
+        if fig_id in seen or fig_id not in by_id:
+            continue
+        seen.add(fig_id)
+        referenced.append(by_id[fig_id])
+
+    # Unreferenced figures keep supply order, appended after the referenced ones.
+    unreferenced = [f for f in figs if f.id not in seen]
+
+    ordered = referenced + unreferenced
+    return [(i + 1, f) for i, f in enumerate(ordered)]
 
 
 def check_figure_consistency(
@@ -512,7 +620,9 @@ __all__ = [
     "FigureConsistencyReport",
     "render_native_figure",
     "render_image_figure",
+    "image_figure_filename",
     "render_figure",
     "figure_labels",
+    "order_figures_by_reference",
     "check_figure_consistency",
 ]

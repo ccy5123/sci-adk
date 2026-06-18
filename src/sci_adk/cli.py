@@ -113,18 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
              "id (-> \\label{fig:<id>}); the engine renders a LaTeX-native pgfplots "
              "figure, pulling y FROM the recorded Evidence (record fidelity). An IMAGE "
              "spec ({\"kind\":\"image\",...}) names a caption, id, and a source image "
-             "path the compiler co-locates into paper/figures/. Never LLM-generated. "
-             "Omit -> no figures",
-    )
-    run.add_argument(
-        "--molecule-figures", action="store_true",
-        help="molecular domain only (--t1-demo / a t1 capability): draw a DETERMINISTIC "
-             "RDKit 2D structure PNG for each demo molecule (via RDKitDockerPlotter in "
-             "sci-adk-python-base), write them under the run's artifacts/figures/, and "
-             "thread the resulting image figure specs into the paper (paper/figures/*.png "
-             "+ \\includegraphics in draft.tex/si.tex). Composes with --figures (its "
-             "specs are appended). Requires the molecular capability + a rdkit-enabled "
-             "image",
+             "path (an image the experiment/agent already produced with whatever tool "
+             "fits its domain) the compiler co-locates into paper/figures/fig<N>. Never "
+             "LLM-generated. Omit -> no figures",
     )
 
     resolve = sub.add_parser(
@@ -409,59 +400,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except ValueError as e:
             print(f"error: invalid figures spec ({figures_path}): {e}", file=sys.stderr)
             return 2
-
-    # --molecule-figures (paper-figures Phase 4-2, molecular domain): draw a
-    # DETERMINISTIC RDKit 2D structure PNG per demo molecule (via the adapter's
-    # RDKitDockerPlotter inside sci-adk-python-base) and thread the resulting IMAGE
-    # figure specs into the paper. This is the genuine end-to-end image-source path:
-    # it produces paper/figures/*.png + \includegraphics in draft.tex/si.tex.
-    #
-    # It is molecular-domain only: it needs the molecules, which the T-1 capability's
-    # demo_options supplies. Requiring the capability (not a free proposal) is why it is
-    # gated on the resolved capability carrying a "molecules" demo option -- the CLI is
-    # the composition root that MAY import the adapter (F4); the kernel never sees this.
-    if args.molecule_figures:
-        if capability_id is None or spec is None:
-            print(
-                "error: --molecule-figures requires a molecular capability "
-                "(use --t1-demo); it draws the capability's demo molecules",
-                file=sys.stderr,
-            )
-            return 2
-        # Pull the demo molecules from the SAME provider.demo_options() the experiment
-        # used (so the drawn structures match the run's molecules). A capability without a
-        # "molecules" demo option is not molecular -> reject rather than guess.
-        from sci_adk.adapter.registry import resolve as _resolve_cap
-
-        demo_opts = _resolve_cap(capability_id).demo_options
-        molecules = demo_opts().get("molecules") if demo_opts is not None else None
-        if not molecules:
-            print(
-                f"error: capability '{capability_id}' exposes no demo molecules; "
-                "--molecule-figures is for the molecular domain (--t1-demo)",
-                file=sys.stderr,
-            )
-            return 2
-
-        from sci_adk.adapter.t1_figures import (
-            RDKitDockerPlotter,
-            build_molecule_figures,
-        )
-
-        workspace = Path(args.output)
-        figures_out = workspace / "runs" / spec.id / "artifacts" / "figures"
-        plotter = RDKitDockerPlotter(workspace_dir=workspace)
-        try:
-            mol_specs = build_molecule_figures(
-                molecules, out_dir=figures_out, plotter=plotter
-            )
-        except RuntimeError as e:
-            # A missing-rdkit image (or a container failure) is a friendly non-zero exit,
-            # never a raw traceback. The plotter's message names the rebuild hint.
-            print(f"error: molecule figures failed: {e}", file=sys.stderr)
-            return 2
-        # Append to any --figures specs (compose; both land in the paper).
-        figures = list(figures or []) + list(mol_specs)
 
     compiler = ResearchCompiler(workspace_dir=Path(args.output))
     # Evidence-validity halt (design/evidence-validity.md E3): an inadequate record

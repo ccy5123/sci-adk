@@ -63,6 +63,8 @@ from sci_adk.render.figures import (
     ImageFigureSpec,
     check_figure_consistency,
     figure_labels,
+    image_figure_filename,
+    order_figures_by_reference,
 )
 from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.prose import PaperProse, SIProse
@@ -252,16 +254,14 @@ class ResearchCompiler:
         # CO-LOCATED path, whose stem is "references", to the renderer.
         bib_path = self._colocate_bib(run_dir, paper_dir)
 
-        # Co-locate each IMAGE figure's source into paper/figures/<id><ext> (the renderer
-        # only emits that reference; the compiler -- the sole filesystem toucher -- lands
-        # the bytes), so the paper/ folder is self-contained on an Overleaf upload. A
-        # missing source fails loud here (record fidelity). Native specs carry no file.
         figures = list(figures or [])
-        self._colocate_figures(figures, paper_dir)
 
         # The .tex is THE paper artifact (Overleaf default pdflatex). Deterministic and
         # offline -- no LLM, no network (render_paper_latex is pure). The Markdown
-        # render_paper remains a library function but is no longer auto-emitted.
+        # render_paper remains a library function but is no longer auto-emitted. It is
+        # rendered FIRST (before co-location) because its body fixes the canonical
+        # body-reference figure numbering (Figure 1 = first-\ref'd) that the co-located
+        # fig<N> filenames AND the SI must agree with.
         paper_tex = render_paper_latex(
             spec, claims, evidence,
             pending=pending_dicts,
@@ -272,6 +272,16 @@ class ResearchCompiler:
         )
         paper_path = paper_dir / "draft.tex"
         paper_path.write_text(paper_tex, encoding="utf-8")
+
+        # Co-locate each IMAGE figure's source into paper/figures/fig<N><ext> (the
+        # renderer only emits that reference; the compiler -- the sole filesystem toucher
+        # -- lands the bytes), so the paper/ folder is self-contained on an Overleaf
+        # upload. The numbering N is computed ONCE from the rendered draft body (the same
+        # pure order_figures_by_reference the renderer used; refs only precede the Figures
+        # section, so scanning the full draft yields the identical order), so the
+        # \includegraphics path and the co-located filename agree exactly. A missing
+        # source fails loud here (record fidelity). Native specs carry no file.
+        self._colocate_figures(figures, paper_dir, paper_tex)
 
         # Supporting Information (design/paper-figures-and-si.md Phase 2 / D3): a
         # STANDALONE si.tex = the deterministic record dump (every Evidence item, the
@@ -287,8 +297,13 @@ class ResearchCompiler:
         # resolving into the SI -- is deferred to Phase 3: separate compiles would need
         # the `xr` package + a compile-order dependency; the SI is INTERNALLY consistent
         # here via figure_labels' unique-id enforcement.)
+        # paper_body=paper_tex: the SI shares the SAME global fig<N> body-reference
+        # numbering as the main draft (Figure N here == Figure N there), so si.tex
+        # references the same paper/figures/fig<N> files the compiler co-located above --
+        # one shared file set for both standalone documents.
         si_tex = render_si_latex(
-            spec, claims, evidence, figures=figures, digest=None, prose=si_prose
+            spec, claims, evidence, figures=figures, digest=None, prose=si_prose,
+            paper_body=paper_tex,
         )
         si_path = paper_dir / "si.tex"
         si_path.write_text(si_tex, encoding="utf-8")
@@ -402,30 +417,41 @@ class ResearchCompiler:
         return str(dest)
 
     def _colocate_figures(
-        self, figures: Sequence[AnyFigure], paper_dir: Path
+        self, figures: Sequence[AnyFigure], paper_dir: Path, paper_body: str
     ) -> None:
-        """Copy each IMAGE figure's source file into ``paper/figures/<id><ext>``.
+        """Copy each IMAGE figure's source file into ``paper/figures/fig<N><ext>``.
 
         Overleaf self-containment (mirrors :meth:`_colocate_bib`): the pure
-        :func:`render_image_figure` emits ``\\includegraphics{figures/<id><ext>}`` but
+        :func:`render_image_figure` emits ``\\includegraphics{figures/fig<N><ext>}`` but
         never touches the filesystem; the compiler -- the sole filesystem toucher --
         lands the actual bytes here so uploading the ``paper/`` folder as-is resolves
-        the reference. The destination filename uses the stable figure id (so the
-        ``.tex`` reference and the file agree) with the SOURCE extension. A relative
-        ``spec.image`` is resolved against ``self.workspace_dir``. Native figures carry
-        no file and are skipped.
+        the reference.
+
+        The destination filename is the GENERIC, domain-free figure NUMBER ``fig<N>``
+        (never the agent's id) with the SOURCE extension. ``N`` is the SHARED
+        body-reference numbering: it is computed from ``paper_body`` (the just-rendered
+        ``draft.tex``) via the SAME pure :func:`order_figures_by_reference` the renderer
+        used, so the co-located filename and the renderer's ``\\includegraphics`` path
+        agree EXACTLY (the numbering is computed once per consumer from the same body, not
+        duplicated divergently). :func:`image_figure_filename` is the single name-builder
+        both this method and the renderer's filename share. A relative ``spec.image`` is
+        resolved against ``self.workspace_dir``. Native figures carry no file and are
+        skipped (they still occupy a body-order position, just no renamed file).
 
         Raises:
             ValueError: if an image figure's source file does not exist -- fail-loud
                 record fidelity (naming the figure id and the missing path), so a
                 broken paper/ is never silently produced.
         """
-        image_figs = [f for f in figures if isinstance(f, ImageFigureSpec)]
-        if not image_figs:
+        if not any(isinstance(f, ImageFigureSpec) for f in figures):
             return
         figures_dir = paper_dir / "figures"
         figures_dir.mkdir(parents=True, exist_ok=True)
-        for fig in image_figs:
+        # The SAME body-reference numbering the renderer assigned (refs precede the
+        # Figures section, so scanning the full draft gives the identical order).
+        for number, fig in order_figures_by_reference(figures, paper_body):
+            if not isinstance(fig, ImageFigureSpec):
+                continue  # native: no file, keeps its body-order number only
             src = Path(fig.image)
             if not src.is_absolute():
                 src = self.workspace_dir / src
@@ -435,7 +461,7 @@ class ResearchCompiler:
                     f"(an image figure must reference an existing file -- record "
                     f"fidelity; the paper/ folder must be self-contained)"
                 )
-            dest = figures_dir / f"{fig.id}{src.suffix}"
+            dest = figures_dir / image_figure_filename(fig, number)
             shutil.copyfile(src, dest)
 
     def _collect_contested_checkpoints(

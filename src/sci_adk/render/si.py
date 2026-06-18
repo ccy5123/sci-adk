@@ -36,7 +36,11 @@ from typing import List, Optional, Sequence
 from sci_adk.core.claim import Claim
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Spec
-from sci_adk.render.figures import AnyFigure, render_figure
+from sci_adk.render.figures import (
+    AnyFigure,
+    order_figures_by_reference,
+    render_figure,
+)
 from sci_adk.render.paper import (
     _confidence_str,
     _latex_sanitize,
@@ -115,6 +119,7 @@ def render_si_latex(
     figures: Optional[Sequence[AnyFigure]] = None,
     digest: Optional[str] = None,
     prose: Optional[SIProse] = None,
+    paper_body: Optional[str] = None,
 ) -> str:
     """Render the full record as a STANDALONE Supporting Information ``si.tex``.
 
@@ -142,7 +147,10 @@ def render_si_latex(
          C3), its supporting/refuting evidence links, and the hypothesis's frozen
          ``decision_rule`` (what it was judged against).
       5. Figures -- ALL ``figures`` via :func:`render_figure` (the SI shows every figure,
-         native or image); ``pgfplots`` is added to the preamble when a NATIVE figure is
+         native or image), in the SAME global body-reference order + the SAME ``fig<N>``
+         identity as the main paper (so ``si.tex`` references the same
+         ``paper/figures/fig<N>`` files the compiler co-locates -- one shared file set for
+         both documents); ``pgfplots`` is added to the preamble when a NATIVE figure is
          present and ``graphicx`` when an IMAGE figure is present.
       6. Record integrity -- ``digest`` embedded as ``Record digest (sha256): <digest>``
          when provided; ELSE a note that the record is independently auditable via
@@ -153,9 +161,12 @@ def render_si_latex(
         claims: the Claims (belief states) whose verdicts the SI records.
         evidence: the append-only Evidence record (rendered in the given order).
         figures: optional agent-authored figure list (native or image) -- the SI renders
-            ALL of them. ``pgfplots`` + ``\\pgfplotsset{compat=1.18}`` are added when a
-            native figure is present, ``graphicx`` when an image figure is present.
-            ``None``/empty -> no figures, no figure packages.
+            ALL of them, in the SAME global ``fig<N>`` body-reference order as the main
+            paper (see ``paper_body``) so an image figure references the SAME
+            ``figures/fig<N><ext>`` file the compiler co-located (one shared file set for
+            ``draft.tex`` + ``si.tex``). ``pgfplots`` + ``\\pgfplotsset{compat=1.18}`` are
+            added when a native figure is present, ``graphicx`` when an image figure is
+            present. ``None``/empty -> no figures, no figure packages.
         digest: optional record digest (hex sha256). When provided it is embedded in the
             integrity section; ``None`` (Phase 2 default) emits the ``sci-adk verify``
             note instead -- NEVER a fabricated digest.
@@ -173,6 +184,14 @@ def render_si_latex(
             slot) -> nothing emitted: the output stays byte-identical to the no-prose
             record dump (a regression invariant). NEVER LLM-generated -- input, the same
             spirit as ``PaperProse``.
+        paper_body: optional MAIN-PAPER body text used ONLY to compute the global
+            body-reference figure numbering (:func:`order_figures_by_reference`), so the
+            SI's figures share the SAME ``fig<N>`` numbers + filenames as ``draft.tex``
+            (the compiler passes the rendered main draft here). ``None`` -> the figures
+            are numbered in supply order (no body to reference against), which is correct
+            for a standalone SI render with no companion paper. Affects ONLY figure
+            numbering (the ``\\label{fig:<id>}`` anchors are unchanged), so a figure-less
+            SI is byte-identical regardless of ``paper_body``.
 
     Returns:
         A STANDALONE LaTeX document string.
@@ -324,12 +343,18 @@ def render_si_latex(
         lines.append("")
 
     # -- Section: Figures (ALL of them; the SI shows every figure) -----------------
-    # render_figure routes by kind (native pgfplots from the record / image include).
+    # render_figure routes by kind (native pgfplots from the record / image include),
+    # emitted in the SAME global body-reference order + the SAME fig<N> numbering as the
+    # main paper: order_figures_by_reference against `paper_body` (the rendered main
+    # draft) -> Figure N here == Figure N there, and an image figure references the SAME
+    # figures/fig<N><ext> file the compiler co-located (one shared file set for both
+    # docs). paper_body=None -> supply order (a standalone SI with no companion paper).
     if figures:
+        ordered = order_figures_by_reference(figures, paper_body or "")
         lines.append(r"\section{Figures}")
         lines.append("")
-        for fig in figures:
-            lines.append(render_figure(fig, evidence))
+        for number, fig in ordered:
+            lines.append(render_figure(fig, evidence, number))
             lines.append("")
 
     # -- Section: Record integrity ------------------------------------------------

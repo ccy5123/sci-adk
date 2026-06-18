@@ -37,6 +37,8 @@ from sci_adk.render.figures import (
     PlotSeries,
     check_figure_consistency,
     figure_labels,
+    image_figure_filename,
+    order_figures_by_reference,
     render_figure,
     render_image_figure,
     render_native_figure,
@@ -497,45 +499,53 @@ class TestNativeKindBackwardCompat:
 
     def test_native_render_byte_identical_with_default_kind(self):
         # A spec built without passing kind (defaulting to "native") renders byte-for-byte
-        # the same tex as today -- the native path is unchanged by the discriminator.
+        # the same tex as today -- the native path is unchanged by the discriminator. The
+        # dispatcher's `number` is ignored for native (native = inline text, no file).
         spec = _line_spec("growth")
         assert spec.kind == "native"
         a = render_native_figure(spec, _series_evidence())
-        b = render_figure(spec, _series_evidence())
+        b = render_figure(spec, _series_evidence(), 1)
         assert a == b  # dispatcher routes native -> render_native_figure verbatim
 
 
 class TestRenderImageFigure:
     def test_emits_includegraphics_caption_label(self):
-        tex = render_image_figure(_image_spec("scheme", "art/diagram.pdf"))
+        # The included path is the GENERIC figure NUMBER fig<N> (here 1), ext from the
+        # source; the \label keeps the SEMANTIC id so the body's \ref{fig:<id>} resolves.
+        tex = render_image_figure(_image_spec("scheme", "art/diagram.pdf"), 1)
         assert r"\begin{figure}" in tex
         assert r"\centering" in tex
-        # The included path is ALWAYS figures/<id><ext>, ext derived from the source.
-        assert r"\includegraphics[width=\linewidth]{figures/scheme.pdf}" in tex
+        assert r"\includegraphics[width=\linewidth]{figures/fig1.pdf}" in tex
         assert r"\caption{Reaction scheme (diagram).}" in tex
         assert r"\label{fig:scheme}" in tex
         assert r"\end{figure}" in tex
 
+    def test_filename_is_the_assigned_number_not_the_id(self):
+        # The co-located filename is fig<N> (the body-reference number), NEVER the id.
+        tex = render_image_figure(_image_spec("scheme", "art/diagram.pdf"), 3)
+        assert "{figures/fig3.pdf}" in tex
+        assert "{figures/scheme.pdf}" not in tex  # the id is NOT the filename
+
     def test_extension_derived_from_source_suffix(self):
-        tex = render_image_figure(_image_spec("panel", "/abs/path/photo.png"))
-        # The file extension follows the SOURCE suffix (.png), the stem is the figure id.
-        assert "{figures/panel.png}" in tex
+        tex = render_image_figure(_image_spec("panel", "/abs/path/photo.png"), 2)
+        # The file extension follows the SOURCE suffix (.png); the stem is fig<N>.
+        assert "{figures/fig2.png}" in tex
 
     def test_explicit_width_is_used(self):
         tex = render_image_figure(
-            _image_spec("w", "d.pdf", width=r"0.8\textwidth")
+            _image_spec("w", "d.pdf", width=r"0.8\textwidth"), 1
         )
-        assert r"\includegraphics[width=0.8\textwidth]{figures/w.pdf}" in tex
+        assert r"\includegraphics[width=0.8\textwidth]{figures/fig1.pdf}" in tex
 
     def test_empty_width_defaults_to_linewidth(self):
-        tex = render_image_figure(_image_spec("d", "d.pdf", width=""))
+        tex = render_image_figure(_image_spec("d", "d.pdf", width=""), 1)
         assert r"width=\linewidth" in tex
 
     def test_caption_is_sanitized(self):
         spec = ImageFigureSpec(
             kind="image", id="esc", caption="100% & cost $5", image="d.pdf"
         )
-        tex = render_image_figure(spec)
+        tex = render_image_figure(spec, 1)
         assert r"100\%" in tex
         assert r"\&" in tex
         assert r"\$5" in tex
@@ -544,11 +554,11 @@ class TestRenderImageFigure:
         # \includegraphics needs a resolvable file ending; an extensionless source is an
         # authoring error (fail-loud, like the native record-fidelity errors).
         with pytest.raises(ValueError):
-            render_image_figure(_image_spec("noext", image="diagram"))
+            render_image_figure(_image_spec("noext", image="diagram"), 1)
 
     def test_image_render_is_pure(self):
         spec = _image_spec("p", "d.pdf")
-        assert render_image_figure(spec) == render_image_figure(spec)
+        assert render_image_figure(spec, 1) == render_image_figure(spec, 1)
 
     def test_unsafe_id_rejected(self):
         # The same LaTeX-safe slug rule as FigureSpec.
@@ -557,22 +567,44 @@ class TestRenderImageFigure:
                 ImageFigureSpec(kind="image", id=bad, caption="c", image="d.pdf")
 
 
+class TestImageFigureFilename:
+    def test_filename_is_fig_number_with_source_ext(self):
+        # The single name-builder the renderer + compiler share: fig<N><ext>.
+        assert image_figure_filename(_image_spec("a", "art/x.png"), 1) == "fig1.png"
+        assert image_figure_filename(_image_spec("b", "/abs/y.pdf"), 7) == "fig7.pdf"
+
+    def test_filename_matches_renderer_includegraphics(self):
+        # The compiler's co-located filename MUST match the renderer's \includegraphics
+        # path for the SAME number (the shared-numbering invariant).
+        spec = _image_spec("scheme", "art/diagram.pdf")
+        name = image_figure_filename(spec, 2)
+        tex = render_image_figure(spec, 2)
+        assert f"{{figures/{name[:-4]}.pdf}}" in tex  # figures/fig2.pdf
+        assert f"figures/{name}" in tex
+
+    def test_extensionless_raises(self):
+        with pytest.raises(ValueError):
+            image_figure_filename(_image_spec("noext", image="diagram"), 1)
+
+
 class TestRenderFigureDispatch:
     def test_dispatches_native(self):
         spec = _line_spec("growth")
-        assert render_figure(spec, _series_evidence()) == render_native_figure(
+        # native ignores `number` (no file); dispatcher == render_native_figure.
+        assert render_figure(spec, _series_evidence(), 1) == render_native_figure(
             spec, _series_evidence()
         )
 
     def test_dispatches_image(self):
         spec = _image_spec("scheme", "d.pdf")
-        # The image path ignores evidence; the dispatcher matches render_image_figure.
-        assert render_figure(spec, _series_evidence()) == render_image_figure(spec)
+        # The image path ignores evidence; the dispatcher matches render_image_figure for
+        # the SAME number.
+        assert render_figure(spec, _series_evidence(), 4) == render_image_figure(spec, 4)
 
     def test_image_dispatch_ignores_evidence(self):
         spec = _image_spec("scheme", "d.pdf")
-        a = render_figure(spec, _series_evidence())
-        b = render_figure(spec, [])  # no evidence at all
+        a = render_figure(spec, _series_evidence(), 1)
+        b = render_figure(spec, [], 1)  # no evidence at all
         assert a == b
 
 
@@ -614,3 +646,64 @@ class TestPaperFiguresMixedUnion:
         pf = PaperFigures.model_validate(payload)
         assert isinstance(pf.figures[0], FigureSpec)
         assert isinstance(pf.figures[1], ImageFigureSpec)
+
+
+# ---------------------------------------------------------------------------
+# order_figures_by_reference (Part B): a main-paper figure's NUMBER is the order it is
+# first \ref'd in the body; unreferenced figures appended after; deterministic.
+# ---------------------------------------------------------------------------
+
+class TestOrderFiguresByReference:
+    def test_number_follows_first_reference_order_not_supply_order(self):
+        # Supplied [a, b, c] but the body references c, then a (b never) -> c=1, a=2,
+        # then the unreferenced b=3 (appended after the referenced ones).
+        figs = [_line_spec("a"), _line_spec("b"), _line_spec("c")]
+        body = r"First see \ref{fig:c}, then \ref{fig:a}."
+        ordered = order_figures_by_reference(figs, body)
+        assert [(n, f.id) for n, f in ordered] == [(1, "c"), (2, "a"), (3, "b")]
+
+    def test_first_reference_wins_for_repeated_refs(self):
+        # A figure \ref'd multiple times is numbered by its FIRST appearance only.
+        figs = [_line_spec("a"), _line_spec("b")]
+        body = r"\ref{fig:b} ... \ref{fig:a} ... \ref{fig:b} again."
+        ordered = order_figures_by_reference(figs, body)
+        assert [(n, f.id) for n, f in ordered] == [(1, "b"), (2, "a")]
+
+    def test_unreferenced_figures_keep_supply_order_after_referenced(self):
+        # None referenced -> all kept in supply order, numbered 1..N.
+        figs = [_line_spec("a"), _line_spec("b"), _line_spec("c")]
+        ordered = order_figures_by_reference(figs, "no refs here")
+        assert [(n, f.id) for n, f in ordered] == [(1, "a"), (2, "b"), (3, "c")]
+
+    def test_mixed_referenced_then_unreferenced(self):
+        # b referenced (=1); a and c unreferenced -> appended in supply order (a=2, c=3).
+        figs = [_line_spec("a"), _line_spec("b"), _line_spec("c")]
+        ordered = order_figures_by_reference(figs, r"only \ref{fig:b}")
+        assert [(n, f.id) for n, f in ordered] == [(1, "b"), (2, "a"), (3, "c")]
+
+    def test_dangling_ref_ignored_does_not_number_a_missing_figure(self):
+        # A \ref to a figure that does not exist contributes no number (it is reported by
+        # check_figure_consistency, not numbered here).
+        figs = [_line_spec("a")]
+        ordered = order_figures_by_reference(figs, r"\ref{fig:ghost} \ref{fig:a}")
+        assert [(n, f.id) for n, f in ordered] == [(1, "a")]
+
+    def test_numbers_are_contiguous_and_one_based(self):
+        figs = [_line_spec("a"), _image_spec("b", "d.pdf"), _line_spec("c")]
+        ordered = order_figures_by_reference(figs, r"\ref{fig:c}")
+        assert [n for n, _ in ordered] == [1, 2, 3]
+
+    def test_is_deterministic(self):
+        figs = [_line_spec("a"), _line_spec("b"), _line_spec("c")]
+        body = r"\ref{fig:b} \ref{fig:a}"
+        a = order_figures_by_reference(figs, body)
+        b = order_figures_by_reference(figs, body)
+        assert [(n, f.id) for n, f in a] == [(n, f.id) for n, f in b]
+
+    def test_empty_figures_is_empty(self):
+        assert order_figures_by_reference([], r"\ref{fig:x}") == []
+
+    def test_duplicate_id_fails_loud(self):
+        figs = [_line_spec("dup"), _image_spec("dup", "d.pdf")]
+        with pytest.raises(ValueError):
+            order_figures_by_reference(figs, r"\ref{fig:dup}")
