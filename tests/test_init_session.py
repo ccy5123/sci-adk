@@ -2,7 +2,7 @@
 ``sci-adk init-session <dir> [--dry-run]`` -- the Phase-3 installer (RED-first).
 
 design/research-session-enforcement.md D3: install the Phase-2
-``templates/research-workspace/`` kit into a target research workspace.
+``src/sci_adk/templates/research-workspace/`` kit into a target research workspace.
 
 The two load-bearing invariants are NON-CLOBBERING and IDEMPOTENT:
   - never overwrite a file the user already has (identical -> no-op; differs -> skip);
@@ -291,18 +291,13 @@ def test_empty_target_string_is_rejected_not_coerced_to_cwd(tmp_path):
 #     / a MoAI build harness. The empty/`.` guard does NOT stop an absolute path
 #     (or a relative path resolving) into the build repo -- a marker-based guard
 #     does. These assert a RAISE, so nothing is written.
+#
+#     NOTE: there is deliberately NO test that points install_session at the REAL
+#     /home/cyjoe/sci-adk checkout. The marker guard makes such a target a no-write
+#     refusal, but on un-guarded/regressed code that test would WRITE the kit into
+#     the build repo (the dev-time pollution incident). The tmp-marker test below
+#     covers the SAME src/sci_adk/ guard branch safely.
 # --------------------------------------------------------------------------- #
-
-
-def _build_repo_root() -> Path:
-    # <repo>/tests/test_init_session.py -> parents[1] = <repo>
-    return Path(__file__).resolve().parents[1]
-
-
-def test_refuses_the_actual_sci_adk_build_repo(tmp_path):
-    # the real build repo (this very checkout) must be refused -- never written to.
-    with pytest.raises(NotADirectoryError):
-        install_session(_build_repo_root())
 
 
 def test_refuses_a_dir_with_sci_adk_package_layout(tmp_path):

@@ -106,9 +106,10 @@ sci-adk's own build harness. Per the sci-adk constitution's two-environment rule
 - They MUST live in the **research workspace's** `.claude/` (the project where research is actually
   done), NOT in this repo's MoAI build harness (`.claude/`, root `CLAUDE.md`) — that harness stays
   untouched.
-- sci-adk SHIPS them as templates the research workspace installs. Proposed home:
-  `templates/research-workspace/.claude/` (hooks, settings fragment, output style, `/research`
-  command) — installed manually or by a future `sci-adk init-session` verb (Open Question O3).
+- sci-adk SHIPS them as templates the research workspace installs. Home:
+  `src/sci_adk/templates/research-workspace/.claude/` (hooks, settings fragment, output style,
+  `/research` command) — packaged as package data so it ships inside the wheel, and installed by
+  the `sci-adk init-session` verb (Open Question O3, resolved).
 - Dogfooding caveat: do **not** install the research gate into *this* repo while it is still the
   build workspace for sci-adk — the MoAI Stop/quality hooks and the sci-adk verify gate would fight.
   Research-on-sci-adk, if ever wanted, gets its own workspace.
@@ -127,7 +128,7 @@ sci-adk's own build harness. Per the sci-adk constitution's two-environment rule
 | `settings.json` fragment wiring them + `outputStyle` | MISSING |
 | `researcher` output style | MISSING |
 | `/research` thin command + skill | MISSING |
-| Template packaging + installer | DECIDED (D3) — `templates/research-workspace/` + `sci-adk init-session <dir>`; to build |
+| Template packaging + installer | DONE (D3) — `src/sci_adk/templates/research-workspace/` (package data, ships in wheel) + `sci-adk init-session <dir>` |
 
 The gap is *wiring + packaging*, not a new engine. This is why the verify-gate is high-leverage:
 the hard part (a deterministic, tamper-evident gate) is already built.
@@ -144,10 +145,13 @@ the hard part (a deterministic, tamper-evident gate) is already built.
   Exploratory turns with no run pass (exit 0); the verify gate bites only when there is recorded
   belief to protect — low noise, so the gate stays enabled. The "you never started a run" nudge is
   Layer 2 (re-anchor) + Layer 4 (`/research`), not a hard Stop block.
-- **D3 — Distribution → `templates/research-workspace/` + a `sci-adk init-session <dir>` installer.**
-  The kit ships as templates and installs (copy + settings.json merge) with one command, version-
-  pinned to the sci-adk release so the hook/`verify` contracts stay in sync. The settings.json merge
-  is the fiddly part; phasing (ship templates first, add the installer second) is acceptable.
+- **D3 — Distribution → `src/sci_adk/templates/research-workspace/` (package data) + a
+  `sci-adk init-session <dir>` installer.** The kit ships as package data — inside the wheel, not
+  just an editable checkout (MANIFEST.in `graft` + `include-package-data`; the hidden `.claude/`
+  dir and the `.sh` hooks ride along) — and installs (copy + settings.json merge) with one command,
+  version-pinned to the sci-adk release so the hook/`verify` contracts stay in sync. The
+  settings.json merge is the fiddly part; phasing (ship templates first, add the installer second)
+  is acceptable.
 - **D4 — Hook portability → bash `.sh` (WSL/bash).** Matches the current WSL ubuntu setup and the
   MoAI wrapper pattern; the hook only needs `sci-adk` reachable from the shell. Revisit only if
   research sessions move to a non-WSL machine (then a Python-based portable hook).

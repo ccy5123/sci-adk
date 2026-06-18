@@ -1,7 +1,7 @@
 """Executable tests for the research-workspace enforcement hooks (Phase 2).
 
 These tests exercise the two bash hooks shipped in
-``templates/research-workspace/.claude/hooks/sci-adk/`` against fixture
+``src/sci_adk/templates/research-workspace/.claude/hooks/sci-adk/`` against fixture
 workspaces built in ``tmp_path``. The hooks are run as real subprocesses; a
 *stub* ``sci-adk`` is injected via ``SCI_ADK_CMD`` so the tests are hermetic
 (no real sci-adk install needed and no real run-verification performed).
@@ -20,10 +20,12 @@ from pathlib import Path
 
 import pytest
 
-# --- locate the template kit (repo-relative, stable regardless of cwd) -------
+# --- locate the template kit (via the installer's own resolver, so the path
+# follows the package wherever it ships -- editable or wheel) -----------------
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-KIT = REPO_ROOT / "templates" / "research-workspace"
+from sci_adk.init_session import _templates_root
+
+KIT = _templates_root()
 HOOK_DIR = KIT / ".claude" / "hooks" / "sci-adk"
 STOP_HOOK = HOOK_DIR / "stop-verify-gate.sh"
 REANCHOR_HOOK = HOOK_DIR / "reanchor.sh"

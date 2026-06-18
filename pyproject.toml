@@ -32,8 +32,26 @@ tools = [
 [project.scripts]
 sci-adk = "sci_adk.cli:main"
 
+[tool.setuptools]
+# Ship non-.py files declared in MANIFEST.in (the research-workspace kit) inside
+# the wheel, not just the sdist. Without this, `graft` only reaches the sdist.
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["src"]
+# `templates/` under the package has no __init__.py so it is NOT importable and is
+# not auto-discovered as a package; its contents ride along as package-data below.
+# The wheel's only top-level dir stays `sci_adk`.
+
+[tool.setuptools.package-data]
+# Belt-and-suspenders alongside MANIFEST.in's `graft`: name the kit's files
+# explicitly so they are included even if the manifest path is bypassed. Two globs
+# are needed because the first (`**/*`) misses dotfiles while the second (`**/.*`)
+# catches the hidden `.claude/` tree (settings.json, hooks, output style, command).
+"sci_adk" = [
+    "templates/research-workspace/**/*",
+    "templates/research-workspace/**/.*",
+]
 
 [tool.pytest.ini_options]
 pythonpath = "src"

@@ -2,10 +2,10 @@
 ``sci-adk init-session <dir>`` -- the Phase-3 research-workspace installer (D3).
 
 design/research-session-enforcement.md D3: install the Phase-2
-``templates/research-workspace/`` enforcement kit (two hooks, the ``researcher``
-output style, the ``/research`` command, ``CLAUDE.md``, and a ``settings.json``
-fragment) into a target research workspace, with one command, keeping the
-hook/``verify`` contracts version-pinned to the sci-adk release.
+``src/sci_adk/templates/research-workspace/`` enforcement kit (two hooks, the
+``researcher`` output style, the ``/research`` command, ``CLAUDE.md``, and a
+``settings.json`` fragment) into a target research workspace, with one command,
+keeping the hook/``verify`` contracts version-pinned to the sci-adk release.
 
 Two load-bearing invariants, tested explicitly in tests/test_init_session.py:
 
@@ -22,16 +22,18 @@ disk and writes into the target dir. It imports NO kernel experiment logic and -
 critically -- NOT the paperforge adapter (the F4 seam stays green; this installer
 is composition-root-adjacent, like ``cli.py``, not kernel code).
 
-Templates root resolution (D3 / O3 follow-up): for an editable (``pip install -e``)
-install, ``templates/research-workspace/`` sits two parents up from this module
-(``<repo>/src/sci_adk/init_session.py`` -> ``<repo>/templates/...``). Packaging the
-templates into a built wheel (so a non-editable install can also init a session) is
-an explicit Phase-3 follow-up; today the installer requires an editable checkout and
-says so in a clear error rather than guessing.
+Templates root resolution: the kit ships as package data at
+``sci_adk/templates/research-workspace/`` (via MANIFEST.in ``graft`` +
+``include-package-data`` -- the hidden ``.claude/`` dir and the two ``.sh`` hooks
+ride inside the wheel). ``_templates_root()`` resolves it with
+``importlib.resources.files("sci_adk")`` so it works for BOTH an editable install
+(``pip install -e .``) and a built wheel (unzipped into site-packages as a real
+dir), with no ``__file__``-parents guessing.
 """
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 import shutil
 from pathlib import Path
@@ -127,23 +129,26 @@ class InstallReport(BaseModel):
 
 
 def _templates_root() -> Path:
-    """Return the ``templates/research-workspace/`` dir shipped with sci-adk.
+    """Return the ``research-workspace/`` template dir shipped with sci-adk.
 
-    For an editable install this resolves to ``<repo>/templates/research-workspace``
-    (two parents up from this module's package dir). Raises a clear, friendly error
-    if it is absent -- e.g. a wheel install that does not yet package the templates
-    (a Phase-3 follow-up); the installer never guesses a path.
+    The kit is packaged as package data under ``sci_adk/templates/`` and resolved
+    via ``importlib.resources.files("sci_adk")`` -- a real on-disk dir for BOTH an
+    editable install and a built wheel (wheels are unzipped into site-packages).
+    Raises a clear, friendly error if the dir is absent (a broken/partial install).
     """
-    # __file__ -> <repo>/src/sci_adk/init_session.py
-    #   parents[0] = <repo>/src/sci_adk
-    #   parents[1] = <repo>/src
-    #   parents[2] = <repo>
-    root = Path(__file__).resolve().parents[2] / "templates" / "research-workspace"
+    # importlib.resources.files -> the package's on-disk root (editable: <repo>/src/
+    # sci_adk; wheel: site-packages/sci_adk). The templates ride inside it as data.
+    root = (
+        Path(str(importlib.resources.files("sci_adk")))
+        / "templates"
+        / "research-workspace"
+    )
     if not root.is_dir():
         raise FileNotFoundError(
             "research-workspace templates not found at "
-            f"{root}; run 'sci-adk init-session' from an editable sci-adk install "
-            "(pip install -e .). Wheel-packaged templates are a Phase-3 follow-up."
+            f"{root}; the sci-adk install appears incomplete (the packaged "
+            "templates are missing). Reinstall sci-adk (pip install -e . or the "
+            "wheel)."
         )
     return root
 
@@ -302,13 +307,15 @@ def _refuse_if_build_harness(target: Path) -> None:
     """Raise if ``target`` (already resolved) looks like a build harness, not a
     research workspace.
 
-    Refuses on ANY of these markers (the two-environment rule):
+    Refuses on EITHER of these markers (the two-environment rule):
       - ``target/src/sci_adk/``                -> the sci-adk build repo's package
-        layout (a relative path that resolves into the repo root is covered here);
-      - ``target/.claude/output-styles/moai/`` -> a MoAI build-harness marker;
-      - ``target == <repo root derived from this package's __file__>`` -> the very
-        repo this installer ships from. Guarded in try/except so a non-editable
-        install (where ``_templates_root()`` raises) simply skips this third check.
+        layout (a relative path that resolves into the repo root is covered here;
+        the sci-adk build repo carries this marker, so it is still refused);
+      - ``target/.claude/output-styles/moai/`` -> a MoAI build-harness marker.
+
+    These two markers are the robust guard. (The former repo-root *identity* check
+    was dropped when the templates moved INTO the package: ``_templates_root()`` no
+    longer sits at a derivable repo root, and it cannot be computed for a wheel.)
 
     Never writes; this is a precondition gate.
     """
@@ -322,17 +329,6 @@ def _refuse_if_build_harness(target: Path) -> None:
             f"target {target} looks like a MoAI build harness "
             "(has .claude/output-styles/moai/); install into a SEPARATE research "
             "workspace (two-environment rule)"
-        )
-    try:
-        repo_root = _templates_root().parents[2]
-    except FileNotFoundError:
-        # non-editable install: no shipped templates to derive a repo root from.
-        # The two marker checks above still stand; just skip the identity check.
-        return
-    if target == repo_root.resolve():
-        raise NotADirectoryError(
-            f"target {target} is the sci-adk build repo itself; install into a "
-            "SEPARATE research workspace (two-environment rule)"
         )
 
 

@@ -1,0 +1,6 @@
+# Ship the research-workspace enforcement kit (the `sci-adk init-session` payload)
+# as package data. `graft` recurses the whole tree INCLUDING dotfiles -- the kit
+# has a hidden `.claude/` dir (hooks, settings.json, output style, /research
+# command); plain globs skip dotfiles, `graft` does not. Pairs with
+# include-package-data=true + package-data in pyproject.toml.
+graft src/sci_adk/templates

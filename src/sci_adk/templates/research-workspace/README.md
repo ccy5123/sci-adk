@@ -12,7 +12,7 @@ architecture.
 ## What's in the kit
 
 ```
-templates/research-workspace/
+src/sci_adk/templates/research-workspace/
 ├── CLAUDE.md                                   # always-loaded research protocol
 ├── README.md                                   # this file
 └── .claude/
@@ -49,8 +49,8 @@ templates/research-workspace/
 2. **Copy the kit into your research workspace** (the project where research is
    actually done — NOT the sci-adk build repo):
    ```bash
-   cp -r templates/research-workspace/.claude  /path/to/research-workspace/.claude
-   cp    templates/research-workspace/CLAUDE.md /path/to/research-workspace/CLAUDE.md
+   cp -r src/sci_adk/templates/research-workspace/.claude  /path/to/research-workspace/.claude
+   cp    src/sci_adk/templates/research-workspace/CLAUDE.md /path/to/research-workspace/CLAUDE.md
    ```
    If the target already has a `.claude/settings.json`, merge the `hooks.Stop`,
    `hooks.UserPromptSubmit`, and `outputStyle` keys from this kit's
