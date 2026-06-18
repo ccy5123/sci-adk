@@ -201,13 +201,15 @@ surface with no verdict trail, so the marginal cost is low. Concretely:
 
 The paper-render (Low) trigger remains deferred.
 
-**Novelty claim framing (convention).** Novelty claims are framed in the direction
-they assert. A novel refutation (e.g. "first to show X does NOT cause Y") is set up as
-a **negative hypothesis** ("X does not cause Y") and handled as SUPPORTED, so it passes
-through the SUPPORTS-only novelty gate. **Explicit limitation:** if a novel refutation
-is mis-framed as a REFUTED novelty claim it escapes the gate -- this residual is left
-to the (future) substance-judge backstop, the same process-vs-substance limit as
-elsewhere; no extra code/gate is built for it now.
+**Novelty claim framing (B-replace).** Because the novelty claim `claim-novelty-<hyp>`
+is **decoupled from the experiment claim**, positive-framing tricks are no longer
+needed. The experiment claim may be SUPPORTED or REFUTED on its own merits; the novelty
+claim is independently derived from whether a `found_nothing` prior-art search was
+recorded — regardless of the experiment direction. A "novel refutation" (e.g. "first
+to show X does NOT cause Y") is handled naturally: the experiment claim is REFUTED (the
+experiment worked as intended) while the novelty claim is SUPPORTED if a
+`found_nothing` search is on record. No positive-hypothesis re-framing required; the
+old SUPPORTS-only gate was an artifact of the A-design and is removed in B-replace.
 
 ## Code map
 
@@ -222,11 +224,11 @@ elsewhere; no extra code/gate is built for it now.
   `contested_open` / `contested_checkpoint`).
 - `src/sci_adk/loop/decision_record.py` -- the single shared decision-writer reused by
   all three triggers (`write_decision_evidence`).
-- `src/sci_adk/core/validity.py` -- `check_novelty_adequacy` (the novelty hard gate).
+- `src/sci_adk/core/validity.py` -- `derive_novelty_status` (the pure novelty-status rule; the old `check_novelty_adequacy` HALT was removed in B-replace).
 - `design/tool-policy.md` -- paperforge tool record + web_search discovery pairing.
 
 ---
 
-Version: 0.3.0
-Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17, render trigger still deferred)
-Last Updated: 2026-06-17
+Version: 0.4.0
+Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18)
+Last Updated: 2026-06-18

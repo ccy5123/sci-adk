@@ -133,9 +133,9 @@ DVC, tmux 등)는 *필요해진 시점에* 추가.
 - 형태: 서브프로세스/CLI 어댑터 — `src/sci_adk/search/paperforge_adapter.py`가
   `paperforge` CLI를 호출(runner/docker_executor 패턴). 두 파이썬 환경 격리 +
   provenance(핀 SHA·명령·버전) 기록.
-- 핀: `ccy5123/paperforge @ 60fefedacb7349c755c29b2c2f26873464158c12`
+- 핀: `ccy5123/paperforge @ 2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e`
   (pyproject.toml `[project.optional-dependencies].tools`,
-  `pip install -e ".[tools]"`).
+  `pip install -e ".[tools]"`). 이 핀부터 `paperforge.bibtex` (DOI→BibTeX) 포함.
 - 출력: `runs/<proposal>/` 하위에 취득물 저장(연구 루프 배선 시).
 
 **Discovery front-end (신규 도구 아님)**: paperforge에 넘길 DOI는 Claude의 native

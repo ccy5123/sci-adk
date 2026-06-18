@@ -1,8 +1,8 @@
 # sci-adk: Rigor / Verification ADK
 
 > Version: 0.1.0
-> Status: working rigor-ADK CLI — compiler + DecisionEngine + proof/qualitative judge rail + headless `verify` + enforced capability seam
-> Last Updated: 2026-06-17
+> Status: working rigor-ADK CLI — compiler + DecisionEngine + judge rail + headless `verify` + literature triggers (novelty + contested) + tex-only paper render
+> Last Updated: 2026-06-18
 
 ## What is sci-adk?
 
@@ -48,7 +48,7 @@ The console script `sci-adk` becomes available. The package is importable as `sc
 ```
 sci-adk run <proposal.md> [-o OUTPUT] [--spec-id ID]
 ```
-Compile a four-pane proposal (Background / Goal / Method / Expected Output) into `runs/<spec.id>/` — produces `spec.json`, `evidence/`, `claims/`, `paper/draft.md`. The numeric path runs autonomously at zero LLM cost. Proof and qualitative hypotheses are surfaced as agent checkpoints (resolved in-session by the Claude agent; never via an autonomous API call).
+Compile a four-pane proposal (Background / Goal / Method / Expected Output) into `runs/<spec.id>/` — produces `spec.json`, `evidence/`, `claims/`, `paper/draft.tex`. The numeric path runs autonomously at zero LLM cost. Proof and qualitative hypotheses are surfaced as agent checkpoints (resolved in-session by the Claude agent; never via an autonomous API call).
 
 ```
 sci-adk run --capability <id> [-o OUTPUT] [--spec-id ID]
@@ -161,11 +161,18 @@ for claim in claims:
 - `provenance/` package: record digest for append-only tamper-evidence
 - `search/paperforge_adapter.py`: DOI-to-OA-PDF acquisition with halt gates wired into the prior-work path
 - `.gitattributes`: LF enforcement on add
-- 458 unit tests passing (`python3 -m pytest tests/ -q`)
+- Referent-typed **evidence-validity** enforcement: synthetic/generated data cannot make a SUPPORTED *empirical* claim (formal vs empirical referent typing; hard halts) — `core/validity.py`
+- **Figure-digitization**: a `digitized` Evidence kind with proposed→verified gate (extractor required, extractor ≠ verifier, never auto-promoted to measured) + deterministic digitizer
+- **PDF normalization**: owner/permission-restricted acquired PDFs auto-normalized (pypdf); user-password-locked PDFs surfaced as `locked`, never cracked — `search/pdf_normalize.py`
+- **Citation-key naming** for acquired PDFs: `<Surname><Year>` with DOI-sorted a/b on collision; rename is swap/cycle-safe (two-stage batch) — `search/citation_keys.py`
+- **Literature triggers — novelty + contested**: contested = recording-only; **novelty is a 1st-class revisable Claim `claim-novelty-<hyp>` derived by rule (B-replace)** — SUPPORTED iff a recorded `found_nothing` prior-art search; NON-HALT compile-time checkpoint; `sci-adk novelty`/`sci-adk contested` CLI verbs; `verify` re-derives the novelty claim
+- **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
+- **paperforge re-pin → DOI→BibTeX**: pin `2cec69b` ships `paperforge.bibtex`
+- 764 unit tests passing (`python3 -m pytest -q`)
 
 ### Remaining
 
-- Paper render merge: deterministic skeleton exists (`render/paper.py`); LaTeX/pandoc prose-merge to full draft still deferred
+- Paper render: tex-only `draft.tex` exists (Overleaf-compilable); **PDF compilation (LaTeX docker)** and the **render-time novelty 'first' output gate** remain deferred
 - 2nd-domain generalization: the plug-seam is built and enforced; validated only once a second domain plugs in without a kernel edit (adoption-roadmap Stage 0 generalization gate)
 - Multi-capability auto-attempt orchestration: deferred (no consumer yet; append-only record + capability-in-provenance block method-shopping structurally)
 - Literature scale: `loop/literature_acquirer.py` exists; PaperQA2 and similar heavy literature plugins are Stage 2 (triggered by first-problem domain selection)
@@ -185,7 +192,8 @@ sci-adk/
 │   │   ├── spec.py           # Spec + invariants S1-S5
 │   │   ├── evidence.py       # Evidence + invariants E1-E4
 │   │   ├── claim.py          # Claim + invariants C1-C6
-│   │   └── parser.py         # Four-pane proposal parser
+│   │   ├── parser.py         # Four-pane proposal parser
+│   │   └── validity.py       # Referent-typed evidence-validity enforcement
 │   ├── loop/                 # Research execution loop
 │   │   ├── compiler.py       # ResearchCompiler (orchestrates run)
 │   │   ├── decision_engine.py # Verifier: frozen DecisionRule -> Verdict
@@ -197,13 +205,16 @@ sci-adk/
 │   │   ├── verdict.py        # Typed checkpoint/verdict schema
 │   │   ├── verify.py         # sci-adk verify (headless re-derivation)
 │   │   ├── prior_work.py     # sci-adk prior-work (prior-work trigger)
-│   │   └── literature_acquirer.py  # LITERATURE Evidence acquisition
+│   │   ├── literature_acquirer.py  # LITERATURE Evidence acquisition
+│   │   └── literature_triggers.py  # Novelty (B-replace) + contested triggers
 │   ├── runner/               # Docker execution
 │   │   └── docker_executor.py
 │   ├── render/               # Paper rendering
-│   │   └── paper.py          # Deterministic draft skeleton (prose merge deferred)
+│   │   └── paper.py          # render_paper_latex: tex-only Overleaf-compilable draft.tex
 │   ├── search/               # Literature / PDF acquisition
-│   │   └── paperforge_adapter.py  # DOI -> OA PDF via paperforge subprocess
+│   │   ├── paperforge_adapter.py  # DOI -> OA PDF via paperforge subprocess
+│   │   ├── citation_keys.py  # <Surname><Year> citation-key naming (swap/cycle-safe)
+│   │   └── pdf_normalize.py  # Permission-restricted PDF normalization (pypdf)
 │   ├── provenance/           # Record integrity
 │   │   └── __init__.py       # Record digest (tamper-evidence)
 │   └── adapter/              # Capability seam (kernel must not import this)
@@ -224,7 +235,7 @@ sci-adk/
 │   └── session-3-handoff.md  # Latest session handoff
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
-├── tests/                    # Engineering-layer tests (458 passing)
+├── tests/                    # Engineering-layer tests (764 passing)
 │   ├── test_spec.py          # Spec invariants
 │   ├── test_evidence.py      # Evidence invariants
 │   ├── test_claim.py         # Claim invariants
@@ -237,7 +248,7 @@ sci-adk/
 │   ├── test_compiler.py
 │   ├── test_kernel_adapter_seam.py  # F4 lint: kernel must not import adapter
 │   ├── test_t1_end_to_end.py
-│   └── ...                   # 32 test files total
+│   └── ...                   # 57 test files total
 ├── runs/                     # Research output (per-run artifacts)
 │   └── <spec_id>/
 │       ├── spec.json         # Compiled Spec (frozen)
@@ -245,7 +256,7 @@ sci-adk/
 │       ├── claims/           # Claim state
 │       ├── checkpoints.md    # Agent checkpoints (unresolved)
 │       ├── verdicts/         # Agent-authored verdict files
-│       └── paper/draft.md    # Paper draft
+│       └── paper/draft.tex   # Paper draft (Overleaf-compilable LaTeX)
 ├── pyproject.toml            # sci-adk v0.1.0; console script sci-adk = sci_adk.cli:main
 └── README.md                 # This file
 ```
@@ -255,11 +266,11 @@ sci-adk/
 ## Testing
 
 ```bash
-# All tests (458 passing)
-python3 -m pytest tests/ -q
+# All tests (764 passing)
+python3 -m pytest -q
 
 # Integration tests (require Docker)
-python3 -m pytest tests/ -m integration -q
+python3 -m pytest -m integration -q
 ```
 
 ---
