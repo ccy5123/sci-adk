@@ -218,6 +218,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", dest="as_json",
         help="emit the StatusReport as indented JSON instead of the human view",
     )
+
+    init_session = sub.add_parser(
+        "init-session",
+        help="install the research-workspace enforcement kit (Stop/UserPromptSubmit "
+             "hooks + researcher persona + /research command + CLAUDE.md) into a target "
+             "dir. Non-clobbering and idempotent: never overwrites the user's files, "
+             "merges settings.json, and re-running is a clean no-op. Exit 0 on success "
+             "(a conflict is a warning, not a failure)",
+    )
+    init_session.add_argument(
+        "dir", help="an existing research-workspace directory to install into "
+                    "(NOT the sci-adk build repo -- the two Stop gates would fight)",
+    )
+    init_session.add_argument(
+        "--dry-run", action="store_true",
+        help="compute and report every planned action but write NOTHING to disk",
+    )
     return parser
 
 
@@ -618,6 +635,44 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_init_session(args: argparse.Namespace) -> int:
+    """Install the research-workspace enforcement kit into a target dir (D3).
+
+    Calls :func:`sci_adk.init_session.install_session`, prints the structured
+    report, and picks the exit code: 0 on success (including when everything was
+    already current or only conflicts were reported -- a conflict is a *warning*,
+    not a failure), non-zero only on a hard error (target dir missing / not a dir,
+    or the shipped templates cannot be located). The installer is imported lazily
+    so its import cost (and the templates lookup) is paid only when this verb runs.
+    """
+    from sci_adk.init_session import install_session
+
+    target = Path(args.dir)
+    try:
+        report = install_session(target, dry_run=args.dry_run)
+    except NotADirectoryError as e:
+        # missing / not-a-dir target, OR a build-harness target the guard refused.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except FileNotFoundError as e:
+        # the shipped templates are missing (non-editable install -- a follow-up).
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        # a malformed existing settings.json (clean message, no traceback).
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    head = "DRY RUN (nothing written) -- " if report.dry_run else ""
+    print(f"{head}init-session -> {target}")
+    for line in report.lines():
+        print(line)
+    if report.conflicts:
+        print(f"  ({len(report.conflicts)} conflict(s) above are warnings, not "
+              f"failures -- resolve them manually; the install still succeeded)")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
@@ -634,6 +689,8 @@ def main(argv=None) -> int:
         return _cmd_contested(args)
     if args.command == "status":
         return _cmd_status(args)
+    if args.command == "init-session":
+        return _cmd_init_session(args)
     return 1
 
 
