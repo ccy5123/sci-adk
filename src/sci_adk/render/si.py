@@ -43,6 +43,7 @@ from sci_adk.render.paper import (
     _result_summary,
     _status_str,
 )
+from sci_adk.render.prose import SIProse
 
 # The numeric Result scalar fields, in a fixed order, for the quantitative data table.
 # A column is emitted ONLY when at least one item carries a value for it (empty columns
@@ -113,12 +114,21 @@ def render_si_latex(
     *,
     figures: Optional[Sequence[AnyFigure]] = None,
     digest: Optional[str] = None,
+    prose: Optional[SIProse] = None,
 ) -> str:
     """Render the full record as a STANDALONE Supporting Information ``si.tex``.
 
     A deterministic, no-authoring dump of everything sci-adk stores -- the RECORD behind
     the main paper's belief narrative. PURE (data in, string out): no LLM, no network, no
     filesystem. Same inputs -> byte-identical output.
+
+    An OPTIONAL :class:`~sci_adk.render.prose.SIProse` may wrap the spine with narrative
+    (design/paper-figures-and-si.md D3, Phase 4): ``overview`` near the top (after the
+    italic record-note, before the Evidence record) and ``notes`` at the bottom (after
+    Record integrity, before ``\\end{document}``). It is INPUT, never sci-adk-generated;
+    the strict no-authoring record dump remains the spine and is never replaced. With
+    ``prose=None`` (or both slots ``None``) the output is BYTE-IDENTICAL to the no-prose
+    dump (a regression invariant, like the ``figures``/``digest`` defaults).
 
     Sections (a faithful record dump; every interpolated string sanitized):
       1. Title -- ``Supporting Information: <spec goal>``.
@@ -156,6 +166,13 @@ def render_si_latex(
             compiler passes ``digest=None`` and the SI's integrity section points to
             ``sci-adk verify`` (which computes the digest over the persisted run).
             Embedding the real digest at render time is a later refinement.
+        prose: optional agent-authored narrative wrapping the record dump -- a present
+            ``overview`` becomes an ``\\section{Overview}`` before the Evidence record and
+            a present ``notes`` becomes an ``\\section{Notes}`` after Record integrity,
+            each sanitized exactly like the paper's prose slots. ``None`` (or a ``None``
+            slot) -> nothing emitted: the output stays byte-identical to the no-prose
+            record dump (a regression invariant). NEVER LLM-generated -- input, the same
+            spirit as ``PaperProse``.
 
     Returns:
         A STANDALONE LaTeX document string.
@@ -202,6 +219,14 @@ def render_si_latex(
         f"the verdicts; the main paper is the belief narrative.}}"
     )
     lines.append("")
+
+    # Agent-authored overview (before the record dump), when supplied. Sanitized
+    # exactly like the paper's prose slots; absent -> nothing, preserving the
+    # byte-identical no-prose dump.
+    if prose is not None and prose.overview:
+        lines.append(r"\section{Overview}")
+        lines.append(_latex_sanitize(prose.overview.strip()))
+        lines.append("")
 
     # -- Section: Evidence record (every item; stable order = as given) ------------
     lines.append(r"\section{Evidence record}")
@@ -324,6 +349,14 @@ def render_si_latex(
             "over the persisted run and re-check the verdict trail."
         )
     lines.append("")
+
+    # Agent-authored closing notes (after Record integrity), when supplied. Sanitized
+    # exactly like the paper's prose slots; absent -> nothing, preserving the
+    # byte-identical no-prose dump.
+    if prose is not None and prose.notes:
+        lines.append(r"\section{Notes}")
+        lines.append(_latex_sanitize(prose.notes.strip()))
+        lines.append("")
 
     lines.append(r"\end{document}")
     return "\n".join(lines)

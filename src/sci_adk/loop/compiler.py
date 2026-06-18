@@ -65,7 +65,7 @@ from sci_adk.render.figures import (
     figure_labels,
 )
 from sci_adk.render.paper import render_paper_latex
-from sci_adk.render.prose import PaperProse
+from sci_adk.render.prose import PaperProse, SIProse
 from sci_adk.render.si import render_si_latex
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
@@ -147,6 +147,7 @@ class ResearchCompiler:
         spec: Optional[Spec] = None,
         experiment: Optional[ExperimentFn] = None,
         prose: Optional[PaperProse] = None,
+        si_prose: Optional[SIProse] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
     ) -> CompileResult:
         """
@@ -169,6 +170,13 @@ class ResearchCompiler:
                 discussion) injected into BOTH the Markdown and LaTeX drafts. Never
                 LLM-generated -- it is input the in-session agent (or a --prose file)
                 supplies, the same spirit as ``pending``.
+            si_prose: optional agent-authored narrative wrapping the Supporting
+                Information record dump -- ``overview`` before the Evidence record,
+                ``notes`` after Record integrity (design/paper-figures-and-si.md D3,
+                Phase 4). Threaded into ``render_si_latex``; the no-authoring record dump
+                is the spine and is never replaced. Never LLM-generated -- input, the same
+                spirit as ``prose``. Absent -> si.tex is byte-identical to the no-prose
+                dump.
             figures: optional agent-authored figure list -- native (pgfplots) or image
                 (``\\includegraphics``) specs (design/paper-figures-and-si.md, Phase
                 1/4). Threaded into the LaTeX renderers (native y pulled from this run's
@@ -280,7 +288,7 @@ class ResearchCompiler:
         # the `xr` package + a compile-order dependency; the SI is INTERNALLY consistent
         # here via figure_labels' unique-id enforcement.)
         si_tex = render_si_latex(
-            spec, claims, evidence, figures=figures, digest=None
+            spec, claims, evidence, figures=figures, digest=None, prose=si_prose
         )
         si_path = paper_dir / "si.tex"
         si_path.write_text(si_tex, encoding="utf-8")

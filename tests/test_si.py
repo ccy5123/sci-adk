@@ -47,6 +47,7 @@ from sci_adk.core.spec import (
     TargetClaim,
 )
 from sci_adk.render.figures import FigureSpec, NativePlot, PlotPoint, PlotSeries
+from sci_adk.render.prose import SIProse
 from sci_adk.render.si import render_si_latex
 
 _T0 = datetime(2026, 6, 18, 10, 0, 0, tzinfo=timezone.utc)
@@ -452,4 +453,87 @@ class TestDeterminism:
         spec, claims, evidence = _basic_record()
         a = render_si_latex(spec, claims, evidence)
         b = render_si_latex(spec, claims, evidence)
+        assert a == b
+
+
+# ---------------------------------------------------------------------------
+# SI prose hook (Phase 4-3): an OPTIONAL SIProse wraps the record dump with
+# narrative -- overview before the Evidence record, notes after Record integrity.
+# The strict no-authoring record dump is the spine; prose=None is byte-identical.
+# ---------------------------------------------------------------------------
+
+class TestSIProse:
+    def test_overview_before_record_notes_after_integrity(self):
+        spec, claims, evidence = _basic_record()
+        prose = SIProse(
+            overview="This SI dumps the complete record behind the headline claim.",
+            notes="Raw artifacts are reproducible via the recorded code refs.",
+        )
+        si = render_si_latex(spec, claims, evidence, prose=prose)
+
+        # Both narrative slots are present (sanitized agent text).
+        assert "This SI dumps the complete record" in si
+        assert "Raw artifacts are reproducible" in si
+        # overview is rendered as a section near the top; notes near the bottom.
+        assert r"\section{Overview}" in si
+        assert r"\section{Notes}" in si
+
+        # overview appears BEFORE the Evidence record section ...
+        assert si.index("This SI dumps the complete record") < si.index(
+            r"\section{Evidence record}"
+        )
+        # ... and notes appears AFTER the Record integrity section, before \end{document}.
+        assert si.index(r"\section{Record integrity}") < si.index(
+            "Raw artifacts are reproducible"
+        )
+        assert si.index("Raw artifacts are reproducible") < si.index(r"\end{document}")
+
+    def test_prose_none_is_byte_identical_regression(self):
+        """The keystone regression lock: render_si_latex(...) with no si-prose must equal
+        the call made without the kwarg (the existing record dump must not move)."""
+        spec, claims, evidence = _basic_record()
+        figs = [_figure("growth", "ev-1")]
+        # Old call (no prose kwarg) vs. explicit prose=None -- byte-identical.
+        old = render_si_latex(spec, claims, evidence, figures=figs, digest="abc123")
+        new = render_si_latex(
+            spec, claims, evidence, figures=figs, digest="abc123", prose=None
+        )
+        assert new == old, "prose=None must not change the existing si.tex record dump"
+
+    def test_both_slots_none_is_byte_identical(self):
+        """An SIProse with both slots None emits nothing -> byte-identical to no prose."""
+        spec, claims, evidence = _basic_record()
+        base = render_si_latex(spec, claims, evidence)
+        empty = render_si_latex(spec, claims, evidence, prose=SIProse())
+        assert empty == base
+
+    def test_partial_prose_only_present_slot(self):
+        spec, claims, evidence = _basic_record()
+        si = render_si_latex(
+            spec, claims, evidence, prose=SIProse(overview="Only an overview.")
+        )
+        assert r"\section{Overview}" in si
+        assert "Only an overview." in si
+        # The absent notes slot produces no Notes section.
+        assert r"\section{Notes}" not in si
+
+    def test_prose_with_specials_is_escaped(self):
+        """LaTeX-special characters in a slot are escaped (mirrors the PaperProse test)."""
+        spec, claims, evidence = _basic_record()
+        prose = SIProse(
+            overview="A 100% deterministic & exact dump of set #1.",
+            notes="Costs <= $0 and stays > baseline.",
+        )
+        si = render_si_latex(spec, claims, evidence, prose=prose)
+        assert r"100\%" in si
+        assert r"\&" in si
+        assert r"\#1" in si
+        # The < and $ in notes are sanitized (no raw $ pair from agent text).
+        assert "stays" in si
+
+    def test_prose_is_deterministic(self):
+        spec, claims, evidence = _basic_record()
+        prose = SIProse(overview="overview text", notes="notes text")
+        a = render_si_latex(spec, claims, evidence, prose=prose)
+        b = render_si_latex(spec, claims, evidence, prose=prose)
         assert a == b

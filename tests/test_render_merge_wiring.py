@@ -678,3 +678,120 @@ def test_compile_si_integrity_points_to_verify(tmp_path):
         encoding="utf-8")
     assert "sci-adk verify" in si
     assert "Record digest (sha256):" not in si
+
+
+# ---------------------------------------------------------------------------
+# SI prose hook (Phase 4-3): the compiler threads si_prose into render_si_latex; the
+# CLI gains --si-prose <json>. The no-prose si.tex stays byte-identical (regression).
+# ---------------------------------------------------------------------------
+
+def test_compile_threads_si_prose_into_si_tex(tmp_path):
+    from sci_adk.render.prose import SIProse
+
+    prose = SIProse(
+        overview="An overview of the complete record dump.",
+        notes="Closing notes on reproducibility.",
+    )
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-si-prose", experiment=_point_experiment, si_prose=prose)
+
+    si = (tmp_path / "runs" / "t-si-prose" / "paper" / "si.tex").read_text(
+        encoding="utf-8")
+    assert r"\section{Overview}" in si
+    assert "An overview of the complete record dump." in si
+    assert r"\section{Notes}" in si
+    assert "Closing notes on reproducibility." in si
+
+
+def test_compile_without_si_prose_has_no_prose_sections(tmp_path):
+    """No si_prose -> the record dump only, no Overview/Notes narrative sections."""
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-si-noprose", experiment=_point_experiment)
+    si = (tmp_path / "runs" / "t-si-noprose" / "paper" / "si.tex").read_text(
+        encoding="utf-8")
+    assert r"\section{Overview}" not in si
+    assert r"\section{Notes}" not in si
+
+
+def test_compile_si_prose_does_not_touch_paper_prose(tmp_path):
+    """si_prose wraps si.tex ONLY; draft.tex (paper prose) is unaffected."""
+    from sci_adk.render.prose import SIProse
+
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-si-prose-iso", experiment=_point_experiment,
+        si_prose=SIProse(overview="SI overview only."))
+    paper_dir = tmp_path / "runs" / "t-si-prose-iso" / "paper"
+    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
+    # The SI carries the overview; the main paper draft does not (no leakage).
+    assert "SI overview only." in si
+    assert "SI overview only." not in draft
+
+
+def test_cli_run_si_prose_injects_into_si_tex(tmp_path):
+    from sci_adk.cli import main
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    si_prose_json = tmp_path / "si_prose.json"
+    si_prose_json.write_text(
+        json.dumps({
+            "overview": "An offline SI overview.",
+            "notes": "An offline SI closing note.",
+        }),
+        encoding="utf-8",
+    )
+
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-si-prose", "--si-prose", str(si_prose_json),
+    ])
+    assert rc == 0
+
+    paper_dir = tmp_path / "runs" / "t-cli-si-prose" / "paper"
+    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    assert r"\section{Overview}" in si
+    assert "An offline SI overview." in si
+    assert r"\section{Notes}" in si
+    assert "An offline SI closing note." in si
+
+
+def test_cli_run_without_si_prose_has_no_prose_sections(tmp_path):
+    from sci_adk.cli import main
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path), "--spec-id", "t-cli-si-noprose",
+    ])
+    assert rc == 0
+    si = (tmp_path / "runs" / "t-cli-si-noprose" / "paper" / "si.tex").read_text(
+        encoding="utf-8")
+    assert r"\section{Overview}" not in si
+    assert r"\section{Notes}" not in si
+
+
+def test_cli_run_si_prose_missing_file_errors(tmp_path):
+    from sci_adk.cli import main
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-si-missing", "--si-prose", str(tmp_path / "nope.json"),
+    ])
+    assert rc == 2
+
+
+def test_cli_run_si_prose_invalid_json_errors(tmp_path):
+    from sci_adk.cli import main
+
+    proposal = tmp_path / "proposal.md"
+    proposal.write_text(PROPOSAL, encoding="utf-8")
+    bad = tmp_path / "bad_si.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+    rc = main([
+        "run", str(proposal), "-o", str(tmp_path),
+        "--spec-id", "t-cli-si-badjson", "--si-prose", str(bad),
+    ])
+    assert rc == 2

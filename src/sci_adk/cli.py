@@ -97,6 +97,15 @@ def build_parser() -> argparse.ArgumentParser:
              "LLM-generated. Omit -> structural skeleton only",
     )
     run.add_argument(
+        "--si-prose", default=None, metavar="PATH",
+        help="optional JSON file mapping {overview, notes} -> text; agent-authored "
+             "narrative WRAPPING the Supporting Information record dump (overview before "
+             "the Evidence record, notes after Record integrity) as LaTeX body input "
+             "(author it LaTeX-safe, e.g. $\\geq$ / H$_2$O; a unicode safety net is a "
+             "fallback, not a license to rely on unicode). The no-authoring record dump "
+             "is the spine. Never LLM-generated. Omit -> record dump only",
+    )
+    run.add_argument(
         "--figures", default=None, metavar="PATH",
         help="optional JSON file: a PaperFigures object {\"figures\": [...]} OR a bare "
              "list of figure specs (native or image). A NATIVE spec names which Evidence "
@@ -349,6 +358,25 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"error: invalid prose JSON ({prose_path}): {e}", file=sys.stderr)
             return 2
 
+    # Optional agent-authored SI prose (overview/notes) wrapping the record dump in
+    # si.tex. Loaded from a JSON file -- input, NOT autonomous generation (sci-adk never
+    # calls an LLM to write it; the record dump stays the spine). Mirrors --prose.
+    si_prose = None
+    if args.si_prose:
+        si_prose_path = Path(args.si_prose)
+        if not si_prose_path.exists():
+            print(f"error: si-prose file not found: {si_prose_path}", file=sys.stderr)
+            return 2
+        from sci_adk.render.prose import SIProse
+
+        try:
+            si_prose = SIProse.model_validate_json(
+                si_prose_path.read_text(encoding="utf-8")
+            )
+        except ValueError as e:
+            print(f"error: invalid si-prose JSON ({si_prose_path}): {e}", file=sys.stderr)
+            return 2
+
     # Optional agent-authored figure specs (paper-figures Phase 1/4). Accepts either a
     # PaperFigures object ({"figures": [...]}) or a bare list of figure specs (native or
     # image, discriminated on "kind") -- both normalize to a figure list. Input, NOT
@@ -445,7 +473,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     try:
         result = compiler.compile(
             proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
-            prose=prose, figures=figures)
+            prose=prose, si_prose=si_prose, figures=figures)
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
         return 2
