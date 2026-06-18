@@ -16,13 +16,14 @@ F4 kernel seam -- no adapter, no loop, no LLM, no fs/network). ``render_si_latex
 the record (Spec + Claims + Evidence, plus optional figures + a record digest) and
 returns a STANDALONE LaTeX document string (``\\documentclass{article}`` ...
 ``\\end{document}``) so ``si.tex`` compiles on its own as a folder-upload sibling of
-``draft.tex`` -- with NO ``\\includegraphics`` / ``\\input`` (native figures are text).
+``draft.tex`` -- with NO ``\\input`` (native figures are inline text; image figures
+reference the same co-located ``figures/<id><ext>`` the compiler lands next to it).
 Deterministic: same inputs -> byte-identical string.
 
 Reuse: every interpolated string is routed through :func:`paper._latex_sanitize` (the
 same escaper + unicode safety net the main paper uses), and figures through
-:func:`figures.render_native_figure` -- so the SI is sanitized and plotted identically
-to the paper.
+:func:`figures.render_figure` -- so the SI is sanitized and plotted identically to the
+paper (native pgfplots or an image ``\\includegraphics``, routed by figure kind).
 
 Reference: design/paper-figures-and-si.md (D3, Phase 2), design/abstractions.md,
 design/directory-structure.md (render/), design/rigor-shell-architecture.md (F4 seam).
@@ -35,7 +36,7 @@ from typing import List, Optional, Sequence
 from sci_adk.core.claim import Claim
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Spec
-from sci_adk.render.figures import FigureSpec, render_native_figure
+from sci_adk.render.figures import AnyFigure, render_figure
 from sci_adk.render.paper import (
     _confidence_str,
     _latex_sanitize,
@@ -110,7 +111,7 @@ def render_si_latex(
     claims: Sequence[Claim],
     evidence: Sequence[EvidenceItem],
     *,
-    figures: Optional[Sequence[FigureSpec]] = None,
+    figures: Optional[Sequence[AnyFigure]] = None,
     digest: Optional[str] = None,
 ) -> str:
     """Render the full record as a STANDALONE Supporting Information ``si.tex``.
@@ -130,8 +131,9 @@ def render_si_latex(
          the confidence (type + value/level + the load-bearing **basis**, always present,
          C3), its supporting/refuting evidence links, and the hypothesis's frozen
          ``decision_rule`` (what it was judged against).
-      5. Figures -- ALL ``figures`` via :func:`render_native_figure` (the SI shows every
-         figure); the ``pgfplots`` package is added to the preamble when figures present.
+      5. Figures -- ALL ``figures`` via :func:`render_figure` (the SI shows every figure,
+         native or image); ``pgfplots`` is added to the preamble when a NATIVE figure is
+         present and ``graphicx`` when an IMAGE figure is present.
       6. Record integrity -- ``digest`` embedded as ``Record digest (sha256): <digest>``
          when provided; ELSE a note that the record is independently auditable via
          ``sci-adk verify <run>`` (which computes the digest over the persisted run).
@@ -140,9 +142,10 @@ def render_si_latex(
         spec: the compiled Spec (the frozen hypotheses + their decision rules).
         claims: the Claims (belief states) whose verdicts the SI records.
         evidence: the append-only Evidence record (rendered in the given order).
-        figures: optional agent-authored ``FigureSpec`` list -- the SI renders ALL of
-            them. When non-empty, the ``pgfplots`` package + ``\\pgfplotsset{compat=1.18}``
-            are added to the preamble. ``None``/empty -> no figures, no pgfplots.
+        figures: optional agent-authored figure list (native or image) -- the SI renders
+            ALL of them. ``pgfplots`` + ``\\pgfplotsset{compat=1.18}`` are added when a
+            native figure is present, ``graphicx`` when an image figure is present.
+            ``None``/empty -> no figures, no figure packages.
         digest: optional record digest (hex sha256). When provided it is embedded in the
             integrity section; ``None`` (Phase 2 default) emits the ``sci-adk verify``
             note instead -- NEVER a fabricated digest.
@@ -169,15 +172,20 @@ def render_si_latex(
     title = (spec.raw_proposal.goal or "Untitled research").strip().splitlines()[0]
 
     # -- Preamble (standalone document; same inputenc/hyperref/url as the paper, so
-    #    si.tex compiles on its own). pgfplots ONLY when figures are present -- a
-    #    figure-less SI stays minimal (mirrors the paper's conditional pgfplots).
+    #    si.tex compiles on its own). Figure packages are added PER KIND (mirrors the
+    #    paper): pgfplots ONLY when a native figure is present, graphicx ONLY when an
+    #    image figure is present -- a figure-less SI stays minimal.
+    has_native = any(f.kind == "native" for f in figures)
+    has_image = any(f.kind == "image" for f in figures)
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
-    if figures:
+    if has_native:
         lines.append(r"\usepackage{pgfplots}")
         lines.append(r"\pgfplotsset{compat=1.18}")
+    if has_image:
+        lines.append(r"\usepackage{graphicx}")
     lines.append(
         f"\\title{{Supporting Information: {_latex_sanitize(title)}}}"
     )
@@ -291,11 +299,12 @@ def render_si_latex(
         lines.append("")
 
     # -- Section: Figures (ALL of them; the SI shows every figure) -----------------
+    # render_figure routes by kind (native pgfplots from the record / image include).
     if figures:
         lines.append(r"\section{Figures}")
         lines.append("")
         for fig in figures:
-            lines.append(render_native_figure(fig, evidence))
+            lines.append(render_figure(fig, evidence))
             lines.append("")
 
     # -- Section: Record integrity ------------------------------------------------

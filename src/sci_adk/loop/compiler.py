@@ -58,8 +58,9 @@ from sci_adk.loop.verdict import (
     PriorWorkCheckpoint,
 )
 from sci_adk.render.figures import (
+    AnyFigure,
     FigureConsistencyReport,
-    FigureSpec,
+    ImageFigureSpec,
     check_figure_consistency,
     figure_labels,
 )
@@ -146,7 +147,7 @@ class ResearchCompiler:
         spec: Optional[Spec] = None,
         experiment: Optional[ExperimentFn] = None,
         prose: Optional[PaperProse] = None,
-        figures: Optional[Sequence[FigureSpec]] = None,
+        figures: Optional[Sequence[AnyFigure]] = None,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -168,13 +169,17 @@ class ResearchCompiler:
                 discussion) injected into BOTH the Markdown and LaTeX drafts. Never
                 LLM-generated -- it is input the in-session agent (or a --prose file)
                 supplies, the same spirit as ``pending``.
-            figures: optional agent-authored ``FigureSpec`` list
-                (design/paper-figures-and-si.md, Phase 1). Threaded into the LaTeX
-                renderer (pgfplots-native, the y pulled from this run's Evidence). Never
-                LLM-generated -- input, the same spirit as ``prose``. After rendering,
-                a NON-BLOCKING ``check_figure_consistency`` over the rendered body is
-                surfaced in ``CompileResult.figure_consistency`` (a report, not a gate;
-                the hard verify-gate is Phase 3). Absent -> no figures.
+            figures: optional agent-authored figure list -- native (pgfplots) or image
+                (``\\includegraphics``) specs (design/paper-figures-and-si.md, Phase
+                1/4). Threaded into the LaTeX renderers (native y pulled from this run's
+                Evidence; image specs reference co-located ``figures/<id><ext>``). Never
+                LLM-generated -- input, the same spirit as ``prose``. For each IMAGE
+                spec the compiler co-locates its source file into ``paper/figures/`` so
+                the ``.tex`` reference resolves on an Overleaf folder-upload (a missing
+                source fails loud, record fidelity). After rendering, a NON-BLOCKING
+                ``check_figure_consistency`` over the rendered body is surfaced in
+                ``CompileResult.figure_consistency`` (a report, not a gate; the hard
+                verify-gate is Phase 3). Absent -> no figures.
 
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
@@ -239,10 +244,16 @@ class ResearchCompiler:
         # CO-LOCATED path, whose stem is "references", to the renderer.
         bib_path = self._colocate_bib(run_dir, paper_dir)
 
+        # Co-locate each IMAGE figure's source into paper/figures/<id><ext> (the renderer
+        # only emits that reference; the compiler -- the sole filesystem toucher -- lands
+        # the bytes), so the paper/ folder is self-contained on an Overleaf upload. A
+        # missing source fails loud here (record fidelity). Native specs carry no file.
+        figures = list(figures or [])
+        self._colocate_figures(figures, paper_dir)
+
         # The .tex is THE paper artifact (Overleaf default pdflatex). Deterministic and
         # offline -- no LLM, no network (render_paper_latex is pure). The Markdown
         # render_paper remains a library function but is no longer auto-emitted.
-        figures = list(figures or [])
         paper_tex = render_paper_latex(
             spec, claims, evidence,
             pending=pending_dicts,
@@ -381,6 +392,43 @@ class ResearchCompiler:
         dest = paper_dir / "references.bib"
         shutil.copyfile(src, dest)
         return str(dest)
+
+    def _colocate_figures(
+        self, figures: Sequence[AnyFigure], paper_dir: Path
+    ) -> None:
+        """Copy each IMAGE figure's source file into ``paper/figures/<id><ext>``.
+
+        Overleaf self-containment (mirrors :meth:`_colocate_bib`): the pure
+        :func:`render_image_figure` emits ``\\includegraphics{figures/<id><ext>}`` but
+        never touches the filesystem; the compiler -- the sole filesystem toucher --
+        lands the actual bytes here so uploading the ``paper/`` folder as-is resolves
+        the reference. The destination filename uses the stable figure id (so the
+        ``.tex`` reference and the file agree) with the SOURCE extension. A relative
+        ``spec.image`` is resolved against ``self.workspace_dir``. Native figures carry
+        no file and are skipped.
+
+        Raises:
+            ValueError: if an image figure's source file does not exist -- fail-loud
+                record fidelity (naming the figure id and the missing path), so a
+                broken paper/ is never silently produced.
+        """
+        image_figs = [f for f in figures if isinstance(f, ImageFigureSpec)]
+        if not image_figs:
+            return
+        figures_dir = paper_dir / "figures"
+        figures_dir.mkdir(parents=True, exist_ok=True)
+        for fig in image_figs:
+            src = Path(fig.image)
+            if not src.is_absolute():
+                src = self.workspace_dir / src
+            if not src.is_file():
+                raise ValueError(
+                    f"figure '{fig.id}': image source not found: {src} "
+                    f"(an image figure must reference an existing file -- record "
+                    f"fidelity; the paper/ folder must be self-contained)"
+                )
+            dest = figures_dir / f"{fig.id}{src.suffix}"
+            shutil.copyfile(src, dest)
 
     def _collect_contested_checkpoints(
         self, spec: Spec, claims: Sequence[Claim]

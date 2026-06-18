@@ -30,7 +30,7 @@ from typing import Any, Optional, Sequence
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Hypothesis, Spec
-from sci_adk.render.figures import FigureSpec, render_native_figure
+from sci_adk.render.figures import AnyFigure, render_figure
 from sci_adk.render.prose import PaperProse
 
 # LaTeX special characters and their escaped forms. Several replacements (the
@@ -475,7 +475,7 @@ def render_paper_latex(
     prose: Optional[PaperProse] = None,
     cited_dois: Optional[Sequence[str]] = None,
     bib_path: Optional[str] = None,
-    figures: Optional[Sequence[FigureSpec]] = None,
+    figures: Optional[Sequence[AnyFigure]] = None,
 ) -> str:
     """
     Render a compilable LaTeX paper draft -- the deterministic, OFFLINE twin of
@@ -505,13 +505,16 @@ def render_paper_latex(
             ``.bib`` is wired with ``\\bibliographystyle{plain}`` +
             ``\\bibliography{<stem>}`` + ``\\nocite{*}`` (so its entries render).
             ``None`` emits no ``\\bibliography``. No BibTeX is generated or fetched here.
-        figures: optional agent-authored ``FigureSpec`` list
-            (design/paper-figures-and-si.md, Phase 1). When non-empty: the
-            ``pgfplots`` package + ``\\pgfplotsset{compat=1.18}`` are added to the
-            preamble and a ``\\section{Figures}`` of LaTeX-native (pgfplots) ``figure``
-            envs is emitted before the References, each with a stable
-            ``\\label{fig:<id>}`` so the body's ``\\ref`` resolves and numbering is
-            automatic. The y values are pulled from ``evidence`` (record fidelity).
+        figures: optional agent-authored figure list -- native (pgfplots) or image
+            (``\\includegraphics``) specs (design/paper-figures-and-si.md, Phase 1/4).
+            When non-empty a ``\\section{Figures}`` of ``figure`` envs is emitted before
+            the References, each with a stable ``\\label{fig:<id>}`` so the body's
+            ``\\ref`` resolves and numbering is automatic (regardless of kind). The
+            preamble pulls ``pgfplots`` ONLY when a NATIVE figure is present and
+            ``graphicx`` ONLY when an IMAGE figure is present, so a native-only render
+            stays byte-identical to the pre-image skeleton and an image-only render does
+            not load pgfplots. Native y values are pulled from ``evidence`` (record
+            fidelity); image specs reference co-located ``figures/<id><ext>``.
             ``None``/empty -> NOTHING new is emitted: the output stays byte-identical
             to the figure-less skeleton (a regression invariant, like ``prose=None``).
 
@@ -532,12 +535,18 @@ def render_paper_latex(
     lines.append(r"\usepackage[utf8]{inputenc}")
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
-    # pgfplots is added ONLY when figures are present, so a figure-less render stays
-    # byte-identical to the pre-figures skeleton (the regression invariant). pgfplots
-    # is a LaTeX package Overleaf ships -- no Python/pip dependency.
-    if figures:
+    # Figure packages are added PER KIND so each path stays minimal and regression-safe:
+    # pgfplots ONLY when a NATIVE figure is present (a native-only render stays
+    # byte-identical to the pre-figures skeleton; an image-only render does not load
+    # pgfplots), graphicx ONLY when an IMAGE figure is present. Both ship with Overleaf
+    # -- no Python/pip dependency.
+    has_native = any(f.kind == "native" for f in figures)
+    has_image = any(f.kind == "image" for f in figures)
+    if has_native:
         lines.append(r"\usepackage{pgfplots}")
         lines.append(r"\pgfplotsset{compat=1.18}")
+    if has_image:
+        lines.append(r"\usepackage{graphicx}")
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     lines.append(r"\author{sci-adk (deterministic render)}")
     lines.append(r"\date{\today}")
@@ -661,15 +670,16 @@ def render_paper_latex(
         lines.append(_latex_sanitize(prose.discussion.strip()))
         lines.append("")
 
-    # Figures (LaTeX-native pgfplots), when supplied -- before References. Each figure
-    # carries a stable \label{fig:<id>} so the body's \ref resolves and numbering is
-    # automatic; the y values are pulled from `evidence` (record fidelity). Absent ->
-    # nothing emitted (byte-identical skeleton, like prose).
+    # Figures (native pgfplots or image \includegraphics), when supplied -- before
+    # References. render_figure routes by kind; each figure carries a stable
+    # \label{fig:<id>} so the body's \ref resolves and numbering is automatic (native y
+    # is pulled from `evidence` for record fidelity; image refs co-located figures/).
+    # Absent -> nothing emitted (byte-identical skeleton, like prose).
     if figures:
         lines.append(r"\section{Figures}")
         lines.append("")
         for fig in figures:
-            lines.append(render_native_figure(fig, evidence))
+            lines.append(render_figure(fig, evidence))
             lines.append("")
 
     # References: a DOI list (no BibTeX generation). Always emitted.

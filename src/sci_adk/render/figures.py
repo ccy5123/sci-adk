@@ -33,9 +33,10 @@ from __future__ import annotations
 
 import math
 import re
-from typing import List, Literal, Sequence
+from pathlib import Path
+from typing import Annotated, List, Literal, Sequence, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Discriminator, Field, Tag
 
 from sci_adk.core.evidence import EvidenceItem
 
@@ -110,13 +111,34 @@ class NativePlot(BaseModel):
     )
 
 
+def _validate_fig_id(v: str) -> str:
+    """Validate (and strip) a figure id to a LaTeX-safe label slug.
+
+    Shared by both figure kinds: the id becomes ``\\label{fig:<id>}`` and is referenced
+    by ``\\ref{fig:<id>}`` in the body, so a space / brace / backslash would break the
+    label. Module-level (not a per-class method) so the native and image specs validate
+    the id identically.
+    """
+    v = v.strip()
+    if not _FIG_ID_RE.match(v):
+        raise ValueError(
+            f"figure id {v!r} is not a LaTeX-safe slug "
+            r"(must match ^[A-Za-z0-9][A-Za-z0-9_-]*$ so \label{fig:<id>} is safe)"
+        )
+    return v
+
+
 class FigureSpec(BaseModel):
-    """An agent-authored figure spec (the figure analogue of ``PaperProse``).
+    """An agent-authored NATIVE figure spec (the figure analogue of ``PaperProse``).
 
     The agent authors WHAT (the caption, the plot, which Evidence ids, the x of each
     point + a stable id); the engine renders it deterministically FROM the Evidence.
 
     Attributes:
+        kind: the union discriminator, fixed ``"native"``. It DEFAULTS to ``"native"``
+            so an existing figure JSON authored before the image kind existed (no
+            ``kind`` key) still parses as a native spec -- the byte-identical-output
+            invariant for the pre-image native path.
         id: a LaTeX-safe slug -- becomes ``\\label{fig:<id>}`` so the body's
             ``\\ref{fig:<id>}`` resolves and numbering is automatic. Must be non-empty
             and match ``^[A-Za-z0-9][A-Za-z0-9_-]*$``.
@@ -126,35 +148,103 @@ class FigureSpec(BaseModel):
 
     model_config = {"frozen": True, "str_strip_whitespace": True}
 
+    kind: Literal["native"] = Field(
+        default="native", description="Union discriminator (default native)"
+    )
     id: str = Field(..., min_length=1, description="LaTeX-safe label slug for fig:<id>")
     caption: str = Field(..., description="Figure caption")
     plot: NativePlot = Field(..., description="The native (pgfplots) plot")
 
-    @classmethod
-    def _validate_id(cls, v: str) -> str:
-        if not _FIG_ID_RE.match(v):
-            raise ValueError(
-                f"figure id {v!r} is not a LaTeX-safe slug "
-                r"(must match ^[A-Za-z0-9][A-Za-z0-9_-]*$ so \label{fig:<id>} is safe)"
-            )
-        return v
+    def __init__(self, **data):  # noqa: D401 - pydantic init hook for id validation
+        if "id" in data and isinstance(data["id"], str):
+            data["id"] = _validate_fig_id(data["id"])
+        super().__init__(**data)
+
+
+class ImageFigureSpec(BaseModel):
+    """An agent-authored IMAGE figure spec: an ``\\includegraphics`` of a co-located
+    source image, for a diagram that cannot be expressed natively (D1).
+
+    The agent authors WHAT (the caption, a stable id, and the SOURCE path of an
+    EXISTING image file); the compiler co-locates that source to ``paper/figures/<id>
+    <ext>`` (the ONLY filesystem toucher) and this PURE renderer emits the matching
+    ``\\includegraphics{figures/<id><ext>}``. The renderer never reads the file -- it
+    derives ``<ext>`` from the source path's suffix as a string op; WHERE the image
+    comes from (an agent file, a deterministic domain plotter, ...) is the compiler's /
+    a later phase's concern, not the kernel's.
+
+    Attributes:
+        kind: the union discriminator, fixed ``"image"``.
+        id: a LaTeX-safe slug -- the stable ``\\label{fig:<id>}`` AND the co-located
+            filename stem (so the ``.tex`` and the file agree). Same validation as
+            :class:`FigureSpec`.
+        caption: the figure caption (rendered LaTeX-safe).
+        image: the SOURCE path/ref of an existing image file (relative or absolute).
+            Only its SUFFIX is used here (to build ``figures/<id><ext>``); the compiler
+            resolves + copies the actual bytes.
+        width: an optional LaTeX width spec for ``\\includegraphics[width=...]`` (e.g.
+            ``0.8\\textwidth``). Empty (the default) -> ``\\linewidth``.
+    """
+
+    model_config = {"frozen": True, "str_strip_whitespace": True}
+
+    kind: Literal["image"] = Field(..., description="Union discriminator (image)")
+    id: str = Field(..., min_length=1, description="LaTeX-safe label slug for fig:<id>")
+    caption: str = Field(..., description="Figure caption")
+    image: str = Field(
+        ..., min_length=1, description="Source path/ref of an existing image file"
+    )
+    width: str = Field(
+        default="", description="LaTeX width spec (empty -> \\linewidth)"
+    )
 
     def __init__(self, **data):  # noqa: D401 - pydantic init hook for id validation
         if "id" in data and isinstance(data["id"], str):
-            data["id"] = self._validate_id(data["id"].strip())
+            data["id"] = _validate_fig_id(data["id"])
         super().__init__(**data)
+
+
+def _figure_kind(value: object) -> str:
+    """Extract the union tag for an :data:`AnyFigure` payload, defaulting to ``native``.
+
+    A plain ``str``-valued ``Field(discriminator="kind")`` would reject a native payload
+    that OMITS ``kind`` (pydantic does not apply a field default during tag extraction),
+    breaking the byte-identical back-compat invariant for pre-image native JSON. A
+    callable :class:`Discriminator` lets us map an absent / ``None`` / empty ``kind`` to
+    ``"native"`` -- so an old native spec (no ``kind`` key) and an explicit
+    ``kind:"image"`` both route correctly. Accepts a dict (JSON) or a model instance.
+    """
+    if isinstance(value, dict):
+        kind = value.get("kind")
+    else:
+        kind = getattr(value, "kind", None)
+    return kind or "native"
+
+
+# The agent-authored figure union, discriminated on ``kind`` via a callable that
+# defaults a missing tag to ``native``: a native (pgfplots) plot or an image
+# (\includegraphics). Each member is ``Tag``-annotated so the callable's return value
+# maps to it.
+AnyFigure = Annotated[
+    Union[
+        Annotated[FigureSpec, Tag("native")],
+        Annotated[ImageFigureSpec, Tag("image")],
+    ],
+    Discriminator(_figure_kind),
+]
 
 
 class PaperFigures(BaseModel):
     """The top-level figure hook (mirrors ``PaperProse``): a list of figure specs.
 
     Absent / empty -> no figures (the renderer emits nothing new, preserving the
-    byte-identical skeleton, exactly like the prose hook).
+    byte-identical skeleton, exactly like the prose hook). Each entry is an
+    :data:`AnyFigure` -- a native or an image spec, discriminated on ``kind``.
     """
 
     model_config = {"frozen": True}
 
-    figures: List[FigureSpec] = Field(
+    figures: List[AnyFigure] = Field(
         default_factory=list, description="Agent-authored figure specs (empty -> none)"
     )
 
@@ -297,7 +387,64 @@ def render_native_figure(
     return "\n".join(lines)
 
 
-def figure_labels(figs: Sequence[FigureSpec]) -> List[str]:
+def render_image_figure(spec: ImageFigureSpec) -> str:
+    """Render an agent-authored ``ImageFigureSpec`` to a LaTeX ``figure`` env.
+
+    PURE: no Evidence is consulted (an image figure is a diagram, not a data plot) and
+    NO filesystem access -- the ``<ext>`` is derived from ``spec.image``'s suffix as a
+    string op only; the compiler co-locates the actual bytes. The included path is
+    ALWAYS ``figures/<id><ext>`` (the stable id is both the ``\\label`` and the filename
+    stem, so the ``.tex`` and the co-located file agree); the ``paper/`` folder stays
+    self-contained because the compiler lands the file under ``paper/figures/``.
+
+    The ``<id>`` label matches the native path, so the body's ``\\ref{fig:<id>}``
+    resolves regardless of figure kind and numbering is automatic.
+
+    Args:
+        spec: the image figure spec (caption, stable id, source image path, width).
+
+    Returns:
+        A LaTeX ``figure`` environment string (``\\includegraphics`` + caption + label).
+
+    Raises:
+        ValueError: if ``spec.image`` has no extension. ``\\includegraphics`` needs a
+            resolvable file ending; an extensionless source cannot name a graphic, so
+            this fails loud (record fidelity -- never emit an uncompilable include).
+    """
+    ext = Path(spec.image).suffix
+    if not ext:
+        raise ValueError(
+            f"figure '{spec.id}': image source {spec.image!r} has no file extension -- "
+            r"\includegraphics needs a resolvable file (e.g. diagram.pdf / .png)"
+        )
+    # An empty width spec -> \linewidth (the figure spans the text column by default).
+    width = spec.width or r"\linewidth"
+
+    lines: List[str] = []
+    lines.append(r"\begin{figure}[htbp]")
+    lines.append(r"\centering")
+    lines.append(f"\\includegraphics[width={width}]{{figures/{spec.id}{ext}}}")
+    lines.append(f"\\caption{{{_sanitize(spec.caption)}}}")
+    lines.append(f"\\label{{fig:{spec.id}}}")
+    lines.append(r"\end{figure}")
+    return "\n".join(lines)
+
+
+def render_figure(spec: AnyFigure, evidence: Sequence[EvidenceItem]) -> str:
+    """Render any :data:`AnyFigure` to a LaTeX ``figure`` env, routing by ``spec.kind``.
+
+    The single entry point the paper/SI renderers call so they need not branch on the
+    figure kind: a ``native`` spec is plotted from the Evidence record
+    (:func:`render_native_figure`), an ``image`` spec is an ``\\includegraphics``
+    (:func:`render_image_figure`, which ignores ``evidence``). PURE -- it dispatches
+    only; the underlying renderers carry the purity/record-fidelity guarantees.
+    """
+    if spec.kind == "image":
+        return render_image_figure(spec)
+    return render_native_figure(spec, evidence)
+
+
+def figure_labels(figs: Sequence[AnyFigure]) -> List[str]:
     """The ``fig:<id>`` labels of ``figs``, enforcing UNIQUE ids.
 
     A duplicate id would emit two ``\\label{fig:<id>}`` -- a LaTeX "multiply defined
@@ -359,9 +506,13 @@ __all__ = [
     "PlotSeries",
     "NativePlot",
     "FigureSpec",
+    "ImageFigureSpec",
+    "AnyFigure",
     "PaperFigures",
     "FigureConsistencyReport",
     "render_native_figure",
+    "render_image_figure",
+    "render_figure",
     "figure_labels",
     "check_figure_consistency",
 ]

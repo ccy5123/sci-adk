@@ -99,11 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--figures", default=None, metavar="PATH",
         help="optional JSON file: a PaperFigures object {\"figures\": [...]} OR a bare "
-             "list of FigureSpecs. Each spec names which Evidence series to plot, the "
-             "plot kind (line|scatter|bar), a caption, and a stable id (-> "
-             "\\label{fig:<id>}); the engine renders a LaTeX-native pgfplots figure, "
-             "pulling y FROM the recorded Evidence (record fidelity). Never "
-             "LLM-generated. Omit -> no figures",
+             "list of figure specs (native or image). A NATIVE spec names which Evidence "
+             "series to plot, the plot kind (line|scatter|bar), a caption, and a stable "
+             "id (-> \\label{fig:<id>}); the engine renders a LaTeX-native pgfplots "
+             "figure, pulling y FROM the recorded Evidence (record fidelity). An IMAGE "
+             "spec ({\"kind\":\"image\",...}) names a caption, id, and a source image "
+             "path the compiler co-locates into paper/figures/. Never LLM-generated. "
+             "Omit -> no figures",
     )
 
     resolve = sub.add_parser(
@@ -337,17 +339,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"error: invalid prose JSON ({prose_path}): {e}", file=sys.stderr)
             return 2
 
-    # Optional agent-authored figure specs (paper-figures Phase 1). Accepts either a
-    # PaperFigures object ({"figures": [...]}) or a bare list of FigureSpecs -- both
-    # normalize to a figure list. Input, NOT autonomous generation (no LLM at render
-    # time; the engine pulls each y FROM the recorded Evidence).
+    # Optional agent-authored figure specs (paper-figures Phase 1/4). Accepts either a
+    # PaperFigures object ({"figures": [...]}) or a bare list of figure specs (native or
+    # image, discriminated on "kind") -- both normalize to a figure list. Input, NOT
+    # autonomous generation (no LLM at render time; native y is pulled FROM the recorded
+    # Evidence, image specs reference a co-located source file).
     figures = None
     if args.figures:
         figures_path = Path(args.figures)
         if not figures_path.exists():
             print(f"error: figures file not found: {figures_path}", file=sys.stderr)
             return 2
-        from sci_adk.render.figures import FigureSpec, PaperFigures
+        from pydantic import TypeAdapter
+
+        from sci_adk.render.figures import AnyFigure, PaperFigures
 
         raw = figures_path.read_text(encoding="utf-8")
         try:
@@ -357,7 +362,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 2
         try:
             if isinstance(parsed, list):
-                figures = [FigureSpec.model_validate(item) for item in parsed]
+                # A bare list normalizes through the discriminated AnyFigure union, so a
+                # list of native AND/OR image specs both validate (a native item omitting
+                # "kind" defaults to native).
+                figures = list(TypeAdapter(list[AnyFigure]).validate_python(parsed))
             else:
                 figures = list(PaperFigures.model_validate(parsed).figures)
         except ValueError as e:

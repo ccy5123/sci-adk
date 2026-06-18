@@ -30,12 +30,15 @@ from sci_adk.core.evidence import (
 from sci_adk.render.figures import (
     FigureConsistencyReport,
     FigureSpec,
+    ImageFigureSpec,
     NativePlot,
     PaperFigures,
     PlotPoint,
     PlotSeries,
     check_figure_consistency,
     figure_labels,
+    render_figure,
+    render_image_figure,
     render_native_figure,
 )
 
@@ -451,3 +454,163 @@ class TestFigureConsistency:
         a = check_figure_consistency(["fig:a"], body)
         b = check_figure_consistency(["fig:a"], body)
         assert a == b
+
+
+# ---------------------------------------------------------------------------
+# IMAGE figures (Phase 4-1): \includegraphics of a co-located source image.
+# ---------------------------------------------------------------------------
+
+def _image_spec(
+    fig_id: str = "scheme", image: str = "diagram.pdf", width: str = ""
+) -> ImageFigureSpec:
+    return ImageFigureSpec(
+        kind="image",
+        id=fig_id,
+        caption="Reaction scheme (diagram).",
+        image=image,
+        width=width,
+    )
+
+
+class TestNativeKindBackwardCompat:
+    """An existing native spec WITHOUT a `kind` key still parses as native and renders
+    byte-identical (the pre-image regression invariant -- the default discriminator)."""
+
+    def test_native_spec_without_kind_parses_as_native(self):
+        # The _figures_json-style payload (no "kind" key) the agent authored before the
+        # image kind existed must still validate as a native FigureSpec.
+        payload = {
+            "id": "growth",
+            "caption": "Point estimate across runs.",
+            "plot": {
+                "type": "line",
+                "xlabel": "run index",
+                "ylabel": "point estimate",
+                "series": [{
+                    "y_field": "point",
+                    "points": [{"evidence_id": "ev-a", "x": 1.0}],
+                }],
+            },
+        }
+        spec = FigureSpec.model_validate(payload)
+        assert spec.kind == "native"
+
+    def test_native_render_byte_identical_with_default_kind(self):
+        # A spec built without passing kind (defaulting to "native") renders byte-for-byte
+        # the same tex as today -- the native path is unchanged by the discriminator.
+        spec = _line_spec("growth")
+        assert spec.kind == "native"
+        a = render_native_figure(spec, _series_evidence())
+        b = render_figure(spec, _series_evidence())
+        assert a == b  # dispatcher routes native -> render_native_figure verbatim
+
+
+class TestRenderImageFigure:
+    def test_emits_includegraphics_caption_label(self):
+        tex = render_image_figure(_image_spec("scheme", "art/diagram.pdf"))
+        assert r"\begin{figure}" in tex
+        assert r"\centering" in tex
+        # The included path is ALWAYS figures/<id><ext>, ext derived from the source.
+        assert r"\includegraphics[width=\linewidth]{figures/scheme.pdf}" in tex
+        assert r"\caption{Reaction scheme (diagram).}" in tex
+        assert r"\label{fig:scheme}" in tex
+        assert r"\end{figure}" in tex
+
+    def test_extension_derived_from_source_suffix(self):
+        tex = render_image_figure(_image_spec("panel", "/abs/path/photo.png"))
+        # The file extension follows the SOURCE suffix (.png), the stem is the figure id.
+        assert "{figures/panel.png}" in tex
+
+    def test_explicit_width_is_used(self):
+        tex = render_image_figure(
+            _image_spec("w", "d.pdf", width=r"0.8\textwidth")
+        )
+        assert r"\includegraphics[width=0.8\textwidth]{figures/w.pdf}" in tex
+
+    def test_empty_width_defaults_to_linewidth(self):
+        tex = render_image_figure(_image_spec("d", "d.pdf", width=""))
+        assert r"width=\linewidth" in tex
+
+    def test_caption_is_sanitized(self):
+        spec = ImageFigureSpec(
+            kind="image", id="esc", caption="100% & cost $5", image="d.pdf"
+        )
+        tex = render_image_figure(spec)
+        assert r"100\%" in tex
+        assert r"\&" in tex
+        assert r"\$5" in tex
+
+    def test_extensionless_image_raises(self):
+        # \includegraphics needs a resolvable file ending; an extensionless source is an
+        # authoring error (fail-loud, like the native record-fidelity errors).
+        with pytest.raises(ValueError):
+            render_image_figure(_image_spec("noext", image="diagram"))
+
+    def test_image_render_is_pure(self):
+        spec = _image_spec("p", "d.pdf")
+        assert render_image_figure(spec) == render_image_figure(spec)
+
+    def test_unsafe_id_rejected(self):
+        # The same LaTeX-safe slug rule as FigureSpec.
+        for bad in ["has space", "with{brace", "_leading"]:
+            with pytest.raises(ValueError):
+                ImageFigureSpec(kind="image", id=bad, caption="c", image="d.pdf")
+
+
+class TestRenderFigureDispatch:
+    def test_dispatches_native(self):
+        spec = _line_spec("growth")
+        assert render_figure(spec, _series_evidence()) == render_native_figure(
+            spec, _series_evidence()
+        )
+
+    def test_dispatches_image(self):
+        spec = _image_spec("scheme", "d.pdf")
+        # The image path ignores evidence; the dispatcher matches render_image_figure.
+        assert render_figure(spec, _series_evidence()) == render_image_figure(spec)
+
+    def test_image_dispatch_ignores_evidence(self):
+        spec = _image_spec("scheme", "d.pdf")
+        a = render_figure(spec, _series_evidence())
+        b = render_figure(spec, [])  # no evidence at all
+        assert a == b
+
+
+class TestFigureLabelsMixedKinds:
+    def test_labels_over_native_and_image(self):
+        figs = [_line_spec("nat"), _image_spec("img", "d.pdf")]
+        assert figure_labels(figs) == ["fig:nat", "fig:img"]
+
+    def test_duplicate_id_across_kinds_fails_loud(self):
+        # A native and an image figure sharing an id would emit two \label{fig:dup}.
+        figs = [_line_spec("dup"), _image_spec("dup", "d.pdf")]
+        with pytest.raises(ValueError):
+            figure_labels(figs)
+
+
+class TestPaperFiguresMixedUnion:
+    def test_paper_figures_holds_both_kinds(self):
+        pf = PaperFigures(figures=[_line_spec("nat"), _image_spec("img", "d.pdf")])
+        assert pf.figures[0].kind == "native"
+        assert pf.figures[1].kind == "image"
+
+    def test_paper_figures_discriminates_from_json(self):
+        payload = {
+            "figures": [
+                {
+                    "id": "nat",
+                    "caption": "c",
+                    "plot": {
+                        "type": "line",
+                        "series": [{
+                            "y_field": "point",
+                            "points": [{"evidence_id": "ev-a", "x": 1.0}],
+                        }],
+                    },
+                },
+                {"kind": "image", "id": "img", "caption": "c", "image": "d.pdf"},
+            ]
+        }
+        pf = PaperFigures.model_validate(payload)
+        assert isinstance(pf.figures[0], FigureSpec)
+        assert isinstance(pf.figures[1], ImageFigureSpec)

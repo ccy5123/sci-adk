@@ -385,6 +385,121 @@ def test_compile_figures_render_y_from_evidence(tmp_path):
     assert "(1, 1)" in tex  # ev-pt-0 point=1.0
 
 
+# ---------------------------------------------------------------------------
+# IMAGE figures (paper-figures Phase 4-1): the compiler co-locates the source image
+# into paper/figures/<id><ext>; draft.tex/si.tex reference it. A missing source fails
+# loud (record fidelity).
+# ---------------------------------------------------------------------------
+
+def _image_figure(fig_id: str, image_path: str) -> dict:
+    """A PaperFigures payload carrying ONE image figure spec."""
+    return {
+        "figures": [
+            {
+                "kind": "image",
+                "id": fig_id,
+                "caption": "Reaction scheme.",
+                "image": image_path,
+            }
+        ]
+    }
+
+
+def test_compile_colocates_image_figure_into_paper_figures(tmp_path):
+    from sci_adk.render.figures import PaperFigures
+
+    # A real source image (relative to the workspace dir, resolved by the compiler).
+    src = tmp_path / "art" / "scheme.png"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"\x89PNG\r\n\x1a\n fake png bytes")
+
+    figs = PaperFigures.model_validate(
+        _image_figure("scheme", "art/scheme.png")
+    ).figures
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-img", experiment=_point_experiment, figures=figs)
+
+    paper_dir = tmp_path / "runs" / "t-img" / "paper"
+    # The source bytes landed at paper/figures/<id><ext> (id = stem, source suffix).
+    dest = paper_dir / "figures" / "scheme.png"
+    assert dest.is_file(), "image source must be co-located into paper/figures/"
+    assert dest.read_bytes() == src.read_bytes()
+
+    # draft.tex references it via graphicx (NOT pgfplots -- image-only render) + label.
+    draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
+    assert r"\usepackage{graphicx}" in draft
+    assert r"\usepackage{pgfplots}" not in draft  # no native figure here
+    assert r"\includegraphics[width=\linewidth]{figures/scheme.png}" in draft
+    assert r"\label{fig:scheme}" in draft
+
+    # si.tex (the SI shows every figure) references the same co-located file.
+    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    assert r"\usepackage{graphicx}" in si
+    assert "{figures/scheme.png}" in si
+
+
+def test_compile_image_figure_absolute_path(tmp_path):
+    from sci_adk.render.figures import PaperFigures
+
+    # An ABSOLUTE source path is used verbatim (not re-rooted at the workspace dir).
+    src = tmp_path / "outside" / "diagram.pdf"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"%PDF-1.4 fake")
+
+    figs = PaperFigures.model_validate(
+        _image_figure("diag", str(src))
+    ).figures
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-img-abs", experiment=_point_experiment, figures=figs)
+
+    dest = tmp_path / "runs" / "t-img-abs" / "paper" / "figures" / "diag.pdf"
+    assert dest.is_file()
+    assert dest.read_bytes() == src.read_bytes()
+
+
+def test_compile_missing_image_source_raises(tmp_path):
+    import pytest
+
+    from sci_adk.render.figures import PaperFigures
+
+    # No file at art/missing.png -> co-location fails loud (record fidelity); the
+    # paper/ folder must never be silently produced with a broken \includegraphics.
+    figs = PaperFigures.model_validate(
+        _image_figure("gone", "art/missing.png")
+    ).figures
+    with pytest.raises(ValueError):
+        ResearchCompiler(workspace_dir=tmp_path).compile(
+            PROPOSAL, spec_id="t-img-missing", experiment=_point_experiment,
+            figures=figs)
+
+
+def test_compile_mixed_native_and_image_figures(tmp_path):
+    from sci_adk.render.figures import PaperFigures
+
+    src = tmp_path / "scheme.pdf"
+    src.write_bytes(b"%PDF-1.4 fake")
+
+    payload = {
+        "figures": [
+            _figures_json("growth", "ev-pt-0")["figures"][0],          # native
+            _image_figure("scheme", "scheme.pdf")["figures"][0],       # image
+        ]
+    }
+    figs = PaperFigures.model_validate(payload).figures
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-img-mixed", experiment=_point_experiment, figures=figs)
+
+    draft = (tmp_path / "runs" / "t-img-mixed" / "paper" / "draft.tex").read_text(
+        encoding="utf-8")
+    # BOTH packages present (one native + one image figure).
+    assert r"\usepackage{pgfplots}" in draft
+    assert r"\usepackage{graphicx}" in draft
+    assert r"\label{fig:growth}" in draft
+    assert r"\label{fig:scheme}" in draft
+    assert (tmp_path / "runs" / "t-img-mixed" / "paper" / "figures" / "scheme.pdf"
+            ).is_file()
+
+
 def test_cli_run_figures_flag_renders_figure(tmp_path, monkeypatch):
     """The --figures flag, through ``main()``, parses the file and renders the figure.
 
