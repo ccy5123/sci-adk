@@ -23,6 +23,7 @@ Reference: design/directory-structure.md (render/), design/abstractions.md.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -219,6 +220,77 @@ def _latex_sanitize(s: str) -> str:
                 continue  # drop combining marks
             else:
                 out.append(_UNICODE_PLACEHOLDER)
+    return "".join(out)
+
+
+# The EXACT allowlist of LaTeX cross-reference / citation commands that
+# :func:`_latex_sanitize_prose` lets through verbatim. Each is of the form
+# ``\cmd{...}`` where ``{...}`` is a SINGLE label/key argument with NO nested braces
+# (``fig:water``, ``Smith2020``, ``a,b``) -- exactly what an author writes to reference
+# a figure or cite a paper. The allowlist is closed and deliberately tiny: it is the
+# ONLY LaTeX that survives a prose slot. A non-allowlisted command (``\textbf{...}``,
+# ``\input{...}``) and every stray special (``&`` ``%`` ``_`` ``$``) stay escaped, so
+# prose can never inject arbitrary LaTeX or break compilation outside this set.
+#
+# The regex matches the command name then a brace group with no inner ``{`` / ``}``
+# (``[^{}]*`` -- a key never contains braces; an empty arg ``\ref{}`` is matched too so
+# it is preserved rather than half-escaped). ``\b``-free by construction: the command
+# names are immediately followed by ``{`` so ``\reference{}`` is NOT matched (the name
+# alternation requires the literal ``{`` next).
+_PROSE_PASSTHROUGH_RE = re.compile(
+    r"\\(?:ref|eqref|autoref|cite|citep|citet)\{[^{}]*\}"
+)
+
+
+def _latex_sanitize_prose(s: str) -> str:
+    """Sanitize an agent-authored PROSE slot, PRESERVING ref/cite commands verbatim.
+
+    The prose-only variant of :func:`_latex_sanitize`. Every prose slot
+    (``PaperProse`` abstract/introduction/discussion, ``SIProse`` overview/notes) is the
+    one place an author legitimately writes real LaTeX: ``\\ref{fig:<id>}`` to point at a
+    figure and ``\\cite{<key>}`` to cite literature. The plain ``_latex_sanitize`` would
+    escape those to literal text (``\\ref{fig:x}`` -> ``\\textbackslash{}ref\\{fig:x\\}``),
+    which is why the body-order figure numbering (:func:`figures.order_figures_by_reference`,
+    which scans the body for ``\\ref{fig:<id>}``) silently fell back to supply order --
+    it never saw a real ref. This function closes that gap by letting EXACTLY the six
+    allowlisted commands (:data:`_PROSE_PASSTHROUGH_RE`) through unchanged while still
+    fully sanitizing everything else.
+
+    Implementation: a SPLIT-and-stitch (collision-proof BY CONSTRUCTION -- no placeholder
+    that could collide with content, and nothing of ours is routed back through the
+    escaper). :func:`re.Match`/:func:`re.split`-style alternation walks ``s`` and carves it
+    into segments separated by the allowlisted spans; only the SEGMENTS between/around the
+    spans pass through the EXISTING :func:`_latex_sanitize` (specials escaped + unicode
+    folded exactly as the non-prose path), while each allowlisted span is concatenated back
+    VERBATIM. The label/key INSIDE ``{...}`` is therefore never escaped: it is a reference
+    key (``fig:a_b``, ``Smith2020``), so an underscore there survives as ``_`` for the
+    ``\\ref`` to resolve, not become ``\\_``.
+
+    Why split rather than the sentinel trick :func:`_latex_escape` uses: ``_latex_escape``
+    (called inside ``_latex_sanitize``) STRIPS the ``\\x00``/``\\x01`` sentinel bytes from
+    its input as a hard collision-proofing invariant, so a placeholder routed THROUGH it
+    would be destroyed. Splitting keeps the preserved spans entirely OUT of the escaper's
+    path -- the same collision-proofing goal, reached without fighting that invariant.
+
+    Safety boundary: ONLY the allowlist passes. A non-allowlisted command stays escaped
+    (``\\textbf{x}`` -> literal ``\\textbackslash{}textbf\\{x\\}``) and a stray ``&`` / ``%``
+    outside a preserved span is still escaped -- so prose cannot smuggle arbitrary LaTeX
+    or unbalanced specials past the renderer.
+
+    PURE + deterministic. Like ``_latex_sanitize`` it is NOT idempotent -- a second pass
+    would re-escape the (now bare) preserved commands. Call exactly once, on prose only.
+    """
+    out: list[str] = []
+    pos = 0
+    # Walk every allowlisted span in order; sanitize the gap BEFORE it, then append the
+    # span itself verbatim. The trailing gap (after the last span) is handled below. A
+    # string with no allowlisted span never enters the loop -> falls straight to the final
+    # _latex_sanitize, i.e. identical to the non-prose path.
+    for match in _PROSE_PASSTHROUGH_RE.finditer(s):
+        out.append(_latex_sanitize(s[pos : match.start()]))  # gap -> fully sanitized
+        out.append(match.group(0))                            # \cmd{key} -> verbatim
+        pos = match.end()
+    out.append(_latex_sanitize(s[pos:]))  # trailing gap (or the whole string if no spans)
     return "".join(out)
 
 
@@ -572,17 +644,18 @@ def render_paper_latex(
     )
     lines.append("")
 
-    # Abstract (after \maketitle), when supplied.
+    # Abstract (after \maketitle), when supplied. Prose-only sanitizer: an author may
+    # \ref a figure / \cite literature here; every other special is still escaped.
     if prose is not None and prose.abstract:
         lines.append(r"\begin{abstract}")
-        lines.append(_latex_sanitize(prose.abstract.strip()))
+        lines.append(_latex_sanitize_prose(prose.abstract.strip()))
         lines.append(r"\end{abstract}")
         lines.append("")
 
-    # Introduction, when supplied.
+    # Introduction, when supplied. Prose-only sanitizer (ref/cite preserved).
     if prose is not None and prose.introduction:
         lines.append(r"\section{Introduction}")
-        lines.append(_latex_sanitize(prose.introduction.strip()))
+        lines.append(_latex_sanitize_prose(prose.introduction.strip()))
         lines.append("")
 
     lines.append(r"\section{Goal}")
@@ -675,10 +748,12 @@ def render_paper_latex(
         lines.append(r"\end{itemize}")
         lines.append("")
 
-    # Agent-authored discussion, when supplied (before References).
+    # Agent-authored discussion, when supplied (before References). Prose-only
+    # sanitizer: \ref{fig:<id>} here is what drives the body-reference figure numbering
+    # (order_figures_by_reference, below) -- it must survive as a real LaTeX ref.
     if prose is not None and prose.discussion:
         lines.append(r"\section{Discussion}")
-        lines.append(_latex_sanitize(prose.discussion.strip()))
+        lines.append(_latex_sanitize_prose(prose.discussion.strip()))
         lines.append("")
 
     # Figures (native pgfplots or image \includegraphics), when supplied -- before

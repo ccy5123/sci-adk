@@ -37,6 +37,16 @@ class PaperProse(BaseModel):
     net folds a stray ``≥`` / ``α`` / accent to a pdflatex-safe form, but it is a
     fallback, not a license to rely on unicode; the ``.tex`` is the source of truth.
 
+    **Reference / citation commands are permitted in prose.** These specific commands
+    pass through verbatim as real LaTeX -- ``\\ref{fig:<id>}``, ``\\eqref{eq:<id>}``,
+    ``\\autoref{<id>}`` to cross-reference, and ``\\cite{<key>}`` / ``\\citep{<key>}`` /
+    ``\\citet{<key>}`` to cite literature -- so an author can point at a figure or cite a
+    paper in the narrative. (Authoring ``\\ref{fig:<id>}`` here is also what drives the
+    body-reference figure numbering.) NO OTHER LaTeX passes: every other special
+    (``&`` ``%`` ``_`` ``$`` ...) is still escaped, and a non-allowlisted command like
+    ``\\textbf{...}`` is rendered as literal text -- so prose stays LaTeX-safe outside
+    the ref/cite allowlist. See :func:`sci_adk.render.paper._latex_sanitize_prose`.
+
     Attributes:
         abstract: the paper abstract (rendered after the title / ``\\maketitle``).
         introduction: the Introduction section body.
@@ -80,10 +90,17 @@ class SIProse(BaseModel):
     Each slot is **LaTeX body input**: the SI artifact is ``si.tex`` (Overleaf default
     pdflatex), so author the text LaTeX-safe -- e.g. ``$\\geq$``, ``H$_2$O``,
     ``30\\textdegree{}C`` -- not unicode. The renderer injects it (after LaTeX
-    special-char escaping, the SAME ``_latex_sanitize`` the record dump uses) verbatim.
-    A lightweight unicode safety net folds a stray ``≥`` / ``α`` / accent to a
-    pdflatex-safe form, but it is a fallback, not a license to rely on unicode; the
-    ``.tex`` is the source of truth.
+    special-char escaping) verbatim. A lightweight unicode safety net folds a stray
+    ``≥`` / ``α`` / accent to a pdflatex-safe form, but it is a fallback, not a license
+    to rely on unicode; the ``.tex`` is the source of truth.
+
+    **Reference / citation commands are permitted in prose** (the same contract as
+    :class:`PaperProse`): ``\\ref`` / ``\\eqref`` / ``\\autoref`` and ``\\cite`` /
+    ``\\citep`` / ``\\citet`` pass through verbatim as real LaTeX so the narrative can
+    cross-reference and cite; every other special is still escaped and a non-allowlisted
+    command renders as literal text. The deterministic record dump that these slots wrap
+    stays FULLY escaped (the plain ``_latex_sanitize``) -- only this narrative prose gets
+    the ref/cite passthrough. See :func:`sci_adk.render.paper._latex_sanitize_prose`.
 
     Attributes:
         overview: a narrative intro, rendered near the TOP of ``si.tex`` (after the

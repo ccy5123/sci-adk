@@ -513,18 +513,18 @@ def test_compile_mixed_native_and_image_figures(tmp_path):
 # ---------------------------------------------------------------------------
 # Body-reference figure numbering (Part B): a figure's number + co-located filename
 # follow the order the figure is FIRST \ref'd in the body, and the SI shares that
-# numbering with the main paper. (NOTE: prose \ref is LaTeX-escaped by the renderer's
-# sanitizer, so a \ref authored in PROSE does not drive ordering through the compiler --
-# proven below. The reference-order behavior itself is exercised against a raw body in
-# tests/test_figures.py::TestOrderFiguresByReference and the renderer test below.)
+# numbering with the main paper. (A \ref authored in a PROSE slot is now preserved by the
+# prose-only sanitizer and DOES drive ordering through the compiler -- proven in
+# tests/test_prose_refs.py and test_compile_prose_ref_drives_figure_numbering below. With
+# NO prose ref, the body carries no live ref and numbering falls to supply order, which is
+# what the first test below exercises.)
 # ---------------------------------------------------------------------------
 
 def test_compile_shares_figure_numbering_and_filenames_main_and_si(tmp_path):
-    """End-to-end shared numbering: two image figures supplied [alpha, beta]. Through the
-    compiler their numbering is supply order (no live \\ref reaches the rendered body --
-    prose \\ref is sanitized), so alpha=fig1 / beta=fig2 -- and CRUCIALLY the SI reuses the
-    SAME fig<N> identity + the SAME co-located file set the main paper uses (one shared set
-    for both standalone documents)."""
+    """End-to-end shared numbering: two image figures supplied [alpha, beta]. No prose ref
+    reaches the body, so numbering is supply order: alpha=fig1 / beta=fig2 -- and CRUCIALLY
+    the SI reuses the SAME fig<N> identity + the SAME co-located file set the main paper
+    uses (one shared set for both standalone documents)."""
     from sci_adk.render.figures import PaperFigures
 
     a = tmp_path / "alpha.png"
@@ -562,6 +562,50 @@ def test_compile_shares_figure_numbering_and_filenames_main_and_si(tmp_path):
     assert si.index(r"\label{fig:alpha}") < si.index(r"\label{fig:beta}")
     # The semantic labels survive in both documents so a body \ref{fig:<id>} resolves.
     assert r"\label{fig:alpha}" in draft and r"\label{fig:beta}" in draft
+
+
+def test_compile_prose_ref_drives_figure_numbering(tmp_path):
+    """The payoff THROUGH the full compiler: prose discussion \\ref's fig:beta then
+    fig:alpha; figures supplied [alpha, beta]. The prose-only sanitizer preserves the refs
+    into the rendered body, so order_figures_by_reference numbers beta=fig1 / alpha=fig2 --
+    BODY reference order, not supply order -- and the co-located paper/figures/fig1<ext> is
+    BETA's image (the gap, closed end-to-end)."""
+    from sci_adk.render.figures import PaperFigures
+    from sci_adk.render.prose import PaperProse
+
+    a = tmp_path / "alpha.png"
+    a.write_bytes(b"\x89PNG alpha-bytes")
+    b = tmp_path / "beta.png"
+    b.write_bytes(b"\x89PNG beta-bytes")
+
+    payload = {
+        "figures": [
+            _image_figure("alpha", "alpha.png")["figures"][0],   # supplied FIRST
+            _image_figure("beta", "beta.png")["figures"][0],     # supplied SECOND
+        ]
+    }
+    figs = PaperFigures.model_validate(payload).figures
+    # Discussion \ref's beta BEFORE alpha -> body-reference order is beta, then alpha.
+    prose = PaperProse(discussion=r"First \ref{fig:beta}, then \ref{fig:alpha}.")
+    ResearchCompiler(workspace_dir=tmp_path).compile(
+        PROPOSAL, spec_id="t-prose-order", experiment=_point_experiment,
+        figures=figs, prose=prose)
+
+    paper_dir = tmp_path / "runs" / "t-prose-order" / "paper"
+    draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
+    figures_dir = paper_dir / "figures"
+
+    # The prose \ref reached the body as REAL LaTeX (not escaped).
+    assert r"\ref{fig:beta}" in draft
+    assert r"\textbackslash{}ref" not in draft
+
+    # Numbering is BODY-REFERENCE order: beta first-\ref'd -> fig1, alpha -> fig2. So the
+    # co-located fig1<ext> is BETA's image (supply order would have made it alpha's).
+    assert (figures_dir / "fig1.png").read_bytes() == b.read_bytes()  # beta = fig1
+    assert (figures_dir / "fig2.png").read_bytes() == a.read_bytes()  # alpha = fig2
+    assert r"\includegraphics[width=\linewidth]{figures/fig1.png}" in draft
+    assert r"\includegraphics[width=\linewidth]{figures/fig2.png}" in draft
+    assert sorted(p.name for p in figures_dir.iterdir()) == ["fig1.png", "fig2.png"]
 
 
 def test_render_paper_orders_figures_by_body_reference(tmp_path):

@@ -44,6 +44,7 @@ from sci_adk.render.figures import (
 from sci_adk.render.paper import (
     _confidence_str,
     _latex_sanitize,
+    _latex_sanitize_prose,
     _result_summary,
     _status_str,
 )
@@ -244,7 +245,9 @@ def render_si_latex(
     # byte-identical no-prose dump.
     if prose is not None and prose.overview:
         lines.append(r"\section{Overview}")
-        lines.append(_latex_sanitize(prose.overview.strip()))
+        # Prose-only sanitizer: an author may \ref a figure / \cite literature here;
+        # every other special is still escaped (the record dump below stays fully escaped).
+        lines.append(_latex_sanitize_prose(prose.overview.strip()))
         lines.append("")
 
     # -- Section: Evidence record (every item; stable order = as given) ------------
@@ -380,7 +383,8 @@ def render_si_latex(
     # byte-identical no-prose dump.
     if prose is not None and prose.notes:
         lines.append(r"\section{Notes}")
-        lines.append(_latex_sanitize(prose.notes.strip()))
+        # Prose-only sanitizer (ref/cite preserved; all other specials escaped).
+        lines.append(_latex_sanitize_prose(prose.notes.strip()))
         lines.append("")
 
     lines.append(r"\end{document}")
