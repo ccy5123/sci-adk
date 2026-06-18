@@ -205,6 +205,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="searched path only: proceed with DEGRADED OA acquisition when no contact "
              "email is set (default: refuse and halt)",
     )
+
+    status = sub.add_parser(
+        "status",
+        help="terse, read-only session-state snapshot of a run dir (recorded claim "
+             "statuses + open decisions). No recompile / experiment / LLM / write / "
+             "re-derivation -- cheap enough to call every turn. Exit 0 ALWAYS (it is a "
+             "report, not a gate; a missing run dir -> a 'nothing recorded' report)",
+    )
+    status.add_argument("run_dir", help="path to a runs/<spec.id>/ dir (may not exist)")
+    status.add_argument(
+        "--json", action="store_true", dest="as_json",
+        help="emit the StatusReport as indented JSON instead of the human view",
+    )
     return parser
 
 
@@ -586,6 +599,25 @@ def _cmd_contested(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_status(args: argparse.Namespace) -> int:
+    """Print a terse, read-only session-state snapshot of a run dir (design §6 D1).
+
+    Reports the RECORDED claim statuses + open decisions (prior-work / novelty /
+    contested / checkpoints awaiting a verdict). It re-derives nothing (that is
+    ``verify``'s job), runs no experiment, calls no LLM, and writes nothing. Exit 0
+    ALWAYS -- it is a report consumed every turn by the re-anchor hook, not a gate; a
+    nonexistent run dir yields a graceful "nothing recorded" report rather than an error.
+    """
+    from sci_adk.loop.status import render_status_text, session_status
+
+    report = session_status(Path(args.run_dir))
+    if args.as_json:
+        print(report.model_dump_json(indent=2))
+    else:
+        print(render_status_text(report))
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
@@ -600,6 +632,8 @@ def main(argv=None) -> int:
         return _cmd_novelty(args)
     if args.command == "contested":
         return _cmd_contested(args)
+    if args.command == "status":
+        return _cmd_status(args)
     return 1
 
 
