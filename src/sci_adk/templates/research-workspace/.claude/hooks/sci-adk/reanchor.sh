@@ -41,8 +41,8 @@ for run in "$runs_dir"/*/; do
 	fi
 done
 
-# No run dirs yet -> nothing to anchor to (the /research entry point + persona
-# handle the "you never started a run" nudge). Exit quietly.
+# No run dirs yet -> nothing to anchor to (the science-orchestrator persona
+# handles the "you never started a run" nudge). Exit quietly.
 [ -n "$latest" ] || exit 0
 
 echo "[sci-adk] You are under research discipline: agents propose, the engine judges. No conclusion bypasses 'sci-adk verify'."

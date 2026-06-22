@@ -260,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_session = sub.add_parser(
         "init-session",
         help="install the research-workspace enforcement kit (Stop/UserPromptSubmit "
-             "hooks + researcher persona + /research command + CLAUDE.md) into a target "
+             "hooks + science-orchestrator persona + CLAUDE.md) into a target "
              "dir. Non-clobbering and idempotent: never overwrites the user's files, "
              "merges settings.json, and re-running is a clean no-op. Exit 0 on success "
              "(a conflict is a warning, not a failure)",

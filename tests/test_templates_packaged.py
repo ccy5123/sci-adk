@@ -28,8 +28,7 @@ _KIT_FILES = (
     "CLAUDE.md",
     "README.md",
     ".claude/settings.json",
-    ".claude/commands/research.md",
-    ".claude/output-styles/researcher/researcher.md",
+    ".claude/output-styles/science-orchestrator/science-orchestrator.md",
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
 )

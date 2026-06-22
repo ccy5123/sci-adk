@@ -16,13 +16,16 @@ src/sci_adk/templates/research-workspace/
 ├── CLAUDE.md                                   # always-loaded research protocol
 ├── README.md                                   # this file
 └── .claude/
-    ├── settings.json                           # wires the two hooks + persona
-    ├── commands/research.md                    # /research entry point
-    ├── output-styles/researcher/researcher.md  # the researcher persona
+    ├── settings.json                                          # wires the two hooks + persona
+    ├── output-styles/science-orchestrator/                    # the orchestrator persona
+    │   └── science-orchestrator.md
     └── hooks/sci-adk/
-        ├── stop-verify-gate.sh                 # HARD gate: Stop -> sci-adk verify
-        └── reanchor.sh                         # re-anchor: UserPromptSubmit -> sci-adk status
+        ├── stop-verify-gate.sh                                # HARD gate: Stop -> sci-adk verify
+        └── reanchor.sh                                        # re-anchor: UserPromptSubmit -> sci-adk status
 ```
+
+(The `/sci` entry-point command is forthcoming; the persona drives sessions
+directly until it ships.)
 
 - **`stop-verify-gate.sh`** (Stop hook) — blocks ending the session while any
   run that has recorded belief (a `runs/<id>/claims/*.json`) fails
@@ -31,9 +34,11 @@ src/sci_adk/templates/research-workspace/
 - **`reanchor.sh`** (UserPromptSubmit hook) — every turn, re-injects the
   protocol reminder + the current run's `sci-adk status` into context. The
   direct antidote to compaction drift.
-- **`researcher` output style** — the always-on persona contract.
-- **`/research`** — the single entry point; "using it correctly" collapses to
-  one action.
+- **`science-orchestrator` output style** — the always-on persona contract: it
+  clarifies intent, delegates to research workers, and gates every conclusion
+  through `sci-adk verify`.
+- **`/sci`** — the planned single entry point (forthcoming). Until it ships, the
+  persona drives sessions directly.
 
 ## Install
 
@@ -62,8 +67,9 @@ src/sci_adk/templates/research-workspace/
    chmod +x /path/to/research-workspace/.claude/hooks/sci-adk/*.sh
    ```
 
-4. **Start a session** in the research workspace and run
-   `/research <proposal.md | research goal>`.
+4. **Start a session** in the research workspace and drive it under the
+   `science-orchestrator` persona for a proposal or research goal. (The `/sci`
+   entry-point command is forthcoming; until it ships, start sessions directly.)
 
 ## Two-environment warning [HARD]
 

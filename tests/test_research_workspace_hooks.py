@@ -135,7 +135,7 @@ def test_hook_scripts_have_lf_line_endings():
 
 def test_settings_json_is_valid_and_wires_both_hooks():
     data = json.loads(SETTINGS.read_text(encoding="utf-8"))
-    assert data.get("outputStyle") == "researcher"
+    assert data.get("outputStyle") == "science-orchestrator"
     hooks = data.get("hooks", {})
     assert "Stop" in hooks, "settings.json missing Stop hook event"
     assert "UserPromptSubmit" in hooks, "settings.json missing UserPromptSubmit hook event"

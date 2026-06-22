@@ -1,11 +1,13 @@
 """
 ``sci-adk init-session <dir>`` -- the Phase-3 research-workspace installer (D3).
 
-design/research-session-enforcement.md D3: install the Phase-2
+design/research-session-enforcement.md D3 + sci-adk-as-moai.md §10.5: install the
 ``src/sci_adk/templates/research-workspace/`` enforcement kit (two hooks, the
-``researcher`` output style, the ``/research`` command, ``CLAUDE.md``, and a
-``settings.json`` fragment) into a target research workspace, with one command,
-keeping the hook/``verify`` contracts version-pinned to the sci-adk release.
+``science-orchestrator`` output style, ``CLAUDE.md``, and a ``settings.json``
+fragment) into a target research workspace, with one command, keeping the
+hook/``verify`` contracts version-pinned to the sci-adk release. (The ``/research``
+command was removed alongside the ``researcher`` persona in the sci-adk-as-moai
+pivot; the ``/sci`` entry point is installed in a later step, not here.)
 
 Two load-bearing invariants, tested explicitly in tests/test_init_session.py:
 
@@ -46,12 +48,13 @@ from pydantic import BaseModel, Field
 # --------------------------------------------------------------------------- #
 
 # plain file assets copied verbatim (non-clobbering). CLAUDE.md and settings.json
-# have their own bespoke handling below and are NOT in this list.
+# have their own bespoke handling below and are NOT in this list. The ``/research``
+# command and ``researcher`` persona were removed in the sci-adk-as-moai pivot; the
+# ``/sci`` command is installed in a later step, not by this verb.
 _PLAIN_ASSETS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
-    ".claude/output-styles/researcher/researcher.md",
-    ".claude/commands/research.md",
+    ".claude/output-styles/science-orchestrator/science-orchestrator.md",
 )
 
 # the subset of _PLAIN_ASSETS whose executable bit must be preserved (the hooks
@@ -72,7 +75,7 @@ _PROTOCOL_SIDECAR = ".claude/sci-adk-research-protocol.md"
 _SETTINGS = ".claude/settings.json"
 
 # the persona key the fragment wants (D3 / Layer 3).
-_OUTPUT_STYLE = "researcher"
+_OUTPUT_STYLE = "science-orchestrator"
 # the two hook events the fragment wires (D3 / Layers 1-2).
 _HOOK_EVENTS = ("Stop", "UserPromptSubmit")
 
@@ -95,7 +98,8 @@ class InstallReport(BaseModel):
         already_current: assets already byte-identical -> no-op (idempotent path).
         skipped: assets present but DIFFERING -> left intact (non-clobbering path).
         conflicts: soft warnings the user must resolve manually (e.g. an existing
-            ``outputStyle`` that is not "researcher"); a conflict is NOT a failure.
+            ``outputStyle`` that is not "science-orchestrator"); a conflict is NOT
+            a failure.
         settings_changes: what the settings.json merge did (set outputStyle, added
             a hook, or "already current").
         dry_run: True iff nothing was written to disk.
@@ -231,7 +235,7 @@ def _merge_settings(
     Returns the merged dict. Rules (D3 / Layer 1-3):
 
     - ``outputStyle``:
-        absent       -> set it to the fragment's value ("researcher").
+        absent       -> set it to the fragment's value ("science-orchestrator").
         == fragment  -> no-op (idempotent).
         other value  -> DO NOT overwrite; record a CONFLICT (a soft warning).
     - ``hooks.<event>`` for each of Stop / UserPromptSubmit:
@@ -259,7 +263,7 @@ def _merge_settings(
     else:
         report.conflicts.append(
             f"outputStyle is '{cur_style}'; set it to '{want_style}' manually to "
-            "enable the researcher persona (left intact)"
+            "enable the science-orchestrator persona (left intact)"
         )
 
     # --- hooks ---
@@ -380,7 +384,7 @@ def install_session(target_dir: Path, *, dry_run: bool = False) -> InstallReport
     src_root = _templates_root()
     report = InstallReport(dry_run=dry_run)
 
-    # 1. the plain file assets (hooks, output style, /research command).
+    # 1. the plain file assets (hooks + the science-orchestrator output style).
     for rel in _PLAIN_ASSETS:
         _copy_nonclobber(
             src_root / rel,

@@ -11,9 +11,13 @@ The two load-bearing invariants are NON-CLOBBERING and IDEMPOTENT:
 
 These two properties are tested explicitly below (they are the whole point of the verb).
 The settings.json merge is the fiddly core: outputStyle is conflict-safe (an existing
-non-"researcher" value is preserved, reported as a conflict, never overwritten); the
-Stop / UserPromptSubmit hooks are matched by their ``command`` string and APPENDED to
-the user's existing event arrays (never reordered, never duplicated).
+non-"science-orchestrator" value is preserved, reported as a conflict, never
+overwritten); the Stop / UserPromptSubmit hooks are matched by their ``command`` string
+and APPENDED to the user's existing event arrays (never reordered, never duplicated).
+
+The ``/research`` command and the ``researcher`` persona were removed in the
+sci-adk-as-moai pivot: the sole installed persona is ``science-orchestrator`` and no
+command is installed by this verb (the ``/sci`` entry point lands in a later step).
 """
 
 from __future__ import annotations
@@ -28,13 +32,14 @@ import pytest
 from sci_adk.cli import main
 from sci_adk.init_session import InstallReport, install_session
 
-# The four plain file assets the kit installs (relative to the target dir). CLAUDE.md
+# The plain file assets the kit installs (relative to the target dir). CLAUDE.md
 # and settings.json have their own special handling and are asserted separately.
+# (The ``/research`` command was removed in the sci-adk-as-moai pivot; no command
+# is installed by this verb.)
 _FILE_ASSETS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
-    ".claude/output-styles/researcher/researcher.md",
-    ".claude/commands/research.md",
+    ".claude/output-styles/science-orchestrator/science-orchestrator.md",
 )
 _HOOK_SHELL_SCRIPTS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
@@ -80,7 +85,7 @@ def test_install_into_empty_dir_lays_down_every_asset(tmp_path):
 
     # settings.json created, persona + both hook events wired
     settings = _settings(tmp_path)
-    assert settings["outputStyle"] == "researcher"
+    assert settings["outputStyle"] == "science-orchestrator"
     stop_cmds = _stop_commands(settings)
     ups_cmds = _ups_commands(settings)
     assert any("stop-verify-gate.sh" in c for c in stop_cmds)
@@ -89,7 +94,7 @@ def test_install_into_empty_dir_lays_down_every_asset(tmp_path):
     # the report names what it installed (asset basenames appear somewhere)
     blob = "\n".join(report.installed + report.settings_changes)
     assert "settings.json" in "\n".join(report.settings_changes).lower() \
-        or settings["outputStyle"] == "researcher"
+        or settings["outputStyle"] == "science-orchestrator"
     assert any("stop-verify-gate.sh" in a for a in report.installed)
 
 
@@ -245,10 +250,10 @@ def test_dry_run_writes_nothing_but_reports_planned_actions(tmp_path):
 
 
 def test_existing_differing_asset_is_skipped_not_overwritten(tmp_path):
-    rel = ".claude/commands/research.md"
+    rel = ".claude/output-styles/science-orchestrator/science-orchestrator.md"
     p = tmp_path / rel
     p.parent.mkdir(parents=True)
-    user_content = "# my own research command, do not touch\n"
+    user_content = "# my own persona, do not touch\n"
     p.write_text(user_content, encoding="utf-8")
 
     report = install_session(tmp_path)
@@ -256,7 +261,7 @@ def test_existing_differing_asset_is_skipped_not_overwritten(tmp_path):
     # the user's file is untouched
     assert p.read_text(encoding="utf-8") == user_content
     # and it was reported as skipped
-    assert any("research.md" in s for s in report.skipped)
+    assert any("science-orchestrator.md" in s for s in report.skipped)
 
 
 # --------------------------------------------------------------------------- #

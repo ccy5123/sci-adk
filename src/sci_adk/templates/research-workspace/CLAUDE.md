@@ -39,10 +39,10 @@ Enforcement lives in the harness, not in memory (a prompt decays; a hook does no
   the session while any run with recorded belief fails `sci-adk verify`.
 - A **UserPromptSubmit hook** (`.claude/hooks/sci-adk/reanchor.sh`) re-injects
   this protocol + the current run's `sci-adk status` every turn.
-- The **`researcher` output style** (`.claude/output-styles/researcher/`) is the
-  always-on persona.
-- The **`/research` command** (`.claude/commands/research.md`) is the single
-  entry point — start research sessions there.
+- The **`science-orchestrator` output style**
+  (`.claude/output-styles/science-orchestrator/`) is the always-on persona.
+- A **`/sci` command** is the planned single entry point (forthcoming). Until it
+  ships, drive sessions directly under the persona contract.
 
 Both hooks degrade to no-op if `sci-adk` is not on PATH (a missing tool never
 bricks a session).
@@ -61,5 +61,6 @@ gates) — is a **separate repo**. Do not confuse them:
 
 ## Start here
 
-Run `/research <proposal.md | research goal>` to drive a session under the loop
-above. See the `researcher` output style for the full persona contract.
+Drive a session under the loop above for a proposal or research goal. See the
+`science-orchestrator` output style for the full persona contract. (The `/sci`
+entry-point command is forthcoming; until it ships, start sessions directly.)
