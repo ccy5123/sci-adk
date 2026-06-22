@@ -37,6 +37,19 @@ This repo contains **two coexisting systems** — confusing them breaks everythi
    - Governed by Spec/Evidence/Claim abstractions + tool policy
    - **Runtime research workflow rejects SW assumptions**
 
+### Scope of this rule (dev repo only)
+
+[HARD] This two-environment separation applies **only to this sci-adk dev
+repository** — the workspace where sci-adk source coexists with a MoAI build
+harness for building sci-adk itself. An external user who runs `sci-adk
+init-session <dir>` gets a workspace containing only sci-adk artifacts (no
+co-located sci-adk *source*); there is no second environment to confuse, and the
+relevant discipline is simply "this workspace runs sci-adk's record/belief +
+`verify` gate." The `init-session` marker guard (which blocks self-install into
+this dev repo) is unchanged.
+
+Source: design/sci-adk-as-moai.md §9.2 (two-environment scoping correction).
+
 ### Policy Compliance
 
 sci-adk's **research runtime** is governed by `design/tool-policy.md`:

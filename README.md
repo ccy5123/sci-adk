@@ -143,6 +143,37 @@ for claim in claims:
 
 ---
 
+## Operational Layer (research workspace)
+
+Beyond the CLI, sci-adk ships an **operational layer** that turns any directory into a
+disciplined research workspace. Install it with:
+
+```bash
+sci-adk init-session <dir>
+```
+
+This lays down (non-clobbering, idempotent):
+
+- **`science-orchestrator`** — the always-on persona: clarifies intent, delegates to
+  research workers, and gates every conclusion through `sci-adk verify`.
+- **Worker agents** — `manager-prereg` (author + freeze the Spec), `expert-experimentalist`
+  (run experiments → Evidence), `expert-statistician` (apply the `DecisionRule` → Claims),
+  `expert-writer` (render the paper), `expert-literature` (prior-art / novelty search).
+- **Guard agents** (advisory) — `evaluator-rigor` / `evaluator-novelty` /
+  `evaluator-validity`: soft pre-checks that catch problems early. They never grant a
+  pass — `sci-adk verify` (run by the Stop hook) is the sole verdict.
+- **`/sci` commands** — `plan` / `experiment` / `publish` / `verify` / `status`
+  (+ `replicate`, a v2 stub) routing through the `sci` orchestration Skill.
+- **Enforcement hooks** — a Stop gate (`sci-adk verify`) and a per-turn re-anchor.
+
+Workers fan out across the decomposed CLI verbs (`init-spec` / `amend-spec` / `execute` /
+`append-evidence` / `derive-claim` / `render`); `sci-adk run` remains the monolithic
+wrapper. The operational layer is **opt-in scaffolding over the same deterministic
+kernel** — it adds delegation and early checks, never a new verdict path. See
+`design/sci-adk-as-moai.md` for the full design.
+
+---
+
 ## Development Status
 
 ### Done (kernel spine)
@@ -288,6 +319,11 @@ This repo contains **two coexisting systems** — confusing them breaks everythi
    - `src/`, `design/`, `runs/`
    - Governed by Spec/Evidence/Claim abstractions and tool policy
    - The runtime research workflow rejects software-engineering truth assumptions
+
+This separation applies **only to this dev repository** (where sci-adk source
+coexists with a MoAI build harness). An external research workspace created by
+`sci-adk init-session <dir>` contains only sci-adk artifacts — there is no second
+environment to confuse. (design/sci-adk-as-moai.md §9.2)
 
 ---
 
