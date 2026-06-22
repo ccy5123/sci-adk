@@ -108,9 +108,17 @@ def run_checkpoint_loop(
         result = ResearchCompiler(workspace_dir=workspace, judge=judge).compile(
             proposal_text, spec=spec, experiment=effective_experiment
         )
-        # Persist produced Evidence so a re-run/re-entry can replay it (F5). Writing
-        # is idempotent: a replay shim returns the same items, and the on-disk file
-        # is keyed by the stable EvidenceItem.id.
+        # Evidence ORDER is consistent across iterations: compile() -> stage_execute now
+        # returns the CANONICAL sorted-by-filename order on EVERY pass -- iteration 1 (fresh
+        # experiment: stage_execute persists then re-reads sorted) and iteration 2+ (the
+        # F5 replay shim / stage_execute's reuse branch both read sorted). So
+        # result.evidence (hence the rendered draft.tex/si.tex) does not reorder between the
+        # first production pass and the later replay passes -- closing the prior
+        # iteration-1-vs-2+ ordering inconsistency at its root in stage_execute.
+        #
+        # Persist produced Evidence so a re-run/re-entry can replay it (F5). Writing is
+        # idempotent: stage_execute already persisted it; re-writing the same items (keyed
+        # by the stable EvidenceItem.id) overwrites byte-identical content.
         _persist_evidence(result.run_dir, result.evidence)
         unresolved = _unresolved(result.checkpoints, result.claims)
         last = LoopResult(

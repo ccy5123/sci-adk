@@ -118,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
              "LLM-generated. Omit -> no figures",
     )
 
+    # -- Step 2: the 6 standalone CLI verbs (design/sci-adk-as-moai.md §4.6). They
+    # decompose `run` into stage verbs for worker fan-out; `run` stays the chained
+    # wrapper. Each verb is a thin wrapper over one ResearchCompiler stage function.
+    _add_verb_parsers(sub)
+
     resolve = sub.add_parser(
         "resolve",
         help="drive the checkpoint loop over an existing run dir (re-enter with "
@@ -271,10 +276,152 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cmd_run(args: argparse.Namespace) -> int:
-    # Capabilities live in the adapter (kernel stays domain-free). The CLI is the
-    # composition root and MAY import the adapter; the kernel may not (design §3.3, F4).
-    # Importing the registry registers the built-in capabilities (T-1 first).
+def _add_verb_parsers(sub) -> None:
+    """Register the 6 standalone Step-2 verbs (design/sci-adk-as-moai.md §4.6).
+
+    Each verb is a thin CLI wrapper over one ``ResearchCompiler`` stage function. The
+    options that OVERLAP ``run`` (capability selection, ``--prose`` / ``--si-prose`` /
+    ``--figures``) keep identical surface + help so a worker that knows ``run`` knows the
+    verbs.
+    """
+    # init-spec: author + freeze a Spec into runs/<id>/ (spec.json + prior-work checkpoint).
+    init_spec = sub.add_parser(
+        "init-spec",
+        help="author + freeze a Spec from a proposal/capability into runs/<spec.id>/ "
+             "(writes spec.json + the Spec-time prior-work checkpoint). The first stage "
+             "of `run`",
+    )
+    init_spec.add_argument(
+        "proposal", nargs="?", default=None,
+        help="path to a four-pane proposal (.md/.txt); omit with --t1-demo/--capability "
+             "to use a capability's built-in demo Spec",
+    )
+    init_spec.add_argument(
+        "-o", "--output", default=".",
+        help="workspace root that holds runs/ (default: cwd)",
+    )
+    init_spec.add_argument("--spec-id", default=None, help="explicit Spec id")
+    init_spec.add_argument(
+        "--capability", default=None, metavar="ID",
+        help="select an adapter-served capability by id; with no proposal, uses that "
+             "capability's built-in demo Spec (capability travels only in Evidence "
+             "provenance, never the frozen Spec)",
+    )
+    init_spec.add_argument(
+        "--t1-demo", action="store_true",
+        help="alias for --capability t1-molecular-godel (demo mode): freeze the built-in "
+             "T-1 Spec",
+    )
+
+    # amend-spec: apply Spec.amend(rationale) + write the checkpoint receipt.
+    amend_spec = sub.add_parser(
+        "amend-spec",
+        help="amend the run's recorded Spec (version+1, S5) and record a human-approved "
+             "amendment checkpoint receipt. Wraps Spec.amend -- no new semantics",
+    )
+    amend_spec.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    amend_spec.add_argument(
+        "--rationale", required=True,
+        help="REQUIRED non-empty rationale for the amendment (S5: a Spec change is never "
+             "silent; the record must say why)",
+    )
+
+    # execute: run the Spec's experiment into Evidence (capability selection like run).
+    execute = sub.add_parser(
+        "execute",
+        help="execute the Spec's experiment into Evidence for an existing run dir "
+             "(resolves a capability like `run`). Honors F5 reuse: a second execute over "
+             "a populated run replays the recorded Evidence rather than re-running",
+    )
+    execute.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    execute.add_argument(
+        "--capability", default=None, metavar="ID",
+        help="select the adapter-served capability whose demo experiment to run "
+             "(must match the capability the Spec was authored for)",
+    )
+    execute.add_argument(
+        "--t1-demo", action="store_true",
+        help="alias for --capability t1-molecular-godel (demo mode)",
+    )
+    execute.add_argument(
+        "--force", action="store_true",
+        help="re-run the experiment even if Evidence already exists (F5: appends, never "
+             "overwrites the append-only log)",
+    )
+
+    # append-evidence: append one typed EvidenceItem from a JSON file.
+    append_ev = sub.add_parser(
+        "append-evidence",
+        help="append one typed EvidenceItem (from a JSON file) to the run's append-only "
+             "Evidence log (E1). The single-item complement to `execute`",
+    )
+    append_ev.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    append_ev.add_argument(
+        "--evidence", required=True, metavar="PATH",
+        help="path to a JSON file holding one EvidenceItem (its bears_on[] carries the "
+             "bearing on the hypotheses)",
+    )
+
+    # derive-claim: apply each DecisionRule to the recorded Evidence -> Claims.
+    derive_claim = sub.add_parser(
+        "derive-claim",
+        help="apply each hypothesis's frozen DecisionRule to the recorded Evidence -> "
+             "Claims (and surface the recording-type checkpoints). Reads spec + evidence "
+             "from the run dir; persists claims/",
+    )
+    derive_claim.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+
+    # render: compile the paper/ artifacts from the recorded spec/evidence/claims.
+    render = sub.add_parser(
+        "render",
+        help="render the paper/ artifacts (draft.tex + si.tex + figures) from the "
+             "recorded spec/evidence/claims. The final stage of `run`",
+    )
+    render.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    render.add_argument(
+        "--prose", default=None, metavar="PATH",
+        help="optional JSON file mapping {abstract, introduction, discussion} -> text; "
+             "agent-authored narrative injected verbatim into the LaTeX draft (never "
+             "LLM-generated). Same as `run --prose`",
+    )
+    render.add_argument(
+        "--si-prose", default=None, metavar="PATH",
+        help="optional JSON file mapping {overview, notes} -> text wrapping the SI record "
+             "dump (never LLM-generated). Same as `run --si-prose`",
+    )
+    render.add_argument(
+        "--figures", default=None, metavar="PATH",
+        help="optional JSON file: a PaperFigures object or a bare list of figure specs "
+             "(native or image). Same as `run --figures`",
+    )
+
+
+class _CliError(Exception):
+    """A friendly CLI error carrying its intended exit code (2 = usage/input error).
+
+    Lets the shared option loaders signal a user-facing failure without each returning
+    a sentinel; the verb handlers catch it, print ``message`` to stderr, and return
+    ``exit_code``. This keeps the loaders reusable across ``run`` and the Step-2 verbs.
+    """
+
+    def __init__(self, message: str, exit_code: int = 2) -> None:
+        super().__init__(message)
+        self.message = message
+        self.exit_code = exit_code
+
+
+def _resolve_capability_selection(args: argparse.Namespace):
+    """Resolve (spec, experiment, proposal_text) from --capability / --t1-demo / proposal.
+
+    The shared capability-selection logic used by BOTH ``run`` and ``init-spec`` (and the
+    experiment half by ``execute``). Capabilities live in the adapter (kernel stays
+    domain-free); the CLI is the composition root and MAY import the adapter (design §3.3,
+    F4). Importing the registry registers the built-in capabilities (T-1 first).
+
+    Returns ``(spec, experiment, proposal_text)`` where ``spec``/``experiment`` are None on
+    the proposal path. Raises :class:`_CliError` on any usage error (unknown capability,
+    proposal+capability combo, missing proposal, missing file).
+    """
     proposal_text = ""
     spec = None
     experiment = None
@@ -284,88 +431,81 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # silently pick one. The alias target is the adapter's own constant (imported here,
     # in the composition root) -- no duplicated magic string.
     capability_id = args.capability
-    if args.t1_demo:
+    if getattr(args, "t1_demo", False):
         from sci_adk.adapter.t1_capability import T1_CAPABILITY_ID as _t1_id
 
         if capability_id is not None and capability_id != _t1_id:
-            print(
-                f"error: --t1-demo is an alias for --capability {_t1_id}; "
-                f"it conflicts with --capability {capability_id} (choose one)",
-                file=sys.stderr,
+            raise _CliError(
+                f"--t1-demo is an alias for --capability {_t1_id}; "
+                f"it conflicts with --capability {capability_id} (choose one)"
             )
-            return 2
         capability_id = _t1_id
 
+    proposal = getattr(args, "proposal", None)
     if capability_id is not None:
         from sci_adk.adapter.registry import resolve
 
         try:
             provider = resolve(capability_id)
         except ValueError as e:
-            print(f"error: {e}", file=sys.stderr)
-            return 2
+            raise _CliError(str(e))
 
         # Minimal scope: a selected capability runs its built-in DEMO (Spec + options),
         # i.e. the no-proposal path. Authoring an experiment FROM an arbitrary proposal
         # is the agent-authored capability path (design §3.2) -- not built here, and not
         # the same as feeding demo data to a proposal's Spec. So proposal + capability is
         # rejected rather than silently substituting demo molecules.
-        if args.proposal:
-            print(
-                f"error: --capability {capability_id} runs the capability's built-in "
+        if proposal:
+            raise _CliError(
+                f"--capability {capability_id} runs the capability's built-in "
                 f"demo; it cannot be combined with a proposal path yet (proposal-driven "
-                f"experiment authoring is not implemented)",
-                file=sys.stderr,
+                f"experiment authoring is not implemented)"
             )
-            return 2
         if not provider.supports_demo:
-            print(
-                f"error: capability '{capability_id}' has no built-in demo; "
-                f"nothing to run without a proposal",
-                file=sys.stderr,
+            raise _CliError(
+                f"capability '{capability_id}' has no built-in demo; "
+                f"nothing to run without a proposal"
             )
-            return 2
-        spec = provider.demo_spec(args.spec_id or "t1-godel")
+        spec = provider.demo_spec(getattr(args, "spec_id", None) or "t1-godel")
         experiment = provider.experiment_fn(**provider.demo_options())
     else:
-        if not args.proposal:
-            print(
-                "error: provide a proposal path, --t1-demo, or --capability <id>",
-                file=sys.stderr,
+        if not proposal:
+            raise _CliError(
+                "provide a proposal path, --t1-demo, or --capability <id>"
             )
-            return 2
-        proposal_path = Path(args.proposal)
+        proposal_path = Path(proposal)
         if not proposal_path.exists():
-            print(f"error: proposal not found: {proposal_path}", file=sys.stderr)
-            return 2
+            raise _CliError(f"proposal not found: {proposal_path}")
         proposal_text = proposal_path.read_text(encoding="utf-8")
 
-    # Optional agent-authored prose (abstract/introduction/discussion) injected into
-    # both drafts. Loaded from a JSON file -- this is input, NOT autonomous generation
-    # (sci-adk never calls an LLM to write it).
+    return spec, experiment, proposal_text
+
+
+def _load_prose(args: argparse.Namespace):
+    """Load optional --prose / --si-prose / --figures from JSON files (shared by run +
+    render).
+
+    Each is agent-authored INPUT, never autonomous generation (sci-adk never calls an LLM
+    to write it). Returns ``(prose, si_prose, figures)`` -- each None when its flag is
+    absent. Raises :class:`_CliError` on a missing file or invalid JSON/spec.
+    """
     prose = None
-    if args.prose:
+    if getattr(args, "prose", None):
         prose_path = Path(args.prose)
         if not prose_path.exists():
-            print(f"error: prose file not found: {prose_path}", file=sys.stderr)
-            return 2
+            raise _CliError(f"prose file not found: {prose_path}")
         from sci_adk.render.prose import PaperProse
 
         try:
             prose = PaperProse.model_validate_json(prose_path.read_text(encoding="utf-8"))
         except ValueError as e:
-            print(f"error: invalid prose JSON ({prose_path}): {e}", file=sys.stderr)
-            return 2
+            raise _CliError(f"invalid prose JSON ({prose_path}): {e}")
 
-    # Optional agent-authored SI prose (overview/notes) wrapping the record dump in
-    # si.tex. Loaded from a JSON file -- input, NOT autonomous generation (sci-adk never
-    # calls an LLM to write it; the record dump stays the spine). Mirrors --prose.
     si_prose = None
-    if args.si_prose:
+    if getattr(args, "si_prose", None):
         si_prose_path = Path(args.si_prose)
         if not si_prose_path.exists():
-            print(f"error: si-prose file not found: {si_prose_path}", file=sys.stderr)
-            return 2
+            raise _CliError(f"si-prose file not found: {si_prose_path}")
         from sci_adk.render.prose import SIProse
 
         try:
@@ -373,20 +513,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 si_prose_path.read_text(encoding="utf-8")
             )
         except ValueError as e:
-            print(f"error: invalid si-prose JSON ({si_prose_path}): {e}", file=sys.stderr)
-            return 2
+            raise _CliError(f"invalid si-prose JSON ({si_prose_path}): {e}")
 
-    # Optional agent-authored figure specs (paper-figures Phase 1/4). Accepts either a
-    # PaperFigures object ({"figures": [...]}) or a bare list of figure specs (native or
-    # image, discriminated on "kind") -- both normalize to a figure list. Input, NOT
-    # autonomous generation (no LLM at render time; native y is pulled FROM the recorded
-    # Evidence, image specs reference a co-located source file).
     figures = None
-    if args.figures:
+    if getattr(args, "figures", None):
         figures_path = Path(args.figures)
         if not figures_path.exists():
-            print(f"error: figures file not found: {figures_path}", file=sys.stderr)
-            return 2
+            raise _CliError(f"figures file not found: {figures_path}")
         from pydantic import TypeAdapter
 
         from sci_adk.render.figures import AnyFigure, PaperFigures
@@ -395,8 +528,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as e:
-            print(f"error: invalid figures JSON ({figures_path}): {e}", file=sys.stderr)
-            return 2
+            raise _CliError(f"invalid figures JSON ({figures_path}): {e}")
         try:
             if isinstance(parsed, list):
                 # A bare list normalizes through the discriminated AnyFigure union, so a
@@ -406,8 +538,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
             else:
                 figures = list(PaperFigures.model_validate(parsed).figures)
         except ValueError as e:
-            print(f"error: invalid figures spec ({figures_path}): {e}", file=sys.stderr)
-            return 2
+            raise _CliError(f"invalid figures spec ({figures_path}): {e}")
+
+    return prose, si_prose, figures
+
+
+def _load_run_spec(run_dir: Path):
+    """Load + validate ``run_dir/spec.json`` (shared by the run-dir verbs).
+
+    Returns the Spec. Raises :class:`_CliError` (exit 2) when ``spec.json`` is absent --
+    the same friendly message the other run-dir verbs print.
+    """
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        raise _CliError(f"no spec.json found in run dir: {run_dir}")
+    return Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    try:
+        spec, experiment, proposal_text = _resolve_capability_selection(args)
+        prose, si_prose, figures = _load_prose(args)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
 
     compiler = ResearchCompiler(workspace_dir=Path(args.output))
     # Evidence-validity halt (design/evidence-validity.md E3): an inadequate record
@@ -438,6 +592,233 @@ def _cmd_run(args: argparse.Namespace) -> int:
     fc = result.figure_consistency
     if fc is not None and not fc.ok:
         # Non-blocking prose<->figure ref report (D4): a warning, not a gate.
+        print("  figure consistency warnings (non-blocking):")
+        if fc.dangling:
+            print(f"    - dangling \\ref (no such figure): {', '.join(fc.dangling)}")
+        if fc.orphan:
+            print(f"    - orphan figure (never \\ref'd): {', '.join(fc.orphan)}")
+    return 0
+
+
+# -- Step 2 verbs (design/sci-adk-as-moai.md §4.6): each is a thin wrapper over one
+# ResearchCompiler stage function. `run` remains the chained wrapper.
+
+def _cmd_init_spec(args: argparse.Namespace) -> int:
+    """Author + freeze a Spec into runs/<spec.id>/ (stage 1 of `run`).
+
+    Resolves the Spec from a capability demo or a proposal (the shared
+    ``_resolve_capability_selection``), then runs ``ResearchCompiler.stage_init_spec`` --
+    writing spec.json + the Spec-time prior-work checkpoint.
+    """
+    try:
+        spec, _experiment, proposal_text = _resolve_capability_selection(args)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
+
+    compiler = ResearchCompiler(workspace_dir=Path(args.output))
+    frozen = compiler.stage_init_spec(
+        spec=spec, proposal_text=proposal_text, spec_id=args.spec_id
+    )
+    run_dir = Path(args.output) / "runs" / frozen.id
+    print(f"init-spec: froze Spec '{frozen.id}' (v{frozen.version}) -> {run_dir}")
+    print(f"  spec: {run_dir / 'spec.json'}")
+    print(f"  prior-work checkpoint: {run_dir / 'checkpoints' / 'prior_work.json'}")
+    print(f"  next: sci-adk execute {run_dir} [--capability <id> | --t1-demo]")
+    return 0
+
+
+def _cmd_amend_spec(args: argparse.Namespace) -> int:
+    """Amend the run's recorded Spec + record the checkpoint receipt (S5).
+
+    Wraps ``loop.amend_spec.amend_spec`` (which calls the existing ``Spec.amend`` -- no
+    new semantics). A missing run dir / spec.json -> exit 2; a blank --rationale ->
+    exit 2 with the S5 message (re-raised ValueError from Spec.amend).
+    """
+    run_dir = Path(args.run_dir)
+    from sci_adk.loop.amend_spec import amend_spec
+
+    try:
+        new_spec, receipt = amend_spec(run_dir, rationale=args.rationale)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        # Blank rationale (S5): a Spec amendment is never silent -- the record must say why.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    print(f"amend-spec: Spec '{new_spec.id}' amended "
+          f"v{receipt.prior_version} -> v{receipt.new_version}")
+    print(f"  rationale: {receipt.rationale}")
+    print(f"  receipt: {run_dir / 'checkpoints' / f'amendment-v{receipt.new_version}.json'}")
+    print(f"  spec.json now holds the amended (v{new_spec.version}) frozen Spec")
+    return 0
+
+
+def _cmd_execute(args: argparse.Namespace) -> int:
+    """Execute the run's experiment into Evidence (stage 2 of `run`).
+
+    Reads the recorded Spec from the run dir, resolves the capability's experiment (the
+    SAME selection ``run`` uses), and runs ``ResearchCompiler.stage_execute``. Honors F5
+    reuse (a second execute over a populated run replays unless --force). The capability
+    is HOW, not WHAT -- it is not in the frozen Spec, so it is selected here just as `run`
+    does, and must match what the Spec was authored for.
+    """
+    run_dir = Path(args.run_dir)
+    # workspace root holds runs/ (run_dir is <workspace>/runs/<spec.id>).
+    workspace = run_dir.parent.parent
+    try:
+        spec = _load_run_spec(run_dir)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
+
+    # Resolve the capability's experiment ONLY when one is selected. Unlike `run`, a bare
+    # `execute` (no capability) is legitimate: with recorded Evidence it replays (F5), so
+    # "no capability" maps to experiment=None rather than a usage error. The Spec is
+    # already frozen on disk, so only the experiment half of the selection is needed.
+    experiment = None
+    if args.capability is not None or args.t1_demo:
+        try:
+            _spec, experiment, _proposal = _resolve_capability_selection(args)
+        except _CliError as e:
+            print(f"error: {e.message}", file=sys.stderr)
+            return e.exit_code
+
+    from sci_adk.core.validity import ValidityHalt
+
+    compiler = ResearchCompiler(workspace_dir=workspace)
+    try:
+        evidence = compiler.stage_execute(
+            spec, experiment=experiment, force=args.force
+        )
+    except ValidityHalt as e:
+        print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
+        return 2
+
+    if not evidence:
+        print(f"error: no experiment selected and no recorded Evidence to reuse for "
+              f"'{spec.id}'; pass --t1-demo / --capability <id> (or --force to re-run)",
+              file=sys.stderr)
+        return 2
+    print(f"execute: produced {len(evidence)} Evidence item(s) for Spec '{spec.id}' "
+          f"-> {run_dir / 'evidence'}")
+    print(f"  next: sci-adk derive-claim {run_dir}")
+    return 0
+
+
+def _cmd_append_evidence(args: argparse.Namespace) -> int:
+    """Append one typed EvidenceItem (from a JSON file) to the run's log (E1).
+
+    The single-item complement to ``execute``. Loads the EvidenceItem via
+    ``EvidenceItem.model_validate`` and runs ``ResearchCompiler.stage_append_evidence``.
+    """
+    run_dir = Path(args.run_dir)
+    workspace = run_dir.parent.parent
+    try:
+        spec = _load_run_spec(run_dir)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
+
+    ev_path = Path(args.evidence)
+    if not ev_path.exists():
+        print(f"error: evidence file not found: {ev_path}", file=sys.stderr)
+        return 2
+
+    from sci_adk.core.evidence import EvidenceItem
+
+    try:
+        item = EvidenceItem.model_validate(
+            json.loads(ev_path.read_text(encoding="utf-8"))
+        )
+    except json.JSONDecodeError as e:
+        print(f"error: invalid evidence JSON ({ev_path}): {e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(f"error: invalid EvidenceItem ({ev_path}): {e}", file=sys.stderr)
+        return 2
+
+    compiler = ResearchCompiler(workspace_dir=workspace)
+    compiler.stage_append_evidence(spec, item)
+    print(f"append-evidence: appended Evidence '{item.id}' ({item.kind.value}) "
+          f"to Spec '{spec.id}' -> {run_dir / 'evidence' / f'{item.id}.json'}")
+    print(f"  next: sci-adk derive-claim {run_dir}")
+    return 0
+
+
+def _cmd_derive_claim(args: argparse.Namespace) -> int:
+    """Apply each DecisionRule to the recorded Evidence -> Claims (stage of `run`).
+
+    Reads spec + evidence from the run dir and runs ``ResearchCompiler.stage_derive_claim``
+    (which persists claims/ and surfaces the recording-type checkpoints). An evidence-
+    validity halt (E3) -- e.g. synthetic data backing an empirical claim -- surfaces as a
+    friendly non-zero exit, never a traceback and never a spurious "supported" line.
+    """
+    run_dir = Path(args.run_dir)
+    workspace = run_dir.parent.parent
+    try:
+        spec = _load_run_spec(run_dir)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
+
+    from sci_adk.core.validity import ValidityHalt
+
+    compiler = ResearchCompiler(workspace_dir=workspace)
+    try:
+        claims, checkpoints, _contested, _novelty = compiler.stage_derive_claim(spec)
+    except ValidityHalt as e:
+        print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
+        return 2
+
+    print(f"derive-claim: derived {len(claims)} Claim(s) for Spec '{spec.id}' "
+          f"-> {run_dir / 'claims'}")
+    for claim in claims:
+        print(f"    - {claim.answers}: {claim.status.value}  "
+              f"({claim.confidence.basis[:70]})")
+    if checkpoints:
+        print(f"  agent checkpoints ({len(checkpoints)}) -> "
+              f"{run_dir / 'checkpoints.md'}:")
+        for c in checkpoints:
+            print(f"    - {c.hypothesis_id} ({c.kind}): {c.expression[:60]}")
+    print(f"  next: sci-adk render {run_dir}")
+    return 0
+
+
+def _cmd_render(args: argparse.Namespace) -> int:
+    """Render the paper/ artifacts from the recorded spec/evidence/claims (final stage).
+
+    Reads spec + evidence + claims from the run dir and runs
+    ``ResearchCompiler.stage_render`` with any agent-authored --prose / --si-prose /
+    --figures (the same options as `run`).
+    """
+    run_dir = Path(args.run_dir)
+    workspace = run_dir.parent.parent
+    try:
+        spec = _load_run_spec(run_dir)
+        prose, si_prose, figures = _load_prose(args)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
+
+    compiler = ResearchCompiler(workspace_dir=workspace)
+    try:
+        paper_path, si_path, figure_consistency = compiler.stage_render(
+            spec, prose=prose, si_prose=si_prose, figures=figures
+        )
+    except ValueError as e:
+        # A missing image-figure source / malformed figure spec fails loud (record
+        # fidelity) -- surface friendly, never a raw traceback.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    print(f"render: compiled paper for Spec '{spec.id}' -> {paper_path}")
+    if si_path is not None:
+        print(f"  supporting information: {si_path}")
+    fc = figure_consistency
+    if fc is not None and not fc.ok:
         print("  figure consistency warnings (non-blocking):")
         if fc.dangling:
             print(f"    - dangling \\ref (no such figure): {', '.join(fc.dangling)}")
@@ -800,6 +1181,18 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
         return _cmd_run(args)
+    if args.command == "init-spec":
+        return _cmd_init_spec(args)
+    if args.command == "amend-spec":
+        return _cmd_amend_spec(args)
+    if args.command == "execute":
+        return _cmd_execute(args)
+    if args.command == "append-evidence":
+        return _cmd_append_evidence(args)
+    if args.command == "derive-claim":
+        return _cmd_derive_claim(args)
+    if args.command == "render":
+        return _cmd_render(args)
     if args.command == "resolve":
         return _cmd_resolve(args)
     if args.command == "verify":

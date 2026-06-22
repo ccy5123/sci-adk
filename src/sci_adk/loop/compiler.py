@@ -194,6 +194,82 @@ class ResearchCompiler:
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
         """
+        # @MX:ANCHOR: [AUTO] the end-to-end compile is now literally the §4.6 stage chain
+        #   (init_spec -> execute -> derive_claim -> render). `sci-adk run` and the 6
+        #   standalone CLI verbs both run THESE stage functions, so there is one source of
+        #   truth for each stage and `run` == the verb chain by construction.
+        # @MX:REASON: [AUTO] every caller -- CLI run/verbs, checkpoint_loop, the adapter
+        #   registry tests, and the byte-identity regression test -- depends on this chain
+        #   producing exactly what the per-verb path produces. Diverging a stage from what
+        #   the chain runs would silently desync `run` from the per-verb path (the
+        #   decomposition contract) and break byte-identity.
+        spec = self.stage_init_spec(
+            spec=spec, proposal_text=proposal_text, spec_id=spec_id
+        )
+
+        # `run` threads the experiment's evidence in memory, but `stage_execute` returns it
+        # in the CANONICAL (sorted-by-filename) order -- the SAME order the standalone
+        # verbs get when they reload from disk. So the chain and the verb path render
+        # Evidence in one identical order (run == verb chain), proven by the multi-evidence
+        # byte-identity regression test. NOTE: on multi-evidence runs this canonical order
+        # may differ from the pre-decomposition monolith's production order; that monolith
+        # order was never canonical (verify/digest/F5-replay already sorted), so unifying on
+        # the sorted order is the minimal-divergence fix.
+        evidence = self.stage_execute(spec, experiment=experiment)
+
+        claims, checkpoints, contested_checkpoints, novelty_checkpoints = (
+            self.stage_derive_claim(spec, evidence=evidence)
+        )
+
+        paper_path, si_path, figure_consistency = self.stage_render(
+            spec,
+            evidence=evidence,
+            claims=claims,
+            checkpoints=checkpoints,
+            prose=prose,
+            si_prose=si_prose,
+            figures=figures,
+        )
+
+        return CompileResult(
+            spec=spec,
+            evidence=evidence,
+            claims=claims,
+            checkpoints=checkpoints,
+            run_dir=self.workspace_dir / "runs" / spec.id,
+            paper_path=paper_path,
+            si_path=si_path,
+            prior_work_checkpoint=prior_work_checkpoint(spec),
+            contested_checkpoints=contested_checkpoints,
+            novelty_checkpoints=novelty_checkpoints,
+            figure_consistency=figure_consistency,
+        )
+
+    # -- stage functions (design/sci-adk-as-moai.md §4.6) -------------------
+    #
+    # Each stage operates on the run directory, reads its prior state from disk when
+    # not handed an in-memory value, performs its step, and persists its output. The
+    # chained ``compile`` above threads in-memory values between stages (so ``run``
+    # is byte-identical to the pre-decomposition monolith); the standalone CLI verbs
+    # call ONE stage each and rely on the disk round-trip. The two paths run the SAME
+    # stage code, so there is no second implementation to drift.
+
+    def stage_init_spec(
+        self,
+        *,
+        spec: Optional[Spec] = None,
+        proposal_text: str = "",
+        spec_id: Optional[str] = None,
+    ) -> Spec:
+        """Author/accept + freeze a Spec, then persist ``spec.json`` + the prior-work
+        checkpoint (the ``init-spec`` verb's stage).
+
+        When ``spec`` is supplied it is used verbatim (a capability adapter's pre-built
+        Spec, bypassing the heuristic parser); otherwise the four-pane ``proposal_text``
+        is parsed. The frozen Spec is written to ``runs/<spec.id>/spec.json`` and the
+        Spec-time prior-work reminder to ``checkpoints/prior_work.json`` (a recording-type
+        reminder, not a judgment -- design/literature-acquisition.md).
+        """
         spec = spec if spec is not None else ProposalParser().parse(
             proposal_text, spec_id=spec_id
         )
@@ -206,21 +282,135 @@ class ResearchCompiler:
         # judgment (no verdict trail, not hypothesis-bound); it stays open until a
         # prior-work decision (searched -> LITERATURE / skipped -> PRIOR_WORK_DECISION)
         # is recorded in the single Evidence log.
-        pw_checkpoint = prior_work_checkpoint(spec)
-        self._save_prior_work_checkpoint(pw_checkpoint, run_dir)
+        self._save_prior_work_checkpoint(prior_work_checkpoint(spec), run_dir)
+        return spec
 
-        evidence: List[EvidenceItem] = []
-        if experiment is not None:
-            produced = experiment(spec, self.workspace_dir)
-            evidence = list(produced) if produced else []
+    def stage_execute(
+        self,
+        spec: Spec,
+        *,
+        experiment: Optional[ExperimentFn] = None,
+        force: bool = False,
+    ) -> List[EvidenceItem]:
+        """Execute the Spec's experiment hook into Evidence (the ``execute`` verb's stage).
+
+        Honors the F5 reuse contract (design/rigor-shell-architecture.md §5, the same
+        rule ``run_checkpoint_loop`` uses): when Evidence already exists on disk for this
+        run and ``force`` is False, the recorded Evidence is REPLAYED rather than
+        re-executing the experiment -- so a re-run is idempotent and the append-only log
+        is not duplicated (E1). When no Evidence exists yet, the supplied ``experiment``
+        is run (the t1 experiment self-persists each item; capabilities that do not
+        self-persist still get a replayable record via :meth:`stage_append_evidence`'s
+        writer in the verb path). An absent experiment with no recorded Evidence yields
+        an empty list (the proposal-only path).
+
+        CANONICAL ORDER (the byte-identity fix): the returned list is ALWAYS in the
+        canonical on-disk order -- ``sorted(evidence_dir.glob("*.json"))`` -- regardless of
+        the experiment's production order. This is the SAME order ``_load_existing_evidence``
+        (F5 replay), ``verify``, ``record_digest``, and ``run_checkpoint_loop`` iteration
+        2+ already use, so adopting it for the FIRST pass too means ``compile``/``run``
+        (which thread this list) and the standalone verbs (which reload from disk) render
+        Evidence in ONE identical order by construction. Production order is NOT canonical:
+        sorting by ``created_at`` would break on equal/sub-second-tied timestamps (e.g. a
+        single experiment call), so the deterministic filename sort is the robust invariant.
+
+        The chained ``compile`` passes the experiment directly (first run -> fresh
+        Evidence); the standalone ``execute`` verb relies on the SAME F5 reuse so a
+        second invocation over a populated run dir replays instead of re-generating.
+        """
+        # @MX:NOTE: [AUTO] F5 reuse is silent: when evidence/ is populated and force is
+        #   False this REPLAYS the recorded Evidence and never calls `experiment`. This is
+        #   why `run` over a pre-seeded run dir reproduces a prior run byte-for-byte
+        #   (shared with run_checkpoint_loop's reuse), and why a bare `execute` with no
+        #   capability still works when Evidence exists.
+        # @MX:ANCHOR: [AUTO] this stage is the SINGLE point that defines the canonical
+        #   Evidence ORDER for the whole pipeline: it always returns the sorted-by-filename
+        #   disk order, so `run`/`compile` and the standalone verbs render Evidence in the
+        #   identical order (no production-vs-sorted divergence).
+        # @MX:REASON: [AUTO] compile(), run_checkpoint_loop iteration 1, and the execute
+        #   verb all flow through here; the renderers (render_paper_latex / render_si_latex)
+        #   iterate the supplied order. If this returned production order on the first pass
+        #   but the verbs/verify/replay read sorted order, draft.tex + si.tex would reorder
+        #   between `run` and the verb chain on multi-evidence runs -- the exact regression
+        #   this fix closes. The order MUST match `_load_existing_evidence`'s sorted glob.
+        from sci_adk.loop.checkpoint_loop import (
+            _load_existing_evidence,
+            _persist_evidence,
+        )
+
+        run_dir = self.workspace_dir / "runs" / spec.id
+        if not force:
+            existing = _load_existing_evidence(run_dir)
+            if existing:
+                return existing
+        if experiment is None:
+            return []
+        produced = experiment(spec, self.workspace_dir)
+        evidence = list(produced) if produced else []
+        # Persist so a downstream verb (derive-claim/render) can reload it. Idempotent:
+        # each item is keyed by its stable id (a self-persisting experiment overwrites
+        # byte-identical content; a non-self-persisting one gets its record here).
+        _persist_evidence(run_dir, evidence)
+        # Re-read in CANONICAL (sorted) order so the in-memory return == the disk order the
+        # verbs/verify/replay see -- this is what makes `run` == the verb chain on
+        # multi-evidence runs. A no-op for the common single-item run.
+        return _load_existing_evidence(run_dir)
+
+    def stage_append_evidence(
+        self, spec: Spec, item: EvidenceItem
+    ) -> EvidenceItem:
+        """Append one typed ``EvidenceItem`` to the run's append-only log (the
+        ``append-evidence`` verb's stage).
+
+        The single-item complement to :meth:`stage_execute`: a worker that produced
+        Evidence out-of-band (its own tool, a manual record) appends it here. The item
+        is written to ``runs/<spec.id>/evidence/<id>.json`` via the shared persister
+        (E1 append-only; keyed by the stable ``item.id``). The chained ``compile`` does
+        not call this -- its experiment IS the append -- so it never double-writes.
+        """
+        from sci_adk.loop.checkpoint_loop import _persist_evidence
+
+        run_dir = self.workspace_dir / "runs" / spec.id
+        _persist_evidence(run_dir, [item])
+        return item
+
+    def stage_derive_claim(
+        self,
+        spec: Spec,
+        *,
+        evidence: Optional[Sequence[EvidenceItem]] = None,
+    ) -> tuple[
+        List[Claim],
+        List["Checkpoint"],
+        List[ContestedCheckpoint],
+        List[NoveltyCheckpoint],
+    ]:
+        """Apply each hypothesis's frozen DecisionRule to the Evidence -> Claims, and
+        collect the recording-type checkpoints (the ``derive-claim`` verb's stage).
+
+        Loads the Evidence from disk when ``evidence`` is not supplied (the verb path);
+        the chained ``compile`` passes the in-memory list (byte-identical to the
+        monolith). Runs the ``ClaimUpdater`` (which persists ``claims/``), then collects:
+          - the proof/qualitative judge checkpoints (persisted to ``checkpoints/``);
+          - the CONTESTED recording reminders (the Medium discovery trigger);
+          - the novelty recording reminders (the High discovery trigger, 2-kind).
+
+        The contested/novelty reasons are derived from the SAME ``evidence`` the claims
+        were derived from (not a second disk read) so the surfaced messages and the
+        persisted claim statuses agree in this single pass.
+        """
+        evidence_list = (
+            list(evidence) if evidence is not None
+            else self._load_evidence(spec)
+        )
 
         claims: List[Claim] = []
-        if evidence:
+        if evidence_list:
             claims = ClaimUpdater(
                 spec, self.workspace_dir, judge=self.judge
-            ).update_claims_from_evidence(evidence)
+            ).update_claims_from_evidence(evidence_list)
 
-        checkpoints = self._collect_checkpoints(spec, evidence)
+        checkpoints = self._collect_checkpoints(spec, evidence_list)
 
         # Contested surfacing (the Medium discovery trigger,
         # design/literature-acquisition.md): for every hypothesis whose freshly
@@ -236,14 +426,58 @@ class ResearchCompiler:
         # this is a recording reminder, not a gate. ``novelty_open`` keys on the
         # novelty claim ClaimUpdater just persisted, so a re-compile after a found_nothing
         # decision (claim SUPPORTED) surfaces nothing. The reason is derived from the SAME
-        # in-memory ``evidence`` the claim was derived from (NOT disk) so the message and
-        # the claim status agree even in this single pass.
-        novelty_checkpoints = self._collect_novelty_checkpoints(spec, claims, evidence)
+        # ``evidence`` the claim was derived from (NOT a second disk read) so the message
+        # and the claim status agree even in this single pass.
+        novelty_checkpoints = self._collect_novelty_checkpoints(
+            spec, claims, evidence_list
+        )
+
+        if checkpoints:
+            self._save_checkpoints(checkpoints, run_dir=self.workspace_dir / "runs" / spec.id)
+
+        return claims, checkpoints, contested_checkpoints, novelty_checkpoints
+
+    def stage_render(
+        self,
+        spec: Spec,
+        *,
+        evidence: Optional[Sequence[EvidenceItem]] = None,
+        claims: Optional[Sequence[Claim]] = None,
+        checkpoints: Optional[Sequence["Checkpoint"]] = None,
+        prose: Optional[PaperProse] = None,
+        si_prose: Optional[SIProse] = None,
+        figures: Optional[Sequence[AnyFigure]] = None,
+    ) -> tuple[Path, Optional[Path], Optional[FigureConsistencyReport]]:
+        """Render the ``paper/`` artifacts -- ``draft.tex`` + ``si.tex`` + figures + bib
+        (the ``render`` verb's stage).
+
+        Loads Evidence, Claims, and the judge checkpoints from disk when not supplied
+        (the verb path); the chained ``compile`` passes the in-memory values
+        (byte-identical to the monolith). The render itself is pure (data in, string
+        out); this stage is the composition root that locates the citations + bib and
+        co-locates figure/bib sources into ``paper/`` for Overleaf self-containment.
+
+        Returns ``(paper_path, si_path, figure_consistency)``.
+        """
+        evidence_list = (
+            list(evidence) if evidence is not None
+            else self._load_evidence(spec)
+        )
+        claims_list = (
+            list(claims) if claims is not None
+            else self._load_claims(spec)
+        )
+        checkpoints_list = (
+            list(checkpoints) if checkpoints is not None
+            else self._load_checkpoints(spec, evidence_list)
+        )
+
+        run_dir = self.workspace_dir / "runs" / spec.id
 
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
-        pending_dicts = [c.__dict__ for c in checkpoints]
-        cited_dois = self._gather_cited_dois(evidence, run_dir)
+        pending_dicts = [c.__dict__ for c in checkpoints_list]
+        cited_dois = self._gather_cited_dois(evidence_list, run_dir)
 
         paper_dir = run_dir / "paper"
         paper_dir.mkdir(parents=True, exist_ok=True)
@@ -263,7 +497,7 @@ class ResearchCompiler:
         # body-reference figure numbering (Figure 1 = first-\ref'd) that the co-located
         # fig<N> filenames AND the SI must agree with.
         paper_tex = render_paper_latex(
-            spec, claims, evidence,
+            spec, claims_list, evidence_list,
             pending=pending_dicts,
             prose=prose,
             cited_dois=cited_dois,
@@ -288,7 +522,7 @@ class ResearchCompiler:
         # numeric data tables, ALL figures, the verdicts + frozen decision rules). It
         # uploads alongside draft.tex as a second compilable document in paper/.
         #
-        # digest=None on purpose: at COMPILE time the evidence is NOT yet persisted to
+        # digest=None on purpose: at COMPILE time the evidence may not yet be persisted to
         # disk (the loop persists AFTER compile), so record_digest(run_dir) here would
         # digest an INCOMPLETE run dir. So Phase 2 does NOT embed the digest -- the SI's
         # integrity section points to `sci-adk verify` (which recomputes the digest over
@@ -302,8 +536,8 @@ class ResearchCompiler:
         # references the same paper/figures/fig<N> files the compiler co-located above --
         # one shared file set for both standalone documents.
         si_tex = render_si_latex(
-            spec, claims, evidence, figures=figures, digest=None, prose=si_prose,
-            paper_body=paper_tex,
+            spec, claims_list, evidence_list, figures=figures, digest=None,
+            prose=si_prose, paper_body=paper_tex,
         )
         si_path = paper_dir / "si.tex"
         si_path.write_text(si_tex, encoding="utf-8")
@@ -316,23 +550,70 @@ class ResearchCompiler:
         figure_consistency = check_figure_consistency(
             figure_labels(figures), paper_tex
         )
+        return paper_path, si_path, figure_consistency
 
-        if checkpoints:
-            self._save_checkpoints(checkpoints, run_dir)
+    # -- disk loaders (the verb path reads its inputs from the run dir) -----
 
-        return CompileResult(
-            spec=spec,
-            evidence=evidence,
-            claims=claims,
-            checkpoints=checkpoints,
-            run_dir=run_dir,
-            paper_path=paper_path,
-            si_path=si_path,
-            prior_work_checkpoint=pw_checkpoint,
-            contested_checkpoints=contested_checkpoints,
-            novelty_checkpoints=novelty_checkpoints,
-            figure_consistency=figure_consistency,
-        )
+    def _load_evidence(self, spec: Spec) -> List[EvidenceItem]:
+        """Load the recorded append-only Evidence log for ``spec`` (read-only).
+
+        Reuses the SAME loader the F5 reuse path and the headless ``verify`` use
+        (``checkpoint_loop._load_existing_evidence`` -> ``sorted(glob("*.json"))``), so a
+        standalone ``derive-claim`` / ``render`` verb sees Evidence in exactly the order
+        the loop and the audit do. Empty when no ``evidence/`` exists yet.
+        """
+        from sci_adk.loop.checkpoint_loop import _load_existing_evidence
+
+        return _load_existing_evidence(self.workspace_dir / "runs" / spec.id)
+
+    def _load_claims(self, spec: Spec) -> List[Claim]:
+        """Load the recorded Claims for ``spec`` in the SAME order ``ClaimUpdater``
+        produced them (experiment claims per hypothesis, then per-{hypothesis, kind}
+        novelty claims).
+
+        ``ClaimUpdater.update_claims_from_evidence`` returns claims hypothesis-by-
+        hypothesis (``claim-<hyp>``) followed by the per-kind novelty claims
+        (``claim-novelty-{kind}-<hyp>``); a naive ``sorted(glob)`` would reorder them and
+        could change the rendered Claims ordering. Reconstructing the updater's order here
+        keeps the standalone ``render`` verb byte-identical to the chained ``compile``.
+        Only claims that exist on disk are returned (a hypothesis with no counted Evidence
+        has no ``claim-<hyp>``; a non-novelty hypothesis has no novelty claim).
+        """
+        claims_dir = self.workspace_dir / "runs" / spec.id / "claims"
+        if not claims_dir.is_dir():
+            return []
+
+        def _load(claim_id: str) -> Optional[Claim]:
+            path = claims_dir / f"{claim_id}.json"
+            if not path.exists():
+                return None
+            return Claim.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+        ordered: List[Claim] = []
+        for h in spec.hypotheses:
+            claim = _load(f"claim-{h.id}")
+            if claim is not None:
+                ordered.append(claim)
+        for h in spec.hypotheses:
+            for kind in _NOVELTY_KINDS:
+                claim = _load(f"claim-novelty-{kind}-{h.id}")
+                if claim is not None:
+                    ordered.append(claim)
+        return ordered
+
+    def _load_checkpoints(
+        self, spec: Spec, evidence: Sequence[EvidenceItem]
+    ) -> List["Checkpoint"]:
+        """Reconstruct the proof/qualitative judge checkpoints for ``render``.
+
+        Checkpoints are deterministic from the Spec + Evidence (the proof/qualitative
+        hypotheses with any bearing finding), so the ``render`` verb regenerates them via
+        the SAME pure :meth:`_collect_checkpoints` the chain uses rather than re-reading
+        ``checkpoints/`` -- one source of truth, and it does not depend on the judge
+        checkpoint files having been written. ``pending`` in the rendered paper is built
+        from these, so the regenerated list matches the chain's.
+        """
+        return self._collect_checkpoints(spec, evidence)
 
     # -- helpers -----------------------------------------------------------
 
