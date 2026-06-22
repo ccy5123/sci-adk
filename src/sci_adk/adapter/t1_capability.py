@@ -25,6 +25,7 @@ a seam.
 
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,7 +50,8 @@ from sci_adk.core.spec import (
     TargetClaim,
 )
 
-from sci_adk.adapter.t1_encoding import Molecule, verify_injectivity
+from sci_adk.adapter import t1_encoding
+from sci_adk.adapter.t1_encoding import Molecule
 
 # The capability id this plugin registers under (design §3.2). A runtime selector
 # (CLI/adapter default) resolves to it; it is HOW, not WHAT, so it is NOT a frozen
@@ -294,11 +296,13 @@ class T1DockerExecutor:
         payload = json.dumps(
             [{"atoms": m.atoms, "bonds": [list(b) for b in m.bonds]} for m in molecules]
         )
-        script = _T1_CONTAINER_SCRIPT
+        script = _build_t1_container_script()
         executor = DockerExecutor(
             image_name=self.image_name, workspace_dir=self.workspace_dir
         )
-        # The container needs sci_adk importable: the workspace mount includes src/.
+        # The script is SELF-CONTAINED (the pure encoding module is inlined), so it
+        # needs neither a sci_adk import nor a source mount -- it runs from ANY
+        # workspace, including a real research workspace with no src/ directory.
         run = executor.execute_python(script, script_args=[payload])
         stats: dict = {}
         if run["success"] and run["stdout"]:
@@ -314,18 +318,53 @@ class T1DockerExecutor:
         return {"success": run["success"], "stats": stats, "provenance": run["provenance"]}
 
 
-# The script executed inside the container. It reconstructs Molecules from the JSON
-# payload and runs the real verifier, printing the stats JSON on the last stdout line.
-_T1_CONTAINER_SCRIPT = """
-import sys, json
-sys.path.insert(0, "/workspace/src")
-from sci_adk.adapter.t1_encoding import Molecule, verify_injectivity
+# The driver appended after the inlined encoding module. It reconstructs Molecules
+# from the JSON payload (argv[1]), runs the real verifier (now defined IN this same
+# script), and prints the stats JSON on the last stdout line. ``Molecule`` and
+# ``verify_injectivity`` are already in scope from the inlined module source, and the
+# stdlib ``sys``/``json`` are imported here (the inlined module imports neither).
+_T1_DRIVER = """
 
-payload = json.loads(sys.argv[1])
-mols = [Molecule(atoms=m["atoms"], bonds=[tuple(b) for b in m["bonds"]]) for m in payload]
-stats = verify_injectivity(mols)
-print(json.dumps(stats))
+import sys as _sys
+import json as _json
+
+_payload = _json.loads(_sys.argv[1])
+_mols = [Molecule(atoms=m["atoms"], bonds=[tuple(b) for b in m["bonds"]]) for m in _payload]
+_stats = verify_injectivity(_mols)
+print(_json.dumps(_stats))
 """
+
+
+def _build_t1_container_script() -> str:
+    """Assemble the SELF-CONTAINED Python script executed inside the container.
+
+    Root-cause fix: the kernel ``DockerExecutor`` mounts ONLY the workspace dir, never
+    source, so a container ``from sci_adk...`` import works only when the workspace IS
+    the build repo. From a real research workspace (no ``src/``) it raised
+    ``ModuleNotFoundError: No module named 'sci_adk'``.
+
+    The cure is to INLINE the pure, stdlib-only ``t1_encoding`` module source via
+    ``inspect.getsource`` (single source of truth -- the encoding logic is never
+    copy-pasted) and append a tiny driver. The result imports no ``sci_adk`` and needs
+    no source mount, so it runs from ANY workspace.
+
+    Ordering is load-bearing: ``inspect.getsource(t1_encoding)`` returns the module
+    text whose FIRST statements are its docstring then ``from __future__ import
+    annotations``. Python requires future-imports to precede other code, so the inlined
+    module source MUST come first; the driver (plain stdlib code) is appended AFTER.
+    """
+    # @MX:ANCHOR: [AUTO] builds the exact code the T-1 container runs. Inlines the pure
+    #   encoding module (single source of truth) so the script is self-contained and
+    #   needs no sci_adk import / no source mount -- the property that lets T-1 run from
+    #   a real research workspace, not only the build repo.
+    # @MX:REASON: [AUTO] T1DockerExecutor.run_t1 (production) and the script-self-
+    #   contained tests both depend on this assembling valid Python whose first
+    #   statement chain keeps `from __future__` import legal; reordering the module
+    #   source after the driver makes the assembled script a SyntaxError, and re-
+    #   introducing a `from sci_adk` import reinstates the ModuleNotFoundError this fix
+    #   removes.
+    module_source = inspect.getsource(t1_encoding)
+    return module_source + _T1_DRIVER
 
 
 # ---------------------------------------------------------------------------
