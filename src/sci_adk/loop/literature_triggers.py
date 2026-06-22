@@ -8,16 +8,23 @@ Spec-bound prior-art check) and both record their decision into the single appen
 Evidence log via the SHARED writer ``loop/decision_record.write_decision_evidence`` --
 no write/id/save logic is duplicated.
 
-  - **Novelty (High)** underwrites the *validity* of a "first/new" claim. Its decision
-    is recorded as a ``NOVELTY_DECISION`` item:
+  - **Novelty (High)** underwrites the *validity* of a "first/new" claim, in TWO
+    INDEPENDENT kinds -- ``result`` (no prior work established the hypothesis's RESULT)
+    and ``method`` (no prior work used its METHOD) -- each separately pre-registered
+    (its ``novelty_result`` / ``novelty_method`` Spec flag), searched, and derived
+    (design/literature-acquisition.md §"Novelty -- definition (2-kind)"). Every
+    novelty recorder is parameterised by ``kind``. Its decision is recorded as a
+    ``NOVELTY_DECISION`` item carrying that ``kind``:
       * :func:`record_novelty_searched` drives the EXISTING ``LiteratureAcquirer``
         (a ``LITERATURE`` artifact) and records the searched decision (with its
-        ``found="nothing"``/``found="something"`` outcome) referencing it;
-      * :func:`record_novelty_skip` records a skipped decision (a recorded null + reason).
-    B-replace: novelty is a 1st-class revisable Claim ``claim-novelty-<hyp>`` derived by
-    rule (``derive_novelty_status``): SUPPORTED iff a recorded *found_nothing* decision,
-    else PROPOSED. There is NO run-HALT; while the novelty claim is PROPOSED the compiler
-    surfaces a NON-HALT :func:`novelty_checkpoint` (``novelty_open`` reports open-ness).
+        ``found="nothing"``/``found="something"`` outcome + ``kind``) referencing it;
+      * :func:`record_novelty_skip` records a skipped decision (a recorded null + reason
+        + ``kind``).
+    B-replace: each kind is a 1st-class revisable Claim ``claim-novelty-{kind}-<hyp>``
+    derived by rule (``derive_novelty_status(hyp, kind, ...)``): SUPPORTED iff a recorded
+    *found_nothing* decision for THAT {hyp, kind}, else PROPOSED. There is NO run-HALT;
+    while a kind's novelty claim is PROPOSED the compiler surfaces a NON-HALT
+    :func:`novelty_checkpoint` (``novelty_open`` reports open-ness per {hyp, kind}).
 
   - **Contested (Medium)** is RECORDING, not searching: after a claim becomes CONTESTED,
     :func:`record_contested` writes a ``CONTESTED_RECORD`` (a timestamp via the
@@ -61,27 +68,30 @@ _CONTESTED_PROMPT = (
     "acquire). This is recording, not a gate -- nothing halts."
 )
 
-# Reason-tailored novelty checkpoint prompts (B-replace). NON-HALT: the run proceeds
-# while the novelty claim is PROPOSED; this is a recording reminder, not a gate.
-#   - not_searched: no novelty decision (or a skipped one) -> the search has not been
-#     done. Tell the agent to search prior art and record the outcome, or amend the
-#     novelty flag away (F7).
-#   - found_something: a prior-art search was done and found prior art. Do NOT tell the
-#     agent to go search (the search is done) -- the escape is the F7 amendment.
+# Reason-tailored novelty checkpoint prompts (B-replace), per kind. NON-HALT: the run
+# proceeds while the kind's novelty claim is PROPOSED; this is a recording reminder, not
+# a gate. ``{kind}`` is the novelty axis (result|method) -- naming it keeps the reminder
+# and the CLI form unambiguous (each kind is searched/recorded independently).
+#   - not_searched: no {hyp, kind} novelty decision (or a skipped one) -> the search has
+#     not been done. Tell the agent to search prior art for THIS kind and record the
+#     outcome, or amend the kind's novelty flag away (F7).
+#   - found_something: a {hyp, kind} prior-art search was done and found prior art. Do NOT
+#     tell the agent to go search (the search is done) -- the escape is the F7 amendment.
 _NOVELTY_PROMPT_NOT_SEARCHED = (
-    "Novelty check: this hypothesis asserts 'first/new' (a universal-negative over the "
-    "literature) but no prior-art search returned nothing for it, so the novelty claim "
-    "stays PROPOSED. Search prior art and record the outcome (`sci-adk novelty <run-dir> "
-    "--hypothesis <id> --searched <dois...> --outcome found-nothing`), or drop the "
-    "novelty flag via a Spec amendment (F7, human-only -- never a silent edit). This is "
-    "a recording reminder, not a gate -- nothing halts."
+    "Novelty check ({kind}-novelty): this hypothesis asserts {kind}-novelty (no prior "
+    "published work established its {kind}) but no prior-art search returned nothing for "
+    "the {kind} kind, so the {kind}-novelty claim stays PROPOSED. Search prior art for "
+    "the {kind} and record the outcome (`sci-adk novelty <run-dir> --hypothesis <id> "
+    "--kind {kind} --searched <dois...> --outcome found-nothing`), or drop the "
+    "novelty_{kind} flag via a Spec amendment (F7, human-only -- never a silent edit). "
+    "This is a recording reminder, not a gate -- nothing halts."
 )
 _NOVELTY_PROMPT_FOUND_SOMETHING = (
-    "Novelty check: prior art WAS found for this hypothesis (a recorded found_something "
-    "search), so the novelty claim cannot be supported and stays PROPOSED. The search is "
-    "done -- do not search again. Drop the novelty flag via a Spec amendment (F7, "
-    "human-only -- never a silent edit). This is a recording reminder, not a gate -- "
-    "nothing halts."
+    "Novelty check ({kind}-novelty): prior art WAS found for the {kind} kind of this "
+    "hypothesis (a recorded found_something search), so the {kind}-novelty claim cannot "
+    "be supported and stays PROPOSED. The search is done -- do not search again. Drop the "
+    "novelty_{kind} flag via a Spec amendment (F7, human-only -- never a silent edit). "
+    "This is a recording reminder, not a gate -- nothing halts."
 )
 
 
@@ -92,6 +102,7 @@ def record_novelty_searched(
     workspace_dir: Optional[Path] = None,
     *,
     hypothesis_id: str,
+    kind: Literal["result", "method"],
     dois: Sequence[str],
     found: Literal["nothing", "something"],
     adapter: Optional[PaperforgeAdapter] = None,
@@ -101,17 +112,19 @@ def record_novelty_searched(
     config_root: Optional[Path] = None,
     **options: Any,
 ) -> AcquisitionOutcome:
-    """Record the novelty *searched* decision: acquire via the EXISTING acquirer, then
-    write a ``NOVELTY_DECISION`` referencing the acquired ``LITERATURE`` item.
+    """Record the novelty *searched* decision for one {hypothesis, kind}: acquire via the
+    EXISTING acquirer, then write a ``NOVELTY_DECISION`` (carrying ``kind``) referencing
+    the acquired ``LITERATURE`` item.
 
-    B-replace (design/literature-acquisition.md §"Discovery trigger model"): the searched
-    decision now records its OUTCOME. ``found="nothing"`` -> ``found_nothing`` (the
-    prior-art search returned nothing -> the novelty claim derives SUPPORTED via
-    ``derive_novelty_status``); ``found="something"`` -> ``found_something`` (prior art
-    exists -> the novelty claim stays PROPOSED). Discovery (topic -> DOIs) is the agent's
-    ``web_search`` upstream; given the DOI list this delegates to
-    :class:`LiteratureAcquirer` (the ``LITERATURE`` item is the acquired artifact, reused
-    not reinvented).
+    2-kind (design/literature-acquisition.md §"Novelty -- definition (2-kind)"): ``kind``
+    selects which axis (``result`` | ``method``) this search serves; the recorded decision
+    derives ONLY that kind's claim. The searched decision records its OUTCOME:
+    ``found="nothing"`` -> ``found_nothing`` (the prior-art search returned nothing -> the
+    {hyp, kind} novelty claim derives SUPPORTED via ``derive_novelty_status``);
+    ``found="something"`` -> ``found_something`` (prior art exists -> it stays PROPOSED).
+    Discovery (topic -> DOIs) is the agent's ``web_search`` upstream; given the DOI list
+    this delegates to :class:`LiteratureAcquirer` (the ``LITERATURE`` item is the acquired
+    artifact, reused not reinvented).
 
     Contact-email policy mirrors ``record_prior_work_searched`` exactly
     (design/evidence-validity.md E4): by DEFAULT a contact email is REQUIRED and resolved
@@ -137,18 +150,19 @@ def record_novelty_searched(
         spec,
         workspace_dir,
         kind=EvidenceKind.NOVELTY_DECISION,
-        finding=f"{outcome_str}: DOIs={list(dois)}",
+        finding=f"{kind}-novelty {outcome_str}: DOIs={list(dois)}",
         provenance=Provenance(
-            code_ref=f"novelty:{outcome_str}",
+            code_ref=f"novelty:{kind}:{outcome_str}",
             data_ref=f"literature_evidence={lit.id}; "
                      f"manifest={lit.result.artifact_ref or ''}",
-            environment="novelty decision (High trigger); "
+            environment=f"novelty decision (High trigger, {kind}-novelty); "
                         "see referenced LITERATURE item for the acquired corpus",
         ),
         id_prefix="evi-nov-decision",
         literature_decision=LiteratureDecision(
             outcome=outcome_str,
             hypothesis_id=hypothesis_id,
+            kind=kind,
             literature_evidence_id=lit.id,
         ),
     )
@@ -160,13 +174,15 @@ def record_novelty_skip(
     workspace_dir: Optional[Path] = None,
     *,
     hypothesis_id: str,
+    kind: Literal["result", "method"],
     reason: str,
 ) -> EvidenceItem:
-    """Record the novelty *skipped* decision as a ``NOVELTY_DECISION`` (a recorded null).
+    """Record the novelty *skipped* decision for one {hypothesis, kind} as a
+    ``NOVELTY_DECISION`` (a recorded null carrying ``kind``).
 
-    A skipped novelty decision does NOT satisfy the novelty gate (skipping the prior-art
-    search guts a 'first/new' claim's only evidentiary basis) -- but it is still recorded,
-    with its reason, so the decision is never invisible (Invariant E2).
+    A skipped novelty decision does NOT satisfy the {hyp, kind} novelty gate (skipping the
+    prior-art search guts that kind's claim's only evidentiary basis) -- but it is still
+    recorded, with its reason and kind, so the decision is never invisible (Invariant E2).
 
     Raises:
         ValueError: if ``reason`` is empty/blank.
@@ -181,61 +197,70 @@ def record_novelty_skip(
         spec,
         workspace_dir,
         kind=EvidenceKind.NOVELTY_DECISION,
-        finding=f"skipped: {reason}",
+        finding=f"{kind}-novelty skipped: {reason}",
         provenance=Provenance(
-            code_ref="novelty:skip",
-            environment="novelty decision (High trigger); no search performed",
+            code_ref=f"novelty:{kind}:skip",
+            environment=f"novelty decision (High trigger, {kind}-novelty); "
+                        "no search performed",
         ),
         id_prefix="evi-nov-decision",
         literature_decision=LiteratureDecision(
-            outcome="skipped", hypothesis_id=hypothesis_id, reason=reason
+            outcome="skipped", hypothesis_id=hypothesis_id, kind=kind, reason=reason
         ),
     )
 
 
 def novelty_open(
-    spec: Spec, hypothesis_id: str, workspace_dir: Optional[Path] = None
+    spec: Spec,
+    hypothesis_id: str,
+    kind: Literal["result", "method"],
+    workspace_dir: Optional[Path] = None,
 ) -> bool:
-    """True iff ``hypothesis_id`` is ``novelty=True`` AND its ``claim-novelty-<hyp>`` on
-    disk is PROPOSED (read-only, no LLM, no capability).
+    """True iff ``hypothesis_id`` has the ``kind`` novelty flag set AND its
+    ``claim-novelty-{kind}-<hyp>`` on disk is PROPOSED (read-only, no LLM, no capability).
 
-    Mirrors :func:`contested_open`. A novelty checkpoint is "open" only while the
-    hypothesis IS a novelty claim AND the novelty claim has not yet derived SUPPORTED. A
-    non-novelty hypothesis has nothing to surface; a SUPPORTED novelty claim (a recorded
-    found_nothing search) is closed. A novelty hypothesis with no recorded novelty claim
-    yet is implicitly PROPOSED -> open. Reads the recorded claim only.
+    Mirrors :func:`contested_open`, per {hyp, kind} (2-kind). A novelty checkpoint is
+    "open" only while the hypothesis IS a novelty claim of THAT kind AND the kind's claim
+    has not yet derived SUPPORTED. A hypothesis with the kind's flag unset has nothing to
+    surface for that kind; a SUPPORTED kind claim (a recorded found_nothing search of that
+    {hyp, kind}) is closed. A flagged kind with no recorded claim yet is implicitly
+    PROPOSED -> open. Reads the recorded claim only.
     """
-    # @MX:ANCHOR: [AUTO] the open/closed predicate for the novelty checkpoint: open iff
-    #   the hypothesis is novelty=True AND its claim-novelty-<hyp> on disk is PROPOSED
-    #   (or absent, treated as PROPOSED).
+    # @MX:ANCHOR: [AUTO] the open/closed predicate for the per-kind novelty checkpoint:
+    #   open iff the hypothesis has the kind's novelty flag set AND its
+    #   claim-novelty-{kind}-<hyp> on disk is PROPOSED (or absent, treated as PROPOSED).
     # @MX:REASON: [AUTO] the compiler surfaces open novelty checkpoints from this; it
     #   MUST stay record-only (no capability/LLM) so the headless verify re-read reaches
-    #   the same verdict, and MUST close only when the novelty claim is SUPPORTED (a
-    #   recorded found_nothing search). It is a recording reminder -- it never gates/halts.
-    if not _hypothesis_is_novelty(spec, hypothesis_id):
+    #   the same verdict, and MUST close only when the kind's novelty claim is SUPPORTED (a
+    #   recorded found_nothing search of THAT kind). It is a recording reminder -- it never
+    #   gates/halts.
+    if not _hypothesis_is_novelty(spec, hypothesis_id, kind):
         return False
     workspace = Path(workspace_dir) if workspace_dir else Path.cwd()
     run_dir = workspace / "runs" / spec.id
-    return _novelty_claim_is_proposed(run_dir, hypothesis_id)
+    return _novelty_claim_is_proposed(run_dir, hypothesis_id, kind)
 
 
 def novelty_checkpoint(
     spec: Spec,
     hypothesis_id: str,
+    kind: Literal["result", "method"],
     spec_version: int,
     *,
     reason: Literal["not_searched", "found_something"],
 ) -> NoveltyCheckpoint:
-    """Build the recording-type novelty checkpoint for ``hypothesis_id`` (High trigger).
+    """Build the recording-type novelty checkpoint for one {hypothesis, kind} (High
+    trigger).
 
-    NON-HALT (B-replace): a reminder that the novelty claim is still PROPOSED. The prompt
-    is tailored by ``reason``:
-      - ``not_searched`` (no novelty decision, or a ``skipped`` one): tell the agent to
-        search prior art and record the outcome, or drop the novelty flag via F7;
-      - ``found_something`` (a prior-art search found prior art): the search is done -- do
-        NOT tell the agent to search again; the escape is the F7 amendment.
+    NON-HALT (B-replace): a reminder that the kind's novelty claim is still PROPOSED. The
+    prompt names the ``kind`` and is tailored by ``reason``:
+      - ``not_searched`` (no {hyp, kind} novelty decision, or a ``skipped`` one): tell the
+        agent to search prior art for this kind and record the outcome, or drop the kind's
+        novelty flag via F7;
+      - ``found_something`` (a {hyp, kind} prior-art search found prior art): the search is
+        done -- do NOT tell the agent to search again; the escape is the F7 amendment.
     """
-    prompt = (
+    template = (
         _NOVELTY_PROMPT_FOUND_SOMETHING
         if reason == "found_something"
         else _NOVELTY_PROMPT_NOT_SEARCHED
@@ -244,28 +269,33 @@ def novelty_checkpoint(
         hypothesis_id=hypothesis_id,
         spec_id=spec.id,
         spec_version=spec_version,
-        prompt=prompt,
+        prompt=template.format(kind=kind),
     )
 
 
 def novelty_reason_from_decisions(
-    hypothesis_id: str, novelty_decisions: Sequence[EvidenceItem]
+    hypothesis_id: str,
+    kind: Literal["result", "method"],
+    novelty_decisions: Sequence[EvidenceItem],
 ) -> Literal["not_searched", "found_something"]:
-    """PURE in-memory novelty-checkpoint reason: ``found_something`` iff a
-    ``found_something`` NOVELTY_DECISION bound to ``hypothesis_id`` is present in
-    ``novelty_decisions``, else ``not_searched`` (no decision, or a ``skipped`` one).
+    """PURE in-memory novelty-checkpoint reason for one {hypothesis, kind}:
+    ``found_something`` iff a ``found_something`` NOVELTY_DECISION bound to
+    ``hypothesis_id`` AND ``kind`` is present in ``novelty_decisions``, else
+    ``not_searched`` (no decision for this kind, or a ``skipped`` one).
 
     This is the SINGLE home for the reason logic. It operates on the SAME decisions the
-    novelty CLAIM is derived from (``derive_novelty_status``), so the checkpoint message
-    and the claim status agree even in a single-pass ``compile()`` where an in-memory
-    ``found_something`` decision is not yet persisted on disk. A ``found_nothing``
-    decision means the claim is SUPPORTED (the checkpoint is closed), so it never reaches
-    this reason path -- it returns ``not_searched`` defensively.
+    kind's novelty CLAIM is derived from (``derive_novelty_status(hyp, kind, ...)``), so
+    the checkpoint message and the claim status agree even in a single-pass ``compile()``
+    where an in-memory ``found_something`` decision is not yet persisted on disk. A
+    ``found_nothing`` decision means the kind's claim is SUPPORTED (the checkpoint is
+    closed), so it never reaches this reason path -- it returns ``not_searched``
+    defensively.
     """
     found_something = any(
         ev.kind == EvidenceKind.NOVELTY_DECISION
         and ev.literature_decision is not None
         and ev.literature_decision.hypothesis_id == hypothesis_id
+        and ev.literature_decision.kind == kind
         and ev.literature_decision.outcome == "found_something"
         for ev in novelty_decisions
     )
@@ -389,21 +419,28 @@ def contested_open(
 
 # -- helpers ---------------------------------------------------------------- #
 
-def _hypothesis_is_novelty(spec: Spec, hypothesis_id: str) -> bool:
-    """True iff the Spec's hypothesis ``hypothesis_id`` carries ``novelty=True``."""
+def _hypothesis_is_novelty(
+    spec: Spec, hypothesis_id: str, kind: Literal["result", "method"]
+) -> bool:
+    """True iff the Spec's hypothesis ``hypothesis_id`` has the ``kind`` novelty flag set
+    (``novelty_result`` for ``result``, ``novelty_method`` for ``method``)."""
     for h in spec.hypotheses:
         if h.id == hypothesis_id:
-            return bool(h.novelty)
+            return bool(h.novelty_result if kind == "result" else h.novelty_method)
     return False
 
 
-def _novelty_claim_is_proposed(run_dir: Path, hypothesis_id: str) -> bool:
-    """True iff the recorded ``claim-novelty-<hyp>`` is PROPOSED, OR no such claim exists
-    yet (an unrecorded novelty claim is implicitly PROPOSED). False iff it is SUPPORTED
-    (or any non-PROPOSED status)."""
+def _novelty_claim_is_proposed(
+    run_dir: Path, hypothesis_id: str, kind: Literal["result", "method"]
+) -> bool:
+    """True iff the recorded ``claim-novelty-{kind}-<hyp>`` is PROPOSED, OR no such claim
+    exists yet (an unrecorded kind novelty claim is implicitly PROPOSED). False iff it is
+    SUPPORTED (or any non-PROPOSED status)."""
     import json
 
-    claim_path = run_dir / "claims" / f"claim-novelty-{hypothesis_id}.json"
+    claim_path = (
+        run_dir / "claims" / f"claim-novelty-{kind}-{hypothesis_id}.json"
+    )
     if not claim_path.exists():
         return True
     claim = Claim.model_validate(json.loads(claim_path.read_text(encoding="utf-8")))

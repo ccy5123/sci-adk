@@ -5,8 +5,8 @@ design/literature-acquisition.md §"Discovery trigger model": the in-session age
 records the novelty / contested decisions into the single Evidence log, mirroring the
 existing ``prior-work`` verb:
 
-    sci-adk novelty <run> --hypothesis <id> --searched <dois...> [--allow-no-email]
-    sci-adk novelty <run> --hypothesis <id> --skip --reason "..."
+    sci-adk novelty <run> --hypothesis <id> --kind {result|method} --searched <dois...>
+    sci-adk novelty <run> --hypothesis <id> --kind {result|method} --skip --reason "..."
     sci-adk contested <run> --hypothesis <id> [--searched <dois...> | --note "..."]
 
 ``ValidityHalt`` / ``ConfigHalt`` -> exit 2. The ``run`` / ``resolve`` / ``verify`` /
@@ -66,26 +66,47 @@ class _FakeAdapter:
 
 def test_novelty_skip_records_decision_exit_zero(tmp_path, capsys):
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-skip")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--kind", "result",
                "--skip", "--reason", "priority framing dropped in review"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "novelty_decision" in out.lower() or "skip" in out.lower()
     items = _load_evidence(run_dir)
-    assert any(i.kind is EvidenceKind.NOVELTY_DECISION for i in items)
+    decisions = [i for i in items if i.kind is EvidenceKind.NOVELTY_DECISION]
+    assert decisions
+    # the recorded decision carries the kind passed on the CLI
+    assert any(
+        i.literature_decision is not None and i.literature_decision.kind == "result"
+        for i in decisions
+    )
 
 
 def test_novelty_skip_without_reason_errors(tmp_path, capsys):
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-noreason")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--skip"])
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--kind", "result",
+               "--skip"])
     err = capsys.readouterr().err
     assert rc == 2
     assert "reason" in err.lower()
 
 
+def test_novelty_requires_kind(tmp_path, capsys):
+    """--kind is REQUIRED (2-kind): omitting it is an argparse error (exit 2)."""
+    import pytest
+
+    run_dir, hyp_id = _seed(tmp_path, "cli-nov-nokind")
+    # argparse raises SystemExit(2) for a missing required option.
+    with pytest.raises(SystemExit) as exc:
+        main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+              "--skip", "--reason", "r"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--kind" in err
+
+
 def test_novelty_missing_run_dir_errors(tmp_path, capsys):
     rc = main(["novelty", str(tmp_path / "runs" / "nope"),
-               "--hypothesis", "hyp-1", "--skip", "--reason", "r"])
+               "--hypothesis", "hyp-1", "--kind", "result", "--skip", "--reason", "r"])
     err = capsys.readouterr().err
     assert rc == 2
     assert "not found" in err.lower() or "no spec" in err.lower()
@@ -102,7 +123,7 @@ def test_novelty_searched_no_email_exits_two_friendly(tmp_path, monkeypatch, cap
     (tmp_path / "xdg").mkdir(parents=True, exist_ok=True)
 
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-noemail")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--kind", "result",
                "--searched", "10.1/x", "--outcome", "found-nothing"])
     err = capsys.readouterr().err
     assert rc == 2
@@ -114,7 +135,8 @@ def test_novelty_searched_no_email_exits_two_friendly(tmp_path, monkeypatch, cap
 def test_novelty_searched_requires_outcome(tmp_path, capsys):
     """--searched without --outcome is rejected (they are required together)."""
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-no-outcome")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--searched", "10.1/x"])
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--kind", "result",
+               "--searched", "10.1/x"])
     err = capsys.readouterr().err
     assert rc == 2
     assert "outcome" in err.lower()
@@ -147,13 +169,20 @@ def test_novelty_searched_found_nothing_proceeds(tmp_path, monkeypatch, capsys):
     _swap_acquirer(monkeypatch)
 
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-found-nothing")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--kind", "method",
                "--searched", "10.1/x", "--outcome", "found-nothing", "--allow-no-email"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "found_nothing" in out.lower() or "found-nothing" in out.lower() \
         or "searched" in out.lower()
     assert "found_nothing" in _novelty_outcomes(run_dir)
+    # the recorded decision carries the method kind passed on the CLI
+    kinds = [
+        i.literature_decision.kind
+        for i in _load_evidence(run_dir)
+        if i.kind is EvidenceKind.NOVELTY_DECISION and i.literature_decision is not None
+    ]
+    assert "method" in kinds
 
 
 def test_novelty_searched_found_prior_art_proceeds(tmp_path, monkeypatch, capsys):
@@ -163,7 +192,7 @@ def test_novelty_searched_found_prior_art_proceeds(tmp_path, monkeypatch, capsys
     _swap_acquirer(monkeypatch)
 
     run_dir, hyp_id = _seed(tmp_path, "cli-nov-found-prior-art")
-    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id,
+    rc = main(["novelty", str(run_dir), "--hypothesis", hyp_id, "--kind", "result",
                "--searched", "10.1/x", "--outcome", "found-prior-art",
                "--allow-no-email"])
     assert rc == 0

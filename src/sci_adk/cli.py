@@ -8,8 +8,8 @@ sci-adk command-line interface.
     sci-adk verify <run-dir>                           # headless read-only belief audit
     sci-adk prior-work <run-dir> --searched <dois...>  # record a prior-work decision
     sci-adk prior-work <run-dir> --skip --reason "..." #   (searched or skipped)
-    sci-adk novelty <run-dir> --hypothesis <id> --searched <dois...>  # novelty trigger
-    sci-adk novelty <run-dir> --hypothesis <id> --skip --reason "..." #   (searched/skip)
+    sci-adk novelty <run-dir> --hypothesis <id> --kind {result|method} --searched <dois...>
+    sci-adk novelty <run-dir> --hypothesis <id> --kind {result|method} --skip --reason "..."
     sci-adk contested <run-dir> --hypothesis <id> [--searched <dois...> | --note "..."]
 
 Compiles a four-pane proposal into ``runs/<spec.id>/`` (spec.json, evidence/,
@@ -168,15 +168,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     novelty = sub.add_parser(
         "novelty",
-        help="record a novelty/priority discovery decision for a hypothesis (the High "
-             "trigger): searched (--outcome found-nothing|found-prior-art) -> LITERATURE "
-             "+ NOVELTY_DECISION, or skipped -> a recorded null. A SUPPORTED novelty "
-             "claim needs a found-nothing searched decision (B-replace: non-HALT)",
+        help="record a novelty/priority discovery decision for one {hypothesis, kind} "
+             "(the High trigger, 2-kind: --kind result|method): searched (--outcome "
+             "found-nothing|found-prior-art) -> LITERATURE + NOVELTY_DECISION, or "
+             "skipped -> a recorded null. A SUPPORTED kind novelty claim needs a "
+             "found-nothing searched decision of THAT kind (B-replace: non-HALT)",
     )
     novelty.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
     novelty.add_argument(
         "--hypothesis", required=True, metavar="ID",
         help="the hypothesis id this novelty decision is bound to",
+    )
+    novelty.add_argument(
+        "--kind", required=True, choices=["result", "method"],
+        help="REQUIRED: which novelty axis this decision serves -- result (no prior work "
+             "established the hypothesis's RESULT) or method (no prior work used its "
+             "METHOD). The two axes are independent; a {hyp, kind} decision derives only "
+             "that kind's claim-novelty-{kind}-<hyp>",
     )
     nov_group = novelty.add_mutually_exclusive_group(required=True)
     nov_group.add_argument(
@@ -620,12 +628,13 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
 
 
 def _cmd_novelty(args: argparse.Namespace) -> int:
-    """Record a novelty/priority discovery decision (the High trigger) into the log.
+    """Record a novelty/priority discovery decision for one {hypothesis, kind} (the High
+    trigger, 2-kind) into the log.
 
     Reads the recorded Spec (no LLM); for ``--searched`` it drives the existing acquirer
-    (a LITERATURE item) and records a searched NOVELTY_DECISION, for ``--skip`` it records
-    a skipped NOVELTY_DECISION null with the given reason. A skip does NOT satisfy the
-    novelty gate (it is a recorded null, not a search).
+    (a LITERATURE item) and records a searched NOVELTY_DECISION carrying ``--kind``, for
+    ``--skip`` it records a skipped NOVELTY_DECISION null (with kind) and the given reason.
+    A skip does NOT satisfy the kind's novelty gate (it is a recorded null, not a search).
     """
     run_dir = Path(args.run_dir)
     spec_path = run_dir / "spec.json"
@@ -647,11 +656,13 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
                   "search is a recorded null; the record must say why)", file=sys.stderr)
             return 2
         item = record_novelty_skip(
-            spec, workspace, hypothesis_id=args.hypothesis, reason=args.reason)
-        print(f"recorded novelty decision (skipped) for hypothesis '{args.hypothesis}' "
-              f"-> {item.kind.value} evidence {item.id}")
+            spec, workspace, hypothesis_id=args.hypothesis, kind=args.kind,
+            reason=args.reason)
+        print(f"recorded {args.kind}-novelty decision (skipped) for hypothesis "
+              f"'{args.hypothesis}' -> {item.kind.value} evidence {item.id}")
         print(f"  reason: {args.reason.strip()}")
-        print("  note: a skipped novelty search leaves the novelty claim PROPOSED")
+        print(f"  note: a skipped {args.kind} novelty search leaves "
+              f"claim-novelty-{args.kind}-{args.hypothesis} PROPOSED")
         return 0
 
     # searched path: --outcome is REQUIRED with --searched (a search has an outcome).
@@ -666,8 +677,8 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
 
     try:
         outcome = record_novelty_searched(
-            spec, workspace, hypothesis_id=args.hypothesis, dois=args.searched,
-            found=found, allow_no_email=args.allow_no_email)
+            spec, workspace, hypothesis_id=args.hypothesis, kind=args.kind,
+            dois=args.searched, found=found, allow_no_email=args.allow_no_email)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
@@ -675,15 +686,16 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
         return 2
     ev = outcome.evidence
     outcome_str = "found_nothing" if found == "nothing" else "found_something"
-    print(f"recorded novelty decision (searched: {outcome_str}) for hypothesis "
-          f"'{args.hypothesis}' -> {ev.kind.value} evidence {ev.id}")
+    print(f"recorded {args.kind}-novelty decision (searched: {outcome_str}) for "
+          f"hypothesis '{args.hypothesis}' -> {ev.kind.value} evidence {ev.id}")
     print(f"  acquired: {len(outcome.result.succeeded)} | "
           f"failed: {len(outcome.result.failed)}")
     if found == "nothing":
-        print("  note: found-nothing -> the novelty claim derives SUPPORTED on recompile")
+        print(f"  note: found-nothing -> claim-novelty-{args.kind}-{args.hypothesis} "
+              "derives SUPPORTED on recompile")
     else:
-        print("  note: found-prior-art -> the novelty claim stays PROPOSED "
-              "(drop the novelty flag via a Spec amendment, F7)")
+        print(f"  note: found-prior-art -> the {args.kind}-novelty claim stays PROPOSED "
+              f"(drop the novelty_{args.kind} flag via a Spec amendment, F7)")
     if outcome.should_halt:
         print("  halt (human input needed):", file=sys.stderr)
         print(outcome.halt.feedback(), file=sys.stderr)

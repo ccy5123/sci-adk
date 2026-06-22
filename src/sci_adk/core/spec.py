@@ -203,17 +203,25 @@ class Hypothesis(BaseModel):
             generator (design/evidence-validity.md Guard 2). Recorded/surfaced, never
             auto-proven. ``None`` for empirical hypotheses or where no generated
             evidence binds.
-        novelty: whether this hypothesis is a novelty/priority claim -- one that asserts
-            "first/new", i.e. a universal-negative over the literature
-            (design/literature-acquisition.md §"Discovery trigger model", the High
-            trigger). Default ``False`` (most hypotheses are not novelty claims).
-            Frozen with the Spec (anti-HARKing): the flag cannot be flipped after seeing
-            results to dodge or invent the prior-art-search requirement. When ``True``, a
-            separate revisable novelty Claim ``claim-novelty-<hyp>`` is derived by rule
-            (``derive_novelty_status``): SUPPORTED iff a recorded *found_nothing*
-            prior-art search, else PROPOSED -- decoupled from the experiment verdict and
-            never a run-HALT (B-replace). Dropping the flag is a human-only Spec amendment
-            (F7), never a silent edit.
+        novelty_result: whether this hypothesis asserts RESULT-novelty -- that no prior
+            published work has established its RESULT (its ``statement``/conclusion), a
+            universal-negative over the literature (design/literature-acquisition.md
+            §"Novelty -- definition (2-kind)"). Default ``False`` (most hypotheses are
+            not result-novelty claims). Frozen with the Spec (anti-HARKing): the flag
+            cannot be flipped after seeing results to dodge or invent the prior-art-search
+            requirement. When ``True``, a separate revisable novelty Claim
+            ``claim-novelty-result-<hyp>`` is derived by rule
+            (``derive_novelty_status(hyp, "result", ...)``): SUPPORTED iff a recorded
+            *found_nothing* prior-art search bound to {hyp, result}, else PROPOSED --
+            decoupled from the experiment verdict and never a run-HALT (B-replace).
+        novelty_method: whether this hypothesis asserts METHOD-novelty -- that no prior
+            published work has used its METHOD (its approach). Independent of
+            ``novelty_result`` (the two axes are orthogonal -- all four quadrants are
+            meaningful: known-result/new-method, new-result/known-method, both, neither).
+            Default ``False``; frozen (anti-HARKing). When ``True``, a separate
+            ``claim-novelty-method-<hyp>`` is derived by rule
+            (``derive_novelty_status(hyp, "method", ...)``). Dropping either flag is a
+            human-only Spec amendment (F7), never a silent edit.
     """
 
     model_config = {
@@ -237,11 +245,20 @@ class Hypothesis(BaseModel):
         description="Non-circularity attestation for a formal/generated claim: what "
         "the verifier tests that is not baked into the generator (recorded, not proven).",
     )
-    novelty: bool = Field(
+    novelty_result: bool = Field(
         default=False,
-        description="Novelty/priority claim (asserts 'first/new', a universal-negative "
-        "over the literature). Default False; frozen (anti-HARKing). A SUPPORTED novelty "
-        "claim requires a recorded prior-art search (the novelty gate); dropping the flag "
+        description="Result-novelty claim: no prior published work established this "
+        "hypothesis's RESULT (a universal-negative over the literature). Default False; "
+        "frozen (anti-HARKing). A SUPPORTED result-novelty claim requires a recorded "
+        "found_nothing prior-art search bound to {hyp, result}; dropping the flag is a "
+        "human-only Spec amendment (F7).",
+    )
+    novelty_method: bool = Field(
+        default=False,
+        description="Method-novelty claim: no prior published work used this hypothesis's "
+        "METHOD (its approach). Independent of novelty_result (orthogonal axes). Default "
+        "False; frozen (anti-HARKing). A SUPPORTED method-novelty claim requires a "
+        "recorded found_nothing prior-art search bound to {hyp, method}; dropping the flag "
         "is a human-only Spec amendment (F7).",
     )
 

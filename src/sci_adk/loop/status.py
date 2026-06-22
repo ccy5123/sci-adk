@@ -14,8 +14,8 @@ The state read is a pure composition over already-tested read-only loaders/predi
     ``claim-<hyp>`` and a novelty claim ``claim-novelty-<hyp>`` for the SAME hypothesis
     are both surfaced, never collapsed);
   - prior-work: ``prior_work.prior_work_open(spec, workspace_dir)``;
-  - novelty: ``literature_triggers.novelty_open(spec, hyp_id, workspace_dir)`` per
-    ``novelty=True`` hypothesis;
+  - novelty: ``literature_triggers.novelty_open(spec, hyp_id, kind, workspace_dir)`` per
+    {hypothesis, kind} whose ``novelty_{kind}`` flag is set (2-kind);
   - contested: ``literature_triggers.contested_open(spec, hyp_id, workspace_dir)`` per
     hypothesis;
   - open checkpoints: a ``checkpoints/<hyp>.json`` with no matching
@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.spec import Spec
+from sci_adk.loop.claim_updater import _NOVELTY_KINDS
 from sci_adk.loop.literature_triggers import contested_open, novelty_open
 from sci_adk.loop.prior_work import prior_work_open
 
@@ -58,8 +59,10 @@ class StatusReport(BaseModel):
             so they are not double-listed here.
         contested_claim_ids: ids of claims whose status is CONTESTED.
         prior_work_open: True iff no PRIOR_WORK_DECISION is recorded for the Spec.
-        novelty_unresolved: hypothesis ids whose novelty checkpoint is still open
-            (``novelty=True`` AND its ``claim-novelty-<hyp>`` is PROPOSED/absent).
+        novelty_unresolved: ``"<hyp>:<kind>"`` entries whose per-kind novelty checkpoint
+            is still open (the ``novelty_{kind}`` flag is set AND its
+            ``claim-novelty-{kind}-<hyp>`` is PROPOSED/absent). The ``:<kind>`` suffix
+            disambiguates the two independent axes (result|method) for one hypothesis.
         contested_pending: hypothesis ids whose Claim is CONTESTED with no recorded
             CONTESTED_RECORD decision yet.
         checkpoints_awaiting_verdict: hypothesis ids with a ``checkpoints/<hyp>.json``
@@ -159,8 +162,10 @@ def session_status(run_dir: Path) -> StatusReport:
     pw_open = prior_work_open(spec, workspace_dir)
 
     novelty_unresolved = sorted(
-        h.id for h in spec.hypotheses
-        if novelty_open(spec, h.id, workspace_dir)
+        f"{h.id}:{kind}"
+        for h in spec.hypotheses
+        for kind in _NOVELTY_KINDS
+        if novelty_open(spec, h.id, kind, workspace_dir)
     )
     contested_pending = sorted(
         h.id for h in spec.hypotheses

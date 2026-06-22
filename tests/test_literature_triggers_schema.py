@@ -5,12 +5,15 @@ design/literature-acquisition.md §"Discovery trigger model": two new hypothesis
 recording triggers join the implemented Spec-creation prior-art anchor. This module
 locks the *schema* surface they need -- mirroring the prior-work / digitized patterns:
 
-  1. ``Hypothesis.novelty`` -- a frozen anti-HARKing flag (a novelty/priority claim
-     asserts "first/new", a universal-negative over the literature). Default False.
+  1. ``Hypothesis.novelty_result`` / ``Hypothesis.novelty_method`` -- two independent
+     frozen anti-HARKing flags (2-kind: a result-novelty claim asserts no prior work
+     established the RESULT; a method-novelty claim, no prior work used the METHOD). Each
+     defaults False.
   2. two new ``EvidenceKind`` values -- ``NOVELTY_DECISION`` / ``CONTESTED_RECORD`` --
      kept SEPARATE from ``PRIOR_WORK_DECISION`` (whose closing-kind set is a
      load-bearing anchor that must stay unchanged).
-  3. a frozen ``LiteratureDecision`` sub-model (mirrors ``DigitizedData``'s style) and
+  3. a frozen ``LiteratureDecision`` sub-model (mirrors ``DigitizedData``'s style) with a
+     ``kind: result|method`` axis on the NOVELTY_DECISION payload, and
      ``EvidenceItem.literature_decision`` (parallel to ``EvidenceItem.digitized``),
      present only on the two new kinds.
 
@@ -37,10 +40,12 @@ from sci_adk.core.spec import (
 
 
 # --------------------------------------------------------------------------- #
-# 1. Hypothesis.novelty -- frozen anti-HARKing flag, default False
+# 1. Hypothesis.novelty_result / novelty_method -- two frozen anti-HARKing flags
 # --------------------------------------------------------------------------- #
 
-def _hyp(novelty: bool | None = None) -> Hypothesis:
+def _hyp(
+    novelty_result: bool | None = None, novelty_method: bool | None = None
+) -> Hypothesis:
     kwargs = dict(
         id="hyp-1",
         statement="X is the first to do Y",
@@ -49,42 +54,64 @@ def _hyp(novelty: bool | None = None) -> Hypothesis:
             kind=DecisionRuleKind.QUALITATIVE, expression="clear and on-topic"
         ),
     )
-    if novelty is not None:
-        kwargs["novelty"] = novelty
+    if novelty_result is not None:
+        kwargs["novelty_result"] = novelty_result
+    if novelty_method is not None:
+        kwargs["novelty_method"] = novelty_method
     return Hypothesis(**kwargs)
 
 
-def test_hypothesis_novelty_defaults_false():
-    """Most hypotheses are not novelty claims -> fail-open default is False."""
-    assert _hyp().novelty is False
+def test_hypothesis_novelty_flags_default_false():
+    """Most hypotheses are not novelty claims -> both kind flags default False."""
+    h = _hyp()
+    assert h.novelty_result is False
+    assert h.novelty_method is False
 
 
-def test_hypothesis_novelty_can_be_set_true():
-    assert _hyp(novelty=True).novelty is True
+def test_hypothesis_novelty_flags_are_independent():
+    """The two axes are orthogonal -- setting one does not set the other."""
+    h_result = _hyp(novelty_result=True)
+    assert h_result.novelty_result is True
+    assert h_result.novelty_method is False
+
+    h_method = _hyp(novelty_method=True)
+    assert h_method.novelty_result is False
+    assert h_method.novelty_method is True
 
 
-def test_hypothesis_novelty_is_frozen():
-    """The Spec is frozen (anti-HARKing): the flag cannot be flipped post-hoc."""
-    hyp = _hyp(novelty=True)
+def test_hypothesis_novelty_both_kinds_can_be_set():
+    h = _hyp(novelty_result=True, novelty_method=True)
+    assert h.novelty_result is True
+    assert h.novelty_method is True
+
+
+def test_hypothesis_novelty_flags_are_frozen():
+    """The Spec is frozen (anti-HARKing): neither flag can be flipped post-hoc."""
+    hyp = _hyp(novelty_result=True, novelty_method=True)
     with pytest.raises(Exception):
-        hyp.novelty = False  # frozen model -> ValidationError/TypeError
+        hyp.novelty_result = False  # frozen model -> ValidationError/TypeError
+    with pytest.raises(Exception):
+        hyp.novelty_method = False
 
 
-def test_hypothesis_novelty_round_trips():
-    hyp = _hyp(novelty=True)
+def test_hypothesis_novelty_flags_round_trip():
+    hyp = _hyp(novelty_result=True, novelty_method=False)
     restored = Hypothesis.model_validate(hyp.model_dump(mode="json"))
     assert restored == hyp
-    assert restored.novelty is True
+    assert restored.novelty_result is True
+    assert restored.novelty_method is False
 
 
-def test_hypothesis_without_novelty_round_trips_as_false():
-    """A pre-existing Hypothesis JSON with no ``novelty`` key loads as False
-    (additive, defaulted field -- older specs still validate)."""
+def test_hypothesis_without_novelty_keys_round_trips_as_false():
+    """A Hypothesis JSON with no ``novelty_result``/``novelty_method`` keys loads as
+    False (defaulted fields -- a spec authored without the flags still validates)."""
     hyp = _hyp()
     blob = hyp.model_dump(mode="json")
-    blob.pop("novelty", None)  # simulate a pre-feature spec on disk
+    blob.pop("novelty_result", None)
+    blob.pop("novelty_method", None)
     restored = Hypothesis.model_validate(blob)
-    assert restored.novelty is False
+    assert restored.novelty_result is False
+    assert restored.novelty_method is False
 
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +149,7 @@ def test_literature_decision_constructs_searched():
     assert d.hypothesis_id == "hyp-1"
     assert d.literature_evidence_id == "evi-lit-x"
     assert d.reason is None
+    assert d.kind is None  # kindless unless this is a NOVELTY_DECISION payload
 
 
 def test_literature_decision_constructs_skipped_with_reason():
@@ -136,6 +164,29 @@ def test_literature_decision_constructs_skipped_with_reason():
 def test_literature_decision_constructs_recorded():
     d = LiteratureDecision(outcome="recorded", hypothesis_id="hyp-1")
     assert d.outcome == "recorded"
+    assert d.kind is None  # CONTESTED_RECORD is kindless
+
+
+def test_literature_decision_kind_defaults_none():
+    """The novelty axis is None unless explicitly set (CONTESTED_RECORD / prior-work)."""
+    d = LiteratureDecision(outcome="found_nothing", hypothesis_id="hyp-1")
+    assert d.kind is None
+
+
+@pytest.mark.parametrize("kind", ["result", "method"])
+def test_literature_decision_accepts_novelty_kind(kind):
+    d = LiteratureDecision(
+        outcome="found_nothing", hypothesis_id="hyp-1", kind=kind,
+        literature_evidence_id="evi-lit-x",
+    )
+    assert d.kind == kind
+
+
+def test_literature_decision_rejects_foreign_kind():
+    with pytest.raises(Exception):
+        LiteratureDecision(
+            outcome="found_nothing", hypothesis_id="hyp-1", kind="conclusion"
+        )
 
 
 def test_literature_decision_requires_nonempty_hypothesis_id():
@@ -157,10 +208,12 @@ def test_literature_decision_is_frozen():
 
 def test_literature_decision_round_trips():
     d = LiteratureDecision(
-        outcome="searched", hypothesis_id="hyp-1", literature_evidence_id="evi-lit-x"
+        outcome="found_nothing", hypothesis_id="hyp-1", kind="method",
+        literature_evidence_id="evi-lit-x",
     )
     restored = LiteratureDecision.model_validate(d.model_dump(mode="json"))
     assert restored == d
+    assert restored.kind == "method"
 
 
 def test_evidence_item_literature_decision_defaults_none():
@@ -183,18 +236,20 @@ def test_evidence_item_with_literature_decision_round_trips():
         id="evi-nov-1",
         spec_id="s",
         kind=EvidenceKind.NOVELTY_DECISION,
-        provenance=Provenance(code_ref="novelty:searched"),
-        result=Result(type="qualitative", finding="searched: DOIs=['10.1/x']"),
+        provenance=Provenance(code_ref="novelty:result:found_nothing"),
+        result=Result(type="qualitative", finding="result-novelty found_nothing"),
         bears_on=[],
         literature_decision=LiteratureDecision(
-            outcome="searched", hypothesis_id="hyp-1", literature_evidence_id="evi-lit-x"
+            outcome="found_nothing", hypothesis_id="hyp-1", kind="result",
+            literature_evidence_id="evi-lit-x",
         ),
     )
     restored = EvidenceItem.model_validate(item.model_dump(mode="json"))
     assert restored == item
     assert restored.literature_decision is not None
-    assert restored.literature_decision.outcome == "searched"
+    assert restored.literature_decision.outcome == "found_nothing"
     assert restored.literature_decision.hypothesis_id == "hyp-1"
+    assert restored.literature_decision.kind == "result"
     # a recorded decision, not a belief
     assert restored.bears_on == []
 

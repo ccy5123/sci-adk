@@ -30,7 +30,7 @@ Reference: design/evidence-validity.md (authoritative), design/abstractions.md
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Literal, Sequence
 
 from sci_adk.core.claim import ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
@@ -286,60 +286,70 @@ def check_digitized_adequacy(
 
 def derive_novelty_status(
     hypothesis: Hypothesis,
+    kind: Literal["result", "method"],
     novelty_decisions: Sequence[EvidenceItem],
 ) -> ClaimStatus:
-    """Derive the revisable novelty-claim status for one hypothesis (the High trigger).
+    """Derive the revisable novelty-claim status for one {hypothesis, kind} (2-kind).
 
-    B-replace (design/literature-acquisition.md §"Discovery trigger model"): novelty is
-    no longer a run-HALT coupled to the experiment verdict. It is a 1st-class revisable
-    Claim derived by THIS PURE RULE -- decoupled from the experiment verdict (no
-    ``verdict_direction`` param) and never raising.
+    Novelty is two INDEPENDENT kinds (design/literature-acquisition.md §"Novelty --
+    definition (2-kind)"): ``result`` (no prior work established the hypothesis's RESULT)
+    and ``method`` (no prior work used its METHOD). They are orthogonal -- each is
+    separately pre-registered (its ``novelty_result`` / ``novelty_method`` flag), searched,
+    and derived. This rule decides ONE kind for ONE hypothesis.
 
-    A novelty/priority claim asserts "first/new" -- a universal-negative over the
-    literature. Its validity rests on a prior-art search that returned nothing. So:
+    B-replace: novelty is not a run-HALT coupled to the experiment verdict. It is a
+    1st-class revisable Claim derived by THIS PURE RULE -- decoupled from the experiment
+    verdict and never raising. The kind's validity rests on a prior-art search of THAT
+    {hyp, kind} that returned nothing. So:
 
-      - returns ``ClaimStatus.SUPPORTED`` iff some ``NOVELTY_DECISION`` bound to
-        ``hypothesis.id`` records ``outcome == "found_nothing"`` (a recorded prior-art
-        search that found no prior art);
-      - returns ``ClaimStatus.PROPOSED`` otherwise -- no decision, a ``skipped``
-        decision (no search), or a ``found_something`` decision (prior art exists).
+      - returns ``ClaimStatus.SUPPORTED`` iff some ``NOVELTY_DECISION`` whose
+        ``literature_decision.hypothesis_id == hypothesis.id`` AND
+        ``literature_decision.kind == kind`` records ``outcome == "found_nothing"``;
+      - returns ``ClaimStatus.PROPOSED`` otherwise -- no decision for this kind, a
+        ``skipped`` decision (no search), or a ``found_something`` decision (prior art).
 
-    SAFETY FLOOR: ``found_something`` NEVER yields SUPPORTED (active ``refuted``
-    promotion is deferred with render). A non-novelty hypothesis yields PROPOSED (the
-    caller does not derive a novelty claim for it; this is a defensive return).
+    SAFETY FLOOR (per kind): ``found_something``/skip/absent NEVER yields SUPPORTED, and a
+    found_nothing on the OTHER kind never satisfies this one (the ``kind ==`` match is
+    load-bearing -- result and method are independent claims). A hypothesis whose ``kind``
+    flag is unset yields PROPOSED (the caller does not derive a claim for an unset kind;
+    this is a defensive return -- a kind is novelty only when its own flag is set,
+    anti-HARKing).
 
     Like the other gates, this takes the novelty DECISION items (kind ==
-    ``NOVELTY_DECISION`` whose ``literature_decision.hypothesis_id == hypothesis.id``),
-    NOT bearing evidence -- the decisions carry ``bears_on=[]`` and never enter the
-    DecisionEngine, so the caller passes them separately.
+    ``NOVELTY_DECISION``), NOT bearing evidence -- the decisions carry ``bears_on=[]`` and
+    never enter the DecisionEngine, so the caller passes them separately.
 
     Args:
         hypothesis: the hypothesis under evaluation (its ``id`` binds the decisions).
+        kind: which novelty axis to derive (``result`` or ``method``).
         novelty_decisions: the ``NOVELTY_DECISION`` EvidenceItems (the caller may pass
-            the full set -- this function matches by kind + payload hypothesis_id).
+            the full set -- this function matches by kind + payload hypothesis_id + kind).
 
     Returns:
-        ``ClaimStatus.SUPPORTED`` iff a recorded found_nothing search exists for the
-        hypothesis, else ``ClaimStatus.PROPOSED``. Never raises.
+        ``ClaimStatus.SUPPORTED`` iff a recorded found_nothing search exists for this
+        {hypothesis, kind}, else ``ClaimStatus.PROPOSED``. Never raises.
     """
-    # @MX:ANCHOR: [AUTO] the novelty status rule (the High discovery trigger, B-replace).
+    # @MX:ANCHOR: [AUTO] the per-kind novelty status rule (2-kind, B-replace).
     # @MX:REASON: [AUTO] ClaimUpdater (persist the novelty claim) and the verify audit
     #   (re-derive it) both call this; it is the one place the "SUPPORTED iff a recorded
-    #   found_nothing prior-art search" rule lives. Loosening it (letting found_something
-    #   or a skip yield SUPPORTED) re-opens the false-novelty claim the trigger exists to
-    #   prevent -- the safety floor. It is PURE (no raise): the HALT was replaced by a
+    #   found_nothing prior-art search of THIS {hyp, kind}" rule lives. Loosening it
+    #   (letting found_something/skip yield SUPPORTED, or letting the other kind's
+    #   found_nothing satisfy this one) re-opens the false-novelty claim the trigger exists
+    #   to prevent -- the safety floor. It is PURE (no raise): the HALT was replaced by a
     #   non-HALT compile-time NoveltyCheckpoint surfaced while the claim is PROPOSED.
-    # Defense-in-depth on the safety floor: a non-novelty hypothesis can never produce a
-    # SUPPORTED novelty claim regardless of any (mis-bound) found_nothing decision. The
-    # caller only derives a novelty claim for novelty=True hypotheses, so this guard is
-    # belt-and-suspenders -- it keeps the single safety-floor predicate honest if a future
-    # caller passes a non-novelty hypothesis.
-    if not hypothesis.novelty:
+    # Defense-in-depth on the safety floor: a hypothesis whose ``kind`` flag is unset can
+    # never produce a SUPPORTED novelty claim for that kind regardless of any (mis-bound)
+    # found_nothing decision. The caller only derives a claim for a SET kind, so this guard
+    # is belt-and-suspenders -- it keeps the single safety-floor predicate honest if a
+    # future caller passes an unset kind.
+    flag = hypothesis.novelty_result if kind == "result" else hypothesis.novelty_method
+    if not flag:
         return ClaimStatus.PROPOSED
     found_nothing = any(
         ev.kind == EvidenceKind.NOVELTY_DECISION
         and ev.literature_decision is not None
         and ev.literature_decision.hypothesis_id == hypothesis.id
+        and ev.literature_decision.kind == kind
         and ev.literature_decision.outcome == "found_nothing"
         for ev in novelty_decisions
     )

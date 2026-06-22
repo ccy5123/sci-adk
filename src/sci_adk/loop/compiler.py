@@ -41,7 +41,7 @@ from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
-from sci_adk.loop.claim_updater import ClaimUpdater
+from sci_adk.loop.claim_updater import ClaimUpdater, _NOVELTY_KINDS
 from sci_adk.loop.judge import Judge
 from sci_adk.loop.literature_triggers import (
     contested_checkpoint,
@@ -484,34 +484,38 @@ class ResearchCompiler:
     def _collect_novelty_checkpoints(
         self, spec: Spec, claims: Sequence[Claim], evidence: Sequence[EvidenceItem]
     ) -> List[NoveltyCheckpoint]:
-        """Surface a reason-tailored novelty checkpoint per novelty=True hypothesis whose
-        ``claim-novelty-<hyp>`` is PROPOSED (NON-HALT; ``novelty_open`` keys on the
-        novelty claim just persisted, so a re-compile after a found_nothing decision --
-        which makes the claim SUPPORTED -- surfaces nothing).
+        """Surface a reason-tailored novelty checkpoint per {hypothesis, kind} whose
+        ``novelty_{kind}`` flag is set and whose ``claim-novelty-{kind}-<hyp>`` is PROPOSED
+        (NON-HALT, 2-kind; ``novelty_open`` keys on the kind's novelty claim just persisted,
+        so a re-compile after a found_nothing decision for that kind -- which makes the
+        claim SUPPORTED -- surfaces nothing).
 
-        Iterates the SPEC hypotheses (not ``claims``): a novelty hypothesis is open even
-        with no experiment claim, exactly as the novelty pass in ClaimUpdater persists
-        its novelty claim independently of experiment evidence.
+        Iterates the SPEC hypotheses x kinds (not ``claims``): a flagged novelty kind is
+        open even with no experiment claim, exactly as the novelty pass in ClaimUpdater
+        persists its per-kind novelty claim independently of experiment evidence.
 
-        The reason is derived from the SAME in-memory ``evidence`` the novelty claim was
-        derived from (``novelty_reason_from_decisions`` over the NOVELTY_DECISIONs in
-        ``evidence``), NOT from disk: in a single-pass ``compile()`` an in-memory
-        found_something decision is not yet persisted, so a disk read would emit the wrong
-        (not_searched / "go search") prompt. ``novelty_open`` reads the just-persisted
-        novelty CLAIM status, which IS on disk -- that read is correct.
+        The reason is derived per kind from the SAME in-memory ``evidence`` the kind's
+        novelty claim was derived from (``novelty_reason_from_decisions(h.id, kind, ...)``
+        over the NOVELTY_DECISIONs in ``evidence``), NOT from disk: in a single-pass
+        ``compile()`` an in-memory found_something decision is not yet persisted, so a disk
+        read would emit the wrong (not_searched / "go search") prompt. ``novelty_open``
+        reads the just-persisted kind novelty CLAIM status, which IS on disk -- correct.
         """
         novelty_decisions = [
             ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
         ]
         out: List[NoveltyCheckpoint] = []
         for h in spec.hypotheses:
-            if not h.novelty:
-                continue
-            if novelty_open(spec, h.id, self.workspace_dir):
-                reason = novelty_reason_from_decisions(h.id, novelty_decisions)
-                out.append(
-                    novelty_checkpoint(spec, h.id, spec.version, reason=reason)
-                )
+            for kind in _NOVELTY_KINDS:
+                if novelty_open(spec, h.id, kind, self.workspace_dir):
+                    reason = novelty_reason_from_decisions(
+                        h.id, kind, novelty_decisions
+                    )
+                    out.append(
+                        novelty_checkpoint(
+                            spec, h.id, kind, spec.version, reason=reason
+                        )
+                    )
         return out
 
     @staticmethod

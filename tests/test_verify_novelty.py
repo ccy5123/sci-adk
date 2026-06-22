@@ -1,17 +1,18 @@
 """
-verify (F6) re-derives the novelty claim from the record (RED-first, B-replace).
+verify (F6) re-derives the per-kind novelty claim from the record (2-kind, B-replace).
 
-design/literature-acquisition.md §"Discovery trigger model" + design/rigor-shell-
+design/literature-acquisition.md §"Novelty -- definition (2-kind)" + design/rigor-shell-
 architecture.md §6.2/§8 F6: ``verify_run`` re-derives belief from the RECORDED run.
 
-For each ``novelty=True`` hypothesis, verify RE-DERIVES the novelty status via
-``derive_novelty_status(hyp, recorded novelty_decisions)`` and compares it to the
-RECORDED ``claim-novelty-<hyp>``:
+For each per-kind novelty claim ``claim-novelty-{kind}-<hyp>``, verify parses the KIND
+from the claim id and RE-DERIVES the status via
+``derive_novelty_status(hyp, kind, recorded novelty_decisions)`` and compares it to the
+RECORDED claim:
 
-  - recorded SUPPORTED, re-derivation SUPPORTED (the found_nothing decision is intact)
-        -> REPRODUCED
-  - recorded SUPPORTED, re-derivation PROPOSED (the found_nothing decision was deleted
-        or tampered found_something->found_nothing) -> DIVERGED.
+  - recorded SUPPORTED, re-derivation SUPPORTED (the {hyp, kind} found_nothing decision is
+        intact) -> REPRODUCED
+  - recorded SUPPORTED, re-derivation PROPOSED (the found_nothing decision was deleted or
+        tampered found_something->found_nothing for that kind) -> DIVERGED.
 
 The record digest covers evidence, so tampering is also caught there. READ-ONLY: no
 persist, no LLM, no capability.
@@ -65,7 +66,7 @@ def _novelty_spec(spec_id: str, hyp_id: str = "hyp-n", value: float = 0.9) -> Sp
                 ),
                 referent="formal",
                 non_circularity=_NON_CIRC,
-                novelty=True,
+                novelty_result=True,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -87,11 +88,12 @@ def _experiment_with_found_nothing(point: float, hyp_id: str = "hyp-n"):
             EvidenceItem(
                 id="evi-nov-found-nothing", spec_id=s.id,
                 kind=EvidenceKind.NOVELTY_DECISION,
-                provenance=Provenance(code_ref="novelty:found_nothing"),
-                result=Result(type="qualitative", finding="found_nothing: DOIs=['10.1/x']"),
+                provenance=Provenance(code_ref="novelty:result:found_nothing"),
+                result=Result(type="qualitative",
+                              finding="result found_nothing: DOIs=['10.1/x']"),
                 bears_on=[],
                 literature_decision=LiteratureDecision(
-                    outcome="found_nothing", hypothesis_id=hyp_id,
+                    outcome="found_nothing", hypothesis_id=hyp_id, kind="result",
                     literature_evidence_id="evi-lit-x"),
             ),
         ]
@@ -114,7 +116,7 @@ def test_verify_supported_novelty_with_found_nothing_reproduced(tmp_path):
     run_dir = _seed(tmp_path, spec, _experiment_with_found_nothing(0.95))
 
     # the recorded novelty claim is SUPPORTED
-    nov_claim = run_dir / "claims" / "claim-novelty-hyp-n.json"
+    nov_claim = run_dir / "claims" / "claim-novelty-result-hyp-n.json"
     assert json.loads(nov_claim.read_text(encoding="utf-8"))["status"] == "supported"
 
     report = verify_run(run_dir)
@@ -137,7 +139,7 @@ def test_verify_supported_novelty_without_found_nothing_diverged(tmp_path):
     spec = _novelty_spec("nv-tampered", value=0.9)
     run_dir = _seed(tmp_path, spec, _experiment_with_found_nothing(0.95))
 
-    nov_claim = run_dir / "claims" / "claim-novelty-hyp-n.json"
+    nov_claim = run_dir / "claims" / "claim-novelty-result-hyp-n.json"
     assert json.loads(nov_claim.read_text(encoding="utf-8"))["status"] == "supported"
 
     # Remove the found_nothing decision from the record (tamper / deletion).
@@ -173,16 +175,17 @@ def test_verify_tampered_found_something_to_found_nothing_diverged(tmp_path):
             EvidenceItem(
                 id="evi-nov-found-something", spec_id=s.id,
                 kind=EvidenceKind.NOVELTY_DECISION,
-                provenance=Provenance(code_ref="novelty:found_something"),
-                result=Result(type="qualitative", finding="found_something: prior art"),
+                provenance=Provenance(code_ref="novelty:result:found_something"),
+                result=Result(type="qualitative",
+                              finding="result found_something: prior art"),
                 bears_on=[],
                 literature_decision=LiteratureDecision(
-                    outcome="found_something", hypothesis_id="hyp-n"),
+                    outcome="found_something", hypothesis_id="hyp-n", kind="result"),
             ),
         ]
 
     run_dir = _seed(tmp_path, spec, exp)
-    nov_claim = run_dir / "claims" / "claim-novelty-hyp-n.json"
+    nov_claim = run_dir / "claims" / "claim-novelty-result-hyp-n.json"
     # honestly derived -> PROPOSED
     assert json.loads(nov_claim.read_text(encoding="utf-8"))["status"] == "proposed"
 
@@ -203,6 +206,61 @@ def test_verify_tampered_found_something_to_found_nothing_diverged(tmp_path):
     ]
     assert any(o.result == "DIVERGED" for o in nov_outcomes)
     assert report.all_reproduced is False
+
+
+def test_verify_parses_method_kind_from_claim_id(tmp_path):
+    """A method-novelty run records ``claim-novelty-method-<hyp>``; verify must parse the
+    method kind from the id and re-derive against the METHOD found_nothing decision (not
+    a result one). A result found_nothing in the record must NOT make it REPRODUCED."""
+    spec = Spec(
+        id="nv-method", version=1,
+        raw_proposal=RawProposal(background="b", goal="g", method="m",
+                                 expected_output="o"),
+        hypotheses=[
+            Hypothesis(
+                id="hyp-n", statement="first to show Z",
+                mode=HypothesisMode.CONFIRMATORY,
+                decision_rule=DecisionRule(
+                    kind=DecisionRuleKind.THRESHOLD,
+                    expression="point >= threshold => support",
+                    params={"statistic": "point", "op": ">=", "value": 0.9},
+                ),
+                referent="formal", non_circularity=_NON_CIRC,
+                novelty_method=True,  # only the METHOD kind
+            )
+        ],
+        method=MethodPlan(approaches=["a"], tools=[]),
+        target_claims=[TargetClaim(id="tc", statement="t", answers="hyp-n")],
+    )
+
+    def exp(s, w):
+        return [
+            EvidenceItem(
+                id="ev-num", spec_id=s.id, kind=EvidenceKind.EXPERIMENT_RUN,
+                provenance=Provenance(code_ref="fixture", data_source="generated"),
+                result=Result(type="quantitative", point=0.95),
+                bears_on=[Bearing(target_id="hyp-n",
+                                  direction=BearingDirection.SUPPORTS)],
+            ),
+            EvidenceItem(
+                id="evi-nov-method-fn", spec_id=s.id,
+                kind=EvidenceKind.NOVELTY_DECISION,
+                provenance=Provenance(code_ref="novelty:method:found_nothing"),
+                result=Result(type="qualitative", finding="method found_nothing"),
+                bears_on=[],
+                literature_decision=LiteratureDecision(
+                    outcome="found_nothing", hypothesis_id="hyp-n", kind="method"),
+            ),
+        ]
+
+    run_dir = _seed(tmp_path, spec, exp)
+    method_claim = run_dir / "claims" / "claim-novelty-method-hyp-n.json"
+    assert json.loads(method_claim.read_text(encoding="utf-8"))["status"] == "supported"
+    assert not (run_dir / "claims" / "claim-novelty-result-hyp-n.json").exists()
+
+    report = verify_run(run_dir)
+    # the method novelty claim re-derives SUPPORTED -> REPRODUCED; whole run reproduces.
+    assert report.all_reproduced is True
 
 
 def test_verify_is_read_only_for_novelty(tmp_path):

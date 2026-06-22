@@ -60,6 +60,13 @@ DIRECTION_TO_STATUS: dict[BearingDirection, ClaimStatus] = {
 }
 
 
+# The two independent novelty axes (design/literature-acquisition.md §"Novelty --
+# definition (2-kind)"). Iterated by the novelty pass so each flagged kind gets its own
+# ``claim-novelty-{kind}-<hyp>``. Order is fixed (result before method) for deterministic
+# claim ordering on re-compile.
+_NOVELTY_KINDS: tuple[str, ...] = ("result", "method")
+
+
 def is_proposed_digitized(ev: EvidenceItem) -> bool:
     """True iff ``ev`` is a digitized item still in the ``proposed`` state.
 
@@ -172,9 +179,9 @@ class ClaimUpdater:
             evidence_items: List of EvidenceItems to evaluate
 
         Returns:
-            Updated/created Claims -- the EXPERIMENT claims AND the novelty claims
-            (``claim-novelty-<hyp>``) for novelty hypotheses, so the compiler sees and
-            persists both.
+            Updated/created Claims -- the EXPERIMENT claims AND the per-kind novelty claims
+            (``claim-novelty-{result,method}-<hyp>``) for each flagged novelty kind, so the
+            compiler sees and persists both.
         """
         claims = []
 
@@ -211,10 +218,10 @@ class ClaimUpdater:
             claims.append(claim)
             self._save_claim(claim)
 
-        # SEPARATE per-hypothesis novelty pass (B-replace). NOT gated by the
-        # experiment-evidence ``continue`` above: a novelty=True hypothesis gets its
-        # ``claim-novelty-<hyp>`` derived/persisted even when it has no experiment
-        # evidence yet (the novelty claim is decoupled from the experiment claim).
+        # SEPARATE per-{hypothesis, kind} novelty pass (B-replace, 2-kind). NOT gated by
+        # the experiment-evidence ``continue`` above: each flagged novelty kind gets its
+        # ``claim-novelty-{kind}-<hyp>`` derived/persisted even when the hypothesis has no
+        # experiment evidence yet (the novelty claim is decoupled from the experiment claim).
         claims.extend(self._update_novelty_claims(novelty_decisions))
 
         return claims
@@ -222,57 +229,71 @@ class ClaimUpdater:
     def _update_novelty_claims(
         self, novelty_decisions: List[EvidenceItem]
     ) -> List[Claim]:
-        """Load-or-create + persist a ``claim-novelty-<hyp>`` for every novelty=True
-        hypothesis, with status = ``derive_novelty_status(hyp, novelty_decisions)``.
+        """Load-or-create + persist a ``claim-novelty-{kind}-<hyp>`` for every {hypothesis,
+        kind} whose ``novelty_{kind}`` flag is set, with status =
+        ``derive_novelty_status(hyp, kind, novelty_decisions)`` (2-kind).
 
-        The novelty claim is a full revisable Claim with a stable id, so re-compile is
-        idempotent and the status can move non-monotonically (PROPOSED -> SUPPORTED when
-        a found_nothing decision is later added). The Confidence is STRUCTURAL (no
+        The two kinds (``result``, ``method``) are INDEPENDENT: each flagged kind gets its
+        own claim, derived from a {hyp, kind}-bound found_nothing decision. The novelty
+        claim is a full revisable Claim with a stable id, so re-compile is idempotent and
+        the status can move non-monotonically (PROPOSED -> SUPPORTED when a found_nothing
+        decision for THAT kind is later added). The Confidence is STRUCTURAL (no
         DecisionRule -- novelty is rule-derived, not evidence-tallied).
         """
         out: List[Claim] = []
         for hypothesis in self.spec.hypotheses:
-            if not hypothesis.novelty:
-                continue
-            status = derive_novelty_status(hypothesis, novelty_decisions)
-            triggering_id = self._latest_evidence_id(novelty_decisions)
-            existing = self._load_novelty_claim(hypothesis)
-            if existing is not None:
-                claim = self._apply_novelty_update(existing, status, triggering_id)
-            else:
-                claim = self._create_novelty_claim(hypothesis, status, triggering_id)
-            out.append(claim)
-            self._save_claim(claim)
+            for kind in _NOVELTY_KINDS:
+                flag = (
+                    hypothesis.novelty_result if kind == "result"
+                    else hypothesis.novelty_method
+                )
+                if not flag:
+                    continue
+                status = derive_novelty_status(hypothesis, kind, novelty_decisions)
+                triggering_id = self._latest_evidence_id(novelty_decisions)
+                existing = self._load_novelty_claim(hypothesis, kind)
+                if existing is not None:
+                    claim = self._apply_novelty_update(
+                        existing, kind, status, triggering_id
+                    )
+                else:
+                    claim = self._create_novelty_claim(
+                        hypothesis, kind, status, triggering_id
+                    )
+                out.append(claim)
+                self._save_claim(claim)
         return out
 
     @staticmethod
-    def _novelty_confidence(status: ClaimStatus) -> Confidence:
-        """Structural Confidence for a novelty claim (rule-derived, not evidence-tallied).
+    def _novelty_confidence(kind: str, status: ClaimStatus) -> Confidence:
+        """Structural Confidence for a {kind} novelty claim (rule-derived, not
+        evidence-tallied).
 
-        SUPPORTED reflects "a prior-art search returned nothing"; PROPOSED reflects an
-        unassessed/minimal basis. Graded type so no numeric threshold carries authority
+        SUPPORTED reflects "a {kind} prior-art search returned nothing"; PROPOSED reflects
+        an unassessed/minimal basis. Graded type so no numeric threshold carries authority
         (the basis is the load-bearing field, C3).
         """
         if status == ClaimStatus.SUPPORTED:
             return Confidence(
                 type=ConfidenceType.GRADED,
                 level=ConfidenceLevel.MODERATE,
-                basis="novelty supported: a recorded prior-art search returned nothing "
-                "(found_nothing) for this hypothesis (rule-derived, decoupled from the "
-                "experiment verdict).",
+                basis=f"{kind}-novelty supported: a recorded prior-art search returned "
+                f"nothing (found_nothing) for the {kind} kind of this hypothesis "
+                "(rule-derived, decoupled from the experiment verdict).",
             )
         return Confidence(
             type=ConfidenceType.GRADED,
             level=ConfidenceLevel.NONE,
-            basis="novelty unassessed: no recorded found_nothing prior-art search for "
-            "this hypothesis yet (PROPOSED; rule-derived, decoupled from the experiment "
-            "verdict).",
+            basis=f"{kind}-novelty unassessed: no recorded found_nothing prior-art search "
+            f"for the {kind} kind of this hypothesis yet (PROPOSED; rule-derived, "
+            "decoupled from the experiment verdict).",
         )
 
-    def _load_novelty_claim(self, hypothesis) -> Optional[Claim]:
-        """Load the persisted ``claim-novelty-<hyp>`` if present, else ``None``."""
+    def _load_novelty_claim(self, hypothesis, kind: str) -> Optional[Claim]:
+        """Load the persisted ``claim-novelty-{kind}-<hyp>`` if present, else ``None``."""
         filepath = (
-            self.claims_dir / f"{self._generate_novelty_claim_id(hypothesis)}.json"
+            self.claims_dir
+            / f"{self._generate_novelty_claim_id(hypothesis, kind)}.json"
         )
         if not filepath.exists():
             return None
@@ -280,9 +301,9 @@ class ClaimUpdater:
             return Claim.model_validate(json.load(f))
 
     def _apply_novelty_update(
-        self, claim: Claim, status: ClaimStatus, triggering_id: str
+        self, claim: Claim, kind: str, status: ClaimStatus, triggering_id: str
     ) -> Claim:
-        """Non-monotonically update an existing novelty claim (C1/C2).
+        """Non-monotonically update an existing {kind} novelty claim (C1/C2).
 
         Only threads a ``StatusChange`` when the derived status DIFFERS from the current
         one (no spurious history on a stable re-compile). Confidence is refreshed to the
@@ -292,9 +313,9 @@ class ClaimUpdater:
             claim.update_status(
                 status,
                 triggered_by=triggering_id or claim.id,
-                note=f"Re-derivation moved novelty status to {status.value}",
+                note=f"Re-derivation moved {kind}-novelty status to {status.value}",
             )
-        conf = self._novelty_confidence(status)
+        conf = self._novelty_confidence(kind, status)
         claim.update_confidence(
             confidence_type=conf.type,
             level=conf.level,
@@ -304,16 +325,17 @@ class ClaimUpdater:
         return claim
 
     def _create_novelty_claim(
-        self, hypothesis, status: ClaimStatus, triggering_id: str
+        self, hypothesis, kind: str, status: ClaimStatus, triggering_id: str
     ) -> Claim:
-        """Create a fresh ``claim-novelty-<hyp>`` with one initial ``StatusChange``."""
+        """Create a fresh ``claim-novelty-{kind}-<hyp>`` with one initial ``StatusChange``."""
+        label = "Result-novelty" if kind == "result" else "Method-novelty"
         return Claim(
-            id=self._generate_novelty_claim_id(hypothesis),
+            id=self._generate_novelty_claim_id(hypothesis, kind),
             spec_id=self.spec.id,
             answers=hypothesis.id,
-            statement=f"Novelty/priority: {hypothesis.statement}",
+            statement=f"{label}: {hypothesis.statement}",
             status=status,
-            confidence=self._novelty_confidence(status),
+            confidence=self._novelty_confidence(kind, status),
             evidence_set=[],
             mode=hypothesis.mode,
             renders_to=None,
@@ -322,15 +344,16 @@ class ClaimUpdater:
                     at=datetime.now(timezone.utc),
                     from_status=ClaimStatus.PROPOSED,
                     to_status=status,
-                    triggered_by=triggering_id or self._generate_novelty_claim_id(hypothesis),
-                    note="Initial novelty derivation (rule-derived)",
+                    triggered_by=triggering_id
+                    or self._generate_novelty_claim_id(hypothesis, kind),
+                    note=f"Initial {kind}-novelty derivation (rule-derived)",
                 )
             ],
         )
 
-    def _generate_novelty_claim_id(self, hypothesis) -> str:
-        """Stable novelty Claim id per hypothesis (``claim-novelty-<hyp.id>``)."""
-        return f"claim-novelty-{hypothesis.id}"
+    def _generate_novelty_claim_id(self, hypothesis, kind: str) -> str:
+        """Stable novelty Claim id per {hypothesis, kind} (``claim-novelty-{kind}-<hyp.id>``)."""
+        return f"claim-novelty-{kind}-{hypothesis.id}"
 
     def _evaluate_hypothesis(
         self,

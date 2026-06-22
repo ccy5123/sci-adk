@@ -13,8 +13,9 @@ These tests build fake run dirs (reusing the ``run_checkpoint_loop`` /
   - empty/missing run -> "nothing recorded" report, empty lists, exit-0-friendly;
   - a PROPOSED experiment claim -> listed unresolved; headline counts it;
   - a CONTESTED claim -> listed in contested;
-  - a novelty=True hyp with a PROPOSED ``claim-novelty-<hyp>`` -> novelty_unresolved;
-    once a found_nothing decision is recorded (claim SUPPORTED) -> not listed;
+  - a flagged result-novelty hyp with a PROPOSED ``claim-novelty-result-<hyp>`` ->
+    novelty_unresolved lists ``"<hyp>:result"``; once a found_nothing decision of that
+    kind is recorded (claim SUPPORTED) -> not listed;
   - prior_work open vs recorded;
   - a ``checkpoints/<hyp>.json`` without a matching ``verdicts/<hyp>.json`` ->
     awaiting-verdict; with the verdict present -> not.
@@ -82,7 +83,7 @@ def _spec(spec_id: str, hyp_id: str = "hyp-x", novelty: bool = False,
                 ),
                 referent="formal",
                 non_circularity=_NON_CIRC,
-                novelty=novelty,
+                novelty_result=novelty,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -104,8 +105,8 @@ def _write_claim(run_dir: Path, claim: Claim) -> None:
 
 
 def _claim(spec_id: str, hyp_id: str, status: ClaimStatus,
-           *, novelty: bool = False) -> Claim:
-    cid = f"claim-novelty-{hyp_id}" if novelty else f"claim-{hyp_id}"
+           *, novelty: bool = False, kind: str = "result") -> Claim:
+    cid = f"claim-novelty-{kind}-{hyp_id}" if novelty else f"claim-{hyp_id}"
     return Claim(
         id=cid, spec_id=spec_id, answers=hyp_id, statement="c",
         status=status,
@@ -142,12 +143,12 @@ def _found_nothing_experiment(point: float, hyp_id: str = "hyp-x"):
             EvidenceItem(
                 id="evi-nov-found-nothing", spec_id=s.id,
                 kind=EvidenceKind.NOVELTY_DECISION,
-                provenance=Provenance(code_ref="novelty:found_nothing"),
+                provenance=Provenance(code_ref="novelty:result:found_nothing"),
                 result=Result(type="qualitative",
-                              finding="found_nothing: DOIs=['10.1/x']"),
+                              finding="result found_nothing: DOIs=['10.1/x']"),
                 bears_on=[],
                 literature_decision=LiteratureDecision(
-                    outcome="found_nothing", hypothesis_id=hyp_id,
+                    outcome="found_nothing", hypothesis_id=hyp_id, kind="result",
                     literature_evidence_id="evi-lit-x"),
             ),
         ]
@@ -230,29 +231,30 @@ def test_contested_claim_is_listed(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_novelty_proposed_is_unresolved(tmp_path):
-    """A novelty=True hyp with a PROPOSED claim-novelty-<hyp> and no found_nothing
-    decision -> novelty_unresolved lists the hyp id."""
+    """A flagged result-novelty hyp with a PROPOSED claim-novelty-result-<hyp> and no
+    found_nothing decision -> novelty_unresolved lists ``"<hyp>:result"`` (the entry
+    encodes both the hypothesis id and the kind)."""
     spec = _spec("sp-nov-open", novelty=True)
     run_dir = tmp_path / "runs" / spec.id
     _write_spec(run_dir, spec)
     _write_claim(run_dir, _claim(spec.id, "hyp-x", ClaimStatus.PROPOSED,
-                                 novelty=True))
+                                 novelty=True, kind="result"))
 
     report = session_status(run_dir)
-    assert "hyp-x" in report.novelty_unresolved
+    assert "hyp-x:result" in report.novelty_unresolved
 
 
 def test_novelty_found_nothing_is_resolved(tmp_path):
-    """Once a found_nothing NOVELTY_DECISION is recorded (claim SUPPORTED), the
+    """Once a found_nothing NOVELTY_DECISION is recorded (the kind's claim SUPPORTED), the
     novelty checkpoint is closed -> not listed."""
     spec = _spec("sp-nov-closed", novelty=True)
     run_dir = tmp_path / "runs" / spec.id
-    # the loop derives a SUPPORTED novelty claim from the found_nothing decision
+    # the loop derives a SUPPORTED result-novelty claim from the found_nothing decision
     run_checkpoint_loop(run_dir=run_dir, spec=spec,
                         experiment=_found_nothing_experiment(0.95),
                         workspace_dir=tmp_path)
 
-    nov_claim = run_dir / "claims" / "claim-novelty-hyp-x.json"
+    nov_claim = run_dir / "claims" / "claim-novelty-result-hyp-x.json"
     assert json.loads(nov_claim.read_text(encoding="utf-8"))["status"] == "supported"
 
     report = session_status(run_dir)

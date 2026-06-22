@@ -1,6 +1,6 @@
 # sci-adk Literature Acquisition
 
-> Status: v0.5 (2026-06-18). How sci-adk surveys and acquires prior work.
+> Status: v0.6 (2026-06-18). How sci-adk surveys and acquires prior work.
 > Discovery = Claude's web_search (allowed tool); acquisition = paperforge.
 > v0.2 added the discovery **trigger model** (graded triggers + a recorded
 > search/skip decision + an F7 link). v0.3 IMPLEMENTS the novelty (High) and
@@ -9,7 +9,12 @@
 > run-HALT coupled to the experiment verdict -- it is a 1st-class revisable Claim
 > derived by rule. **v0.5 lays down the 2-kind Novelty definition** (result-novelty +
 > method-novelty, independent; see "Novelty -- definition") as the agreed refinement of
-> the single-flag implementation. The paper-render (Low) novelty gate remains deferred.
+> the single-flag implementation. **v0.6 IMPLEMENTS the 2-kind core (N1):** the single
+> `Hypothesis.novelty` flag is replaced by independent `novelty_result` / `novelty_method`
+> (hard migration, no back-compat); per-{hyp, kind} claims, decisions, derivation, and the
+> CLI `--kind` flag are now live. The render-time `\novelty{}` markup + scoped-render (N2)
+> and the render/verify novelty GATE (N3) remain deferred. The paper-render (Low) novelty
+> gate remains deferred.
 
 sci-adk acquires the literature the way a researcher does: when starting, when
 unsure, or when checking whether something has already been done, you *search*
@@ -160,9 +165,12 @@ same mechanism.
 
 ## Novelty — definition (2-kind; agreed 2026-06-18)
 
-> This is the AGREED conceptual definition. It REFINES the single-flag implementation
-> described under "Implementation" below (one `Hypothesis.novelty` flag + one
-> `claim-novelty-<hyp>`); the migration to the 2-kind model is pending.
+> This is the AGREED conceptual definition. It is now IMPLEMENTED in the 2-kind core
+> (N1, v0.6): the single `Hypothesis.novelty` flag is replaced by independent
+> `novelty_result` / `novelty_method`, each backed by a per-{hyp, kind}
+> `claim-novelty-result-<hyp>` / `claim-novelty-method-<hyp>`, a `NOVELTY_DECISION.kind`,
+> and `derive_novelty_status(hyp, kind, ...)`. The render-time markup + scoped-render (N2)
+> and the render/verify novelty gate (N3) remain pending.
 
 **Novelty** in sci-adk is a revisable, **literature-referent** Claim that, as of a
 recorded prior-art search, **no prior published work establishes a specified aspect of a
@@ -199,7 +207,7 @@ deterministic: it checks that a `found_nothing` search of the right {hyp, kind} 
 record. Likewise sci-adk does not adjudicate **significance/importance** (a value
 judgment) — only novelty (a recordable literature-absence claim).
 
-**Structural changes from the single-flag model (migration target):**
+**Structural changes from the single-flag model (IMPLEMENTED in N1, v0.6 — the "current (single)" column is now historical/removed):**
 
 | element | current (single) | 2-kind |
 |---------|------------------|--------|
@@ -208,7 +216,7 @@ judgment) — only novelty (a recordable literature-absence claim).
 | `NOVELTY_DECISION` | hyp-bound | + `kind: result \| method` |
 | `derive_novelty_status` | per hyp | per {hyp, kind} |
 | CLI | `sci-adk novelty <run> --hypothesis <id> ...` | `... --kind {result\|method}` |
-| (future) render markup | `\novelty{hyp}{text}` | `\novelty{result\|method}{hyp}{text}` |
+| (future) render markup — STILL PENDING (N2) | `\novelty{hyp}{text}` | `\novelty{result\|method}{hyp}{text}` |
 
 ### Render-time novelty gate (design agreed 2026-06-18; implementation pending)
 
@@ -250,8 +258,21 @@ contradiction.)
 {hyp, kind} is on record — never semantic "same-ness" (the searcher's recorded judgment) or
 significance.
 
-Implementation depends on the 2-kind migration above (markup carries `kind`; the gate keys
-on `claim-novelty-{kind}-{hyp}`).
+The 2-kind migration this gate depends on is now implemented (N1, v0.6), so the markup +
+gate (N2/N3) remain to be built on top of the now-live `claim-novelty-{kind}-{hyp}`
+primitives (markup carries `kind`; the gate keys on `claim-novelty-{kind}-{hyp}`).
+
+**Implementation (v0.6, N1 — 2-kind core).** The conceptual 2-kind definition above is
+now the implemented core (the v0.3/v0.4 single-flag narrative that follows is preserved as
+the evolution record). Concretely: the single `Hypothesis.novelty` flag → independent
+`novelty_result` / `novelty_method`; `claim-novelty-<hyp>` → `claim-novelty-{kind}-<hyp>`
+(only for set kinds); every `NOVELTY_DECISION` carries `kind`; `derive_novelty_status` is
+per-{hyp, kind} (SUPPORTED iff a matching {hyp, kind} `found_nothing` decision is on record,
+the `kind==` match load-bearing); the CLI gained a **required** `--kind {result|method}`;
+and `sci-adk verify` re-derives per kind (DIVERGED when only the OTHER kind's `found_nothing`
+exists). This was a **hard migration (no back-compat alias)** — the old single flag is not
+auto-mapped onto either kind — and is independently verified (997 tests). N2 (the render-time
+`\novelty{}` markup + scoped-render) and N3 (the render/verify novelty gate) remain deferred.
 
 **Implementation (v0.3).** The novelty (High) and contested (Medium) triggers are
 now built, on top of the Spec-creation anchor. Each recording-type checkpoint
@@ -260,10 +281,13 @@ discriminated union in `loop/verdict.py`): a recording-only checkpoint is that s
 surface with no verdict trail, so the marginal cost is low. Concretely:
 
 - **Novelty (High) -- v0.4 B-replace (a revisable claim, not a HALT).** `Hypothesis.novelty`
-  remains a frozen anti-HARKing flag, but novelty is now **decoupled from the experiment
-  claim** and is a **1st-class revisable Claim** `claim-novelty-<hyp>`, separate from the
+  (v0.6: now per-{hyp, kind} `novelty_result` / `novelty_method`) remains a frozen
+  anti-HARKing flag, but novelty is now **decoupled from the experiment
+  claim** and is a **1st-class revisable Claim** `claim-novelty-<hyp>` (v0.6: now
+  `claim-novelty-{kind}-<hyp>`), separate from the
   experiment claim `claim-<hyp>`. The status is derived by a PURE RULE
-  `derive_novelty_status(hypothesis, novelty_decisions)` (in `core/validity.py`, no
+  `derive_novelty_status(hypothesis, novelty_decisions)` (v0.6: now per-{hyp, kind}
+  `derive_novelty_status(hyp, kind, novelty_decisions)`) (in `core/validity.py`, no
   raise): **SUPPORTED iff** a recorded `NOVELTY_DECISION` bound to the hypothesis has
   outcome `found_nothing` (a prior-art search that returned nothing); otherwise
   **PROPOSED** (no decision, a `skipped` one, or a `found_something` one). The searched
@@ -277,6 +301,7 @@ surface with no verdict trail, so the marginal cost is low. Concretely:
   search is done and the escape is the F7 amendment (it does **not** say "go search").
   Dropping the flag is a human-only Spec amendment (F7) -- never a silent edit. `sci-adk
   verify` RE-DERIVES the novelty status from the record: a SUPPORTED `claim-novelty-<hyp>`
+  (v0.6: now per-{hyp, kind} `claim-novelty-{kind}-<hyp>`)
   whose `found_nothing` decision was deleted (or a `found_something` tampered to
   `found_nothing`) is reported DIVERGED. The render `first`-gate + hedge reporting remain
   **DEFERRED** (this milestone is render-free).
@@ -289,7 +314,8 @@ surface with no verdict trail, so the marginal cost is low. Concretely:
   Spec-creation `prior_work_open` closing-kind anchor (which keys only on
   `PRIOR_WORK_DECISION`) is unchanged.
 - The CLI verbs are `sci-adk novelty <run> --hypothesis <id> (--searched <dois...>
-  --outcome {found-nothing|found-prior-art} | --skip --reason "...")` and `sci-adk
+  --outcome {found-nothing|found-prior-art} | --skip --reason "...")` (v0.6: now also takes
+  a **required** `--kind {result|method}`) and `sci-adk
   contested <run> --hypothesis <id> (--searched <dois...> | --note "...")`. For novelty,
   `--searched` and `--outcome` are required together (a recorded search records what it
   found; `found-nothing` -> `found_nothing`, `found-prior-art` -> `found_something`). The
@@ -318,14 +344,16 @@ old SUPPORTS-only gate was an artifact of the A-design and is removed in B-repla
   (`prior_work_open` / `record_prior_work_searched` / `record_prior_work_skip`).
 - `src/sci_adk/loop/literature_triggers.py` -- the novelty (High) + contested (Medium)
   triggers (`record_novelty_searched` / `record_novelty_skip` / `record_contested` /
-  `contested_open` / `contested_checkpoint`).
+  `contested_open` / `contested_checkpoint`); v0.6: the novelty recorders/predicates
+  (`record_novelty_searched` / `record_novelty_skip` / `novelty_open` / `novelty_checkpoint`
+  / `novelty_reason_from_decisions`) now take `kind`.
 - `src/sci_adk/loop/decision_record.py` -- the single shared decision-writer reused by
   all three triggers (`write_decision_evidence`).
-- `src/sci_adk/core/validity.py` -- `derive_novelty_status` (the pure novelty-status rule; the old `check_novelty_adequacy` HALT was removed in B-replace).
+- `src/sci_adk/core/validity.py` -- `derive_novelty_status(hyp, kind, novelty_decisions)` (the pure novelty-status rule, now per-{hyp, kind}; the old `check_novelty_adequacy` HALT was removed in B-replace).
 - `design/tool-policy.md` -- paperforge tool record + web_search discovery pairing.
 
 ---
 
-Version: 0.4.0
-Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18)
+Version: 0.6.0
+Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18); 2-kind Novelty core (N1) implemented — hard migration, no back-compat (2026-06-18)
 Last Updated: 2026-06-18

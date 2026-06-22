@@ -1,19 +1,22 @@
 """
-Novelty soft-checkpoint surfacing in the compiler/run path (RED-first, B-replace).
+Novelty soft-checkpoint surfacing in the compiler/run path (2-kind, B-replace).
 
-design/literature-acquisition.md §"Discovery trigger model" (High trigger, B-replace):
-novelty no longer HALTs. Instead, while a ``novelty=True`` hypothesis's
-``claim-novelty-<hyp>`` is PROPOSED, the run/compiler path surfaces a NON-HALT
+design/literature-acquisition.md §"Novelty -- definition (2-kind)" (High trigger,
+B-replace): novelty no longer HALTs. Instead, while a flagged {hypothesis, kind}'s
+``claim-novelty-{kind}-<hyp>`` is PROPOSED, the run/compiler path surfaces a NON-HALT
 ``NoveltyCheckpoint`` (mirroring how the contested checkpoint is surfaced). The compile
-PROCEEDS normally -- the checkpoint is collected and returned, nothing stops.
+PROCEEDS normally -- the checkpoint is collected and returned, nothing stops. These tests
+exercise a single flagged kind (result), so exactly one checkpoint is expected.
 
-The checkpoint prompt is reason-tailored:
-  - reason ``not_searched`` (no novelty decision, or a ``skipped`` one): "search prior
-    art and record the outcome, or drop the novelty flag via a Spec amendment (F7)".
-  - reason ``found_something``: "prior art was found; drop the novelty flag via a Spec
-    amendment (F7)" -- it does NOT tell the agent to go search (the search is done).
+The checkpoint prompt is reason-tailored and names the kind:
+  - reason ``not_searched`` (no {hyp, kind} novelty decision, or a ``skipped`` one):
+    "search prior art for this kind and record the outcome, or drop the kind's novelty
+    flag via a Spec amendment (F7)".
+  - reason ``found_something``: "prior art was found; drop the kind's novelty flag via a
+    Spec amendment (F7)" -- it does NOT tell the agent to go search (the search is done).
 
-When a found_nothing decision exists (novelty claim SUPPORTED), nothing is surfaced.
+When a found_nothing decision of that kind exists (the kind's novelty claim SUPPORTED),
+nothing is surfaced for that kind.
 """
 
 from __future__ import annotations
@@ -63,7 +66,7 @@ def _novelty_spec(spec_id: str, hyp_id: str = "hyp-1", novelty: bool = True) -> 
                 ),
                 referent="formal",
                 non_circularity=_NON_CIRC,
-                novelty=novelty,
+                novelty_result=novelty,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -94,13 +97,13 @@ def _supporting_with_decision(outcome: str, hyp_id: str = "hyp-1", point: float 
                 bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.SUPPORTS)],
             ),
             EvidenceItem(
-                id=f"evi-nov-{outcome}", spec_id=s.id,
+                id=f"evi-nov-result-{outcome}", spec_id=s.id,
                 kind=EvidenceKind.NOVELTY_DECISION,
-                provenance=Provenance(code_ref=f"novelty:{outcome}"),
-                result=Result(type="qualitative", finding=f"{outcome}: ..."),
+                provenance=Provenance(code_ref=f"novelty:result:{outcome}"),
+                result=Result(type="qualitative", finding=f"result {outcome}: ..."),
                 bears_on=[],
                 literature_decision=LiteratureDecision(
-                    outcome=outcome, hypothesis_id=hyp_id),
+                    outcome=outcome, hypothesis_id=hyp_id, kind="result"),
             ),
         ]
     return experiment

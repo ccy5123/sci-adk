@@ -1,16 +1,16 @@
 """
-record_novelty_searched found-split + novelty_open / novelty_checkpoint (RED-first).
+record_novelty_searched found-split + novelty_open / novelty_checkpoint (2-kind).
 
-design/literature-acquisition.md §"Discovery trigger model" (B-replace): a novelty
-*searched* decision now records its OUTCOME -- ``found_nothing`` (prior art search
-returned nothing -> supports the novelty claim) or ``found_something`` (prior art
-exists -> does not). ``record_novelty_searched`` gains a required ``found`` param
-mapping "nothing"/"something" to the LiteratureDecision outcome.
+design/literature-acquisition.md §"Novelty -- definition (2-kind)": a novelty *searched*
+decision records its OUTCOME -- ``found_nothing`` (prior art search returned nothing ->
+supports the kind's novelty claim) or ``found_something`` (prior art exists -> does not)
+-- and its ``kind`` (result | method). ``record_novelty_searched`` takes a required
+``kind`` and ``found`` param.
 
-``novelty_open(spec, hypothesis_id)`` mirrors ``contested_open``: True iff the
-hypothesis is novelty=True AND its ``claim-novelty-<hyp>`` on disk is PROPOSED.
-``novelty_checkpoint(spec, hyp, version, reason=...)`` builds the reason-tailored
-NoveltyCheckpoint.
+``novelty_open(spec, hypothesis_id, kind)`` mirrors ``contested_open``, per {hyp, kind}:
+True iff the hypothesis has the kind's flag set AND its ``claim-novelty-{kind}-<hyp>`` on
+disk is PROPOSED. ``novelty_checkpoint(spec, hyp, kind, version, reason=...)`` builds the
+reason-tailored, kind-named NoveltyCheckpoint.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from sci_adk.search.paperforge_adapter import AcquisitionRecord, AcquisitionResu
 
 
 def _spec(spec_id: str, hyp_id: str = "hyp-1", novelty: bool = True) -> Spec:
+    """``novelty`` sets the result-novelty flag (the kind these tests exercise)."""
     return Spec(
         id=spec_id,
         version=1,
@@ -50,7 +51,7 @@ def _spec(spec_id: str, hyp_id: str = "hyp-1", novelty: bool = True) -> Spec:
                 mode=HypothesisMode.CONFIRMATORY,
                 decision_rule=DecisionRule(
                     kind=DecisionRuleKind.QUALITATIVE, expression="clear"),
-                novelty=novelty,
+                novelty_result=novelty,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -81,16 +82,16 @@ def _load_novelty_decisions(run_dir: Path) -> list[EvidenceItem]:
 
 
 def _write_novelty_claim(run_dir: Path, spec_id: str, status: ClaimStatus,
-                         hyp_id: str = "hyp-1") -> None:
+                         hyp_id: str = "hyp-1", kind: str = "result") -> None:
     claims_dir = run_dir / "claims"
     claims_dir.mkdir(parents=True, exist_ok=True)
     claim = Claim(
-        id=f"claim-novelty-{hyp_id}", spec_id=spec_id, answers=hyp_id,
+        id=f"claim-novelty-{kind}-{hyp_id}", spec_id=spec_id, answers=hyp_id,
         statement="novelty", status=status,
         confidence=Confidence(type=ConfidenceType.GRADED, level="moderate", basis="x"),
         mode=HypothesisMode.CONFIRMATORY,
     )
-    (claims_dir / f"claim-novelty-{hyp_id}.json").write_text(
+    (claims_dir / f"claim-novelty-{kind}-{hyp_id}.json").write_text(
         json.dumps(claim.model_dump(mode="json"), indent=2), encoding="utf-8")
 
 
@@ -101,25 +102,25 @@ def _write_novelty_claim(run_dir: Path, spec_id: str, status: ClaimStatus,
 def test_record_novelty_searched_found_nothing_writes_found_nothing(tmp_path):
     spec = _spec("nov-fn")
     record_novelty_searched(
-        spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/x"],
+        spec, tmp_path, hypothesis_id="hyp-1", kind="result", dois=["10.1/x"],
         adapter=_FakeAdapter(), email="x@y.z", found="nothing",
     )
     decisions = _load_novelty_decisions(tmp_path / "runs" / spec.id)
-    outcomes = [d.literature_decision.outcome for d in decisions
-                if d.literature_decision is not None]
-    assert "found_nothing" in outcomes
+    pairs = [(d.literature_decision.outcome, d.literature_decision.kind)
+             for d in decisions if d.literature_decision is not None]
+    assert ("found_nothing", "result") in pairs
 
 
 def test_record_novelty_searched_found_something_writes_found_something(tmp_path):
     spec = _spec("nov-fs")
     record_novelty_searched(
-        spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/x"],
+        spec, tmp_path, hypothesis_id="hyp-1", kind="method", dois=["10.1/x"],
         adapter=_FakeAdapter(), email="x@y.z", found="something",
     )
     decisions = _load_novelty_decisions(tmp_path / "runs" / spec.id)
-    outcomes = [d.literature_decision.outcome for d in decisions
-                if d.literature_decision is not None]
-    assert "found_something" in outcomes
+    pairs = [(d.literature_decision.outcome, d.literature_decision.kind)
+             for d in decisions if d.literature_decision is not None]
+    assert ("found_something", "method") in pairs
 
 
 # --------------------------------------------------------------------------- #
@@ -129,47 +130,76 @@ def test_record_novelty_searched_found_something_writes_found_something(tmp_path
 def test_novelty_open_true_when_claim_proposed(tmp_path):
     spec = _spec("nov-open-prop")
     run_dir = tmp_path / "runs" / spec.id
-    _write_novelty_claim(run_dir, spec.id, ClaimStatus.PROPOSED)
-    assert novelty_open(spec, "hyp-1", tmp_path) is True
+    _write_novelty_claim(run_dir, spec.id, ClaimStatus.PROPOSED, kind="result")
+    assert novelty_open(spec, "hyp-1", "result", tmp_path) is True
 
 
 def test_novelty_open_false_when_claim_supported(tmp_path):
     spec = _spec("nov-open-sup")
     run_dir = tmp_path / "runs" / spec.id
-    _write_novelty_claim(run_dir, spec.id, ClaimStatus.SUPPORTED)
-    assert novelty_open(spec, "hyp-1", tmp_path) is False
+    _write_novelty_claim(run_dir, spec.id, ClaimStatus.SUPPORTED, kind="result")
+    assert novelty_open(spec, "hyp-1", "result", tmp_path) is False
 
 
-def test_novelty_open_false_for_non_novelty_hypothesis(tmp_path):
-    spec = _spec("nov-open-off", novelty=False)
+def test_novelty_open_false_for_unset_kind(tmp_path):
+    """The kind whose flag is unset is not a novelty claim -> never open. Here only
+    novelty_result is set (novelty=True), so the method kind is closed."""
+    spec = _spec("nov-open-off")  # novelty_result=True, novelty_method=False
     run_dir = tmp_path / "runs" / spec.id
-    _write_novelty_claim(run_dir, spec.id, ClaimStatus.PROPOSED)
-    assert novelty_open(spec, "hyp-1", tmp_path) is False
+    _write_novelty_claim(run_dir, spec.id, ClaimStatus.PROPOSED, kind="method")
+    assert novelty_open(spec, "hyp-1", "method", tmp_path) is False
+
+
+def test_novelty_open_independent_per_kind(tmp_path):
+    """Each kind's open-ness is independent: a SUPPORTED result claim closes result but
+    leaves an unrecorded method claim (flag set) open."""
+    spec = Spec(
+        id="nov-open-indep", version=1,
+        raw_proposal=RawProposal(background="b", goal="g", method="m",
+                                 expected_output="o"),
+        hypotheses=[
+            Hypothesis(
+                id="hyp-1", statement="first to show Z",
+                mode=HypothesisMode.CONFIRMATORY,
+                decision_rule=DecisionRule(
+                    kind=DecisionRuleKind.QUALITATIVE, expression="clear"),
+                novelty_result=True, novelty_method=True,
+            )
+        ],
+        method=MethodPlan(approaches=["a"], tools=[]),
+        target_claims=[TargetClaim(id="tc", statement="t", answers="hyp-1")],
+    )
+    run_dir = tmp_path / "runs" / spec.id
+    _write_novelty_claim(run_dir, spec.id, ClaimStatus.SUPPORTED, kind="result")
+    assert novelty_open(spec, "hyp-1", "result", tmp_path) is False
+    # method has no recorded claim yet -> implicitly PROPOSED -> open
+    assert novelty_open(spec, "hyp-1", "method", tmp_path) is True
 
 
 def test_novelty_open_true_when_no_claim_yet(tmp_path):
-    """A novelty hypothesis with no recorded novelty claim is implicitly PROPOSED ->
-    open."""
+    """A flagged kind with no recorded novelty claim is implicitly PROPOSED -> open."""
     spec = _spec("nov-open-noclaim")
-    assert novelty_open(spec, "hyp-1", tmp_path) is True
+    assert novelty_open(spec, "hyp-1", "result", tmp_path) is True
 
 
 # --------------------------------------------------------------------------- #
-# novelty_checkpoint reason-tailoring
+# novelty_checkpoint reason-tailoring (per kind)
 # --------------------------------------------------------------------------- #
 
 def test_novelty_checkpoint_not_searched_reason():
     spec = _spec("nov-cp-ns")
-    cp = novelty_checkpoint(spec, "hyp-1", 1, reason="not_searched")
+    cp = novelty_checkpoint(spec, "hyp-1", "result", 1, reason="not_searched")
     assert isinstance(cp, NoveltyCheckpoint)
     assert cp.hypothesis_id == "hyp-1"
     assert cp.spec_id == "nov-cp-ns"
     assert "search" in cp.prompt.lower()
+    assert "result" in cp.prompt.lower()  # the prompt names the kind
 
 
 def test_novelty_checkpoint_found_something_reason():
     spec = _spec("nov-cp-fs")
-    cp = novelty_checkpoint(spec, "hyp-1", 1, reason="found_something")
+    cp = novelty_checkpoint(spec, "hyp-1", "method", 1, reason="found_something")
     prompt = cp.prompt.lower()
     assert "amend" in prompt or "f7" in prompt
     assert "found" in prompt or "prior art" in prompt
+    assert "method" in prompt  # the prompt names the kind

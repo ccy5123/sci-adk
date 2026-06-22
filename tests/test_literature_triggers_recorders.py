@@ -9,9 +9,11 @@ EXISTING ``LiteratureAcquirer`` (same contact-email policy as
 
 Covered:
   - ``record_novelty_searched`` -> a LITERATURE acquisition artifact + a
-    NOVELTY_DECISION(outcome="searched") referencing it; bears_on=[].
+    NOVELTY_DECISION(outcome=found_nothing/found_something, kind=...) referencing it;
+    bears_on=[].
   - ``record_novelty_searched`` honors the contact-email policy (ConfigHalt by default).
-  - ``record_novelty_skip`` -> NOVELTY_DECISION(outcome="skipped") with a required reason.
+  - ``record_novelty_skip`` -> NOVELTY_DECISION(outcome="skipped", kind=...) with a
+    required reason.
   - ``record_contested`` with DOIs -> a LITERATURE artifact + a CONTESTED_RECORD.
   - REGRESSION: NOVELTY_DECISION / CONTESTED_RECORD do NOT close the Spec-creation
     prior_work checkpoint (separate kinds; the prior_work closing-kind set is unchanged).
@@ -56,7 +58,8 @@ def _spec(spec_id: str, hyp_id: str = "hyp-1") -> Spec:
                 decision_rule=DecisionRule(
                     kind=DecisionRuleKind.QUALITATIVE, expression="clear and on-topic"
                 ),
-                novelty=True,
+                novelty_result=True,
+                novelty_method=True,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -101,7 +104,8 @@ def test_record_novelty_searched_writes_decision_referencing_literature(tmp_path
 
     spec = _spec("nov-searched")
     outcome = record_novelty_searched(
-        spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/a", "10.1/b"],
+        spec, tmp_path, hypothesis_id="hyp-1", kind="result",
+        dois=["10.1/a", "10.1/b"],
         found="nothing", adapter=_FakeAdapter(), email="novelty-test@example.org",
     )
     # the acquisition artifact is a LITERATURE item ...
@@ -114,9 +118,10 @@ def test_record_novelty_searched_writes_decision_referencing_literature(tmp_path
 
     decision = next(i for i in items if i.kind is EvidenceKind.NOVELTY_DECISION)
     assert decision.literature_decision is not None
-    # B-replace: a novelty search records its outcome (found_nothing here).
+    # B-replace: a novelty search records its outcome (found_nothing here) + the kind.
     assert decision.literature_decision.outcome == "found_nothing"
     assert decision.literature_decision.hypothesis_id == "hyp-1"
+    assert decision.literature_decision.kind == "result"
     # references the acquired LITERATURE item for traceability
     assert decision.literature_decision.literature_evidence_id == outcome.evidence.id
     assert decision.bears_on == []  # a recorded decision, not a belief
@@ -127,13 +132,14 @@ def test_record_novelty_searched_found_something_records_found_something(tmp_pat
 
     spec = _spec("nov-searched-fs")
     record_novelty_searched(
-        spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/a"],
+        spec, tmp_path, hypothesis_id="hyp-1", kind="method", dois=["10.1/a"],
         found="something", adapter=_FakeAdapter(), email="novelty-test@example.org",
     )
     items = _load_evidence(tmp_path, spec.id)
     decision = next(i for i in items if i.kind is EvidenceKind.NOVELTY_DECISION)
     assert decision.literature_decision is not None
     assert decision.literature_decision.outcome == "found_something"
+    assert decision.literature_decision.kind == "method"
 
 
 def test_record_novelty_searched_requires_email_by_default(tmp_path, monkeypatch):
@@ -155,7 +161,7 @@ def test_record_novelty_searched_requires_email_by_default(tmp_path, monkeypatch
     spec = _spec("nov-noemail")
     with pytest.raises(ConfigHalt):
         record_novelty_searched(
-            spec, tmp_path, hypothesis_id="hyp-1", dois=["10.1/x"],
+            spec, tmp_path, hypothesis_id="hyp-1", kind="result", dois=["10.1/x"],
             found="nothing", adapter=_Spy(), config_root=cfg_root,
         )
     assert calls["n"] == 0  # no acquisition attempted
@@ -170,12 +176,13 @@ def test_record_novelty_skip_writes_decision_with_reason(tmp_path):
 
     spec = _spec("nov-skip")
     item = record_novelty_skip(
-        spec, tmp_path, hypothesis_id="hyp-1",
+        spec, tmp_path, hypothesis_id="hyp-1", kind="result",
         reason="the priority framing was dropped in review",
     )
     assert item.kind is EvidenceKind.NOVELTY_DECISION
     assert item.literature_decision.outcome == "skipped"
     assert item.literature_decision.hypothesis_id == "hyp-1"
+    assert item.literature_decision.kind == "result"
     assert "dropped in review" in (item.result.finding or "")
     assert item.bears_on == []
 
@@ -185,7 +192,9 @@ def test_record_novelty_skip_requires_reason(tmp_path):
 
     spec = _spec("nov-skip-noreason")
     with pytest.raises(ValueError):
-        record_novelty_skip(spec, tmp_path, hypothesis_id="hyp-1", reason="  ")
+        record_novelty_skip(
+            spec, tmp_path, hypothesis_id="hyp-1", kind="result", reason="  "
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -221,7 +230,7 @@ def test_novelty_decision_does_not_close_prior_work(tmp_path):
 
     spec = _spec("reg-nov")
     assert prior_work_open(spec, tmp_path) is True
-    record_novelty_skip(spec, tmp_path, hypothesis_id="hyp-1", reason="r")
+    record_novelty_skip(spec, tmp_path, hypothesis_id="hyp-1", kind="result", reason="r")
     # prior_work is STILL open: a novelty decision is a different kind.
     assert prior_work_open(spec, tmp_path) is True
 

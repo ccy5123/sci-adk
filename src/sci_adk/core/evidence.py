@@ -400,6 +400,12 @@ class LiteratureDecision(BaseModel):
             NOT support the novelty claim).
         hypothesis_id: the hypothesis this decision is bound to (REQUIRED, non-empty --
             these triggers are hypothesis-bound, unlike the Spec-time prior-art check).
+        kind: ``result`` | ``method`` -- which novelty axis this NOVELTY_DECISION serves
+            (design/literature-acquisition.md §"Novelty -- definition (2-kind)"). The two
+            axes are orthogonal: a {hyp, result} decision derives only the result-novelty
+            claim, a {hyp, method} decision only the method-novelty claim. REQUIRED on
+            every NOVELTY_DECISION (the recorders always set it); ``None`` on the kindless
+            CONTESTED_RECORD (and prior-work, which carries no LiteratureDecision at all).
         reason: why the search was skipped, or a contested note (optional).
         literature_evidence_id: the id of the ``LITERATURE`` EvidenceItem this decision
             references, when a search was performed (None for a pure skip).
@@ -422,6 +428,11 @@ class LiteratureDecision(BaseModel):
     hypothesis_id: str = Field(
         ..., min_length=1,
         description="Hypothesis this decision is bound to (REQUIRED, non-empty)",
+    )
+    kind: Optional[Literal["result", "method"]] = Field(
+        default=None,
+        description="The novelty axis this NOVELTY_DECISION serves (result|method); set "
+        "by the recorders on every NOVELTY_DECISION. None on CONTESTED_RECORD.",
     )
     reason: Optional[str] = Field(
         default=None, description="Why skipped, or a contested note (optional)"

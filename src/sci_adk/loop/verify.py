@@ -46,7 +46,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
@@ -197,12 +197,15 @@ def verify_run(run_dir: Path) -> VerifyReport:
             )
             continue
         if _is_novelty_claim(claim):
-            # Novelty claim (B-replace): re-derive its status by RULE
-            # (``derive_novelty_status`` over the recorded novelty decisions), NOT via the
-            # experiment DecisionEngine. A deleted/tampered found_nothing decision makes
-            # the recorded SUPPORTED novelty claim no longer re-derive -> DIVERGED.
+            # Novelty claim (B-replace, 2-kind): re-derive its status by RULE
+            # (``derive_novelty_status`` over the recorded novelty decisions for the
+            # claim's KIND), NOT via the experiment DecisionEngine. The kind is parsed from
+            # the claim id (``claim-novelty-{result,method}-<hyp>``). A deleted/tampered
+            # found_nothing decision for that kind makes the recorded SUPPORTED novelty
+            # claim no longer re-derive -> DIVERGED.
+            kind = _novelty_kind_of(claim)
             outcomes.append(
-                _audit_novelty_claim(hypothesis, claim, novelty_decisions)
+                _audit_novelty_claim(hypothesis, kind, claim, novelty_decisions)
             )
             continue
         outcomes.append(
@@ -329,36 +332,66 @@ def _classify(
 
 
 def _is_novelty_claim(claim: Claim) -> bool:
-    """True iff ``claim`` is a novelty claim (id ``claim-novelty-<hyp>``)."""
+    """True iff ``claim`` is a novelty claim (id ``claim-novelty-{result,method}-<hyp>``).
+
+    Both 2-kind ids share the ``claim-novelty-`` prefix, so this prefix test still
+    identifies a novelty claim of either kind. The specific kind is parsed by
+    :func:`_novelty_kind_of`.
+    """
     return claim.id.startswith("claim-novelty-")
+
+
+def _novelty_kind_of(claim: Claim) -> Literal["result", "method"]:
+    """Parse the novelty kind from a novelty claim id (``claim-novelty-{kind}-<hyp>``).
+
+    Strips the ``claim-novelty-`` prefix and reads the kind token. Robust when the
+    hypothesis id itself contains hyphens (the remainder is matched by its leading
+    ``result-`` / ``method-`` token only). Precondition: ``_is_novelty_claim(claim)`` --
+    a non-novelty id raises (the caller gates on ``_is_novelty_claim`` first).
+
+    Raises:
+        ValueError: if the id is not a recognised 2-kind novelty id.
+    """
+    remainder = claim.id[len("claim-novelty-"):]
+    if remainder.startswith("result-"):
+        return "result"
+    if remainder.startswith("method-"):
+        return "method"
+    raise ValueError(
+        f"unrecognised novelty claim id '{claim.id}': expected "
+        "claim-novelty-result-<hyp> or claim-novelty-method-<hyp> (2-kind)"
+    )
 
 
 def _audit_novelty_claim(
     hypothesis: Hypothesis,
+    kind: Literal["result", "method"],
     recorded_claim: Claim,
     novelty_decisions: List[EvidenceItem],
 ) -> VerifyOutcome:
-    """Re-derive the novelty claim status by RULE and compare to the recorded one.
+    """Re-derive one {hypothesis, kind} novelty claim status by RULE and compare to the
+    recorded one (2-kind).
 
     B-replace (design/literature-acquisition.md): the novelty claim is rule-derived
-    (``derive_novelty_status`` over the recorded NOVELTY_DECISIONs), decoupled from the
-    experiment verdict. A recorded SUPPORTED novelty claim is faithful only if the record
-    still holds a *found_nothing* decision for the hypothesis; if that decision was
-    deleted (or a found_something was tampered to found_nothing), the re-derived status
-    diverges from the recorded one. READ-ONLY: no persist, no LLM.
+    (``derive_novelty_status(hyp, kind, ...)`` over the recorded NOVELTY_DECISIONs of that
+    kind), decoupled from the experiment verdict. A recorded SUPPORTED novelty claim is
+    faithful only if the record still holds a *found_nothing* decision for THIS {hyp,
+    kind}; if that decision was deleted (or a found_something was tampered to found_nothing,
+    or the only found_nothing was bound to the OTHER kind), the re-derived status diverges
+    from the recorded one. READ-ONLY: no persist, no LLM.
 
     Classification: matching status -> REPRODUCED; any mismatch -> DIVERGED (novelty has
     no inconclusive/UNRESOLVED state -- the rule always yields PROPOSED or SUPPORTED).
     """
-    rederived = derive_novelty_status(hypothesis, novelty_decisions)
+    rederived = derive_novelty_status(hypothesis, kind, novelty_decisions)
     result = REPRODUCED if rederived == recorded_claim.status else DIVERGED
     basis = (
-        "novelty re-derived from the recorded prior-art decisions"
+        f"{kind}-novelty re-derived from the recorded prior-art decisions"
         if result == REPRODUCED
         else (
-            "recorded novelty claim does not re-derive from the record: recorded "
+            f"recorded {kind}-novelty claim does not re-derive from the record: recorded "
             f"{recorded_claim.status.value}, re-derived {rederived.value} (a "
-            "found_nothing prior-art decision was deleted or tampered)"
+            f"found_nothing {kind} prior-art decision was deleted or tampered)"
         )
     )
     return VerifyOutcome(

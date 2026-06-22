@@ -1,22 +1,24 @@
 """
-Two-claim model at the Evidence->Claim chokepoint (RED-first, B-replace).
+Two-claim model at the Evidence->Claim chokepoint (2-kind, B-replace).
 
-design/literature-acquisition.md §"Discovery trigger model": novelty is decoupled from
-the experiment claim. ``ClaimUpdater.update_claims_from_evidence`` now:
+design/literature-acquisition.md §"Novelty -- definition (2-kind)": novelty is decoupled
+from the experiment claim AND split into two independent kinds.
+``ClaimUpdater.update_claims_from_evidence`` now:
 
   - derives the EXPERIMENT claim ``claim-<hyp.id>`` from EXPERIMENT evidence ONLY (the
     novelty HALT is gone -- the experiment claim never stops on novelty), AND
-  - for every ``novelty=True`` hypothesis, load-or-creates and persists a SEPARATE
-    novelty claim ``claim-novelty-<hyp.id>`` whose status is
-    ``derive_novelty_status(hyp, novelty_decisions)`` (SUPPORTED iff a recorded
-    found_nothing; else PROPOSED).
+  - for every {hypothesis, kind} whose ``novelty_{kind}`` flag is set, load-or-creates
+    and persists a SEPARATE novelty claim ``claim-novelty-{kind}-<hyp.id>`` whose status
+    is ``derive_novelty_status(hyp, kind, novelty_decisions)`` (SUPPORTED iff a recorded
+    found_nothing of THAT kind; else PROPOSED).
 
-Both claims are RETURNED and PERSISTED. The novelty claim is a full revisable Claim
-(append-only history, non-monotone): re-compiling after a found_nothing decision is
-later added moves it PROPOSED -> SUPPORTED.
+All claims are RETURNED and PERSISTED. Each novelty claim is a full revisable Claim
+(append-only history, non-monotone): re-compiling after a found_nothing decision of that
+kind is later added moves it PROPOSED -> SUPPORTED.
 
-Safety floor: a found_something decision NEVER produces SUPPORTED (it stays PROPOSED) --
-the false-novelty-claim structural block.
+Safety floor: a found_something decision NEVER produces SUPPORTED (it stays PROPOSED), and
+a found_nothing of the OTHER kind never satisfies this one -- the false-novelty-claim
+structural block, per kind.
 """
 
 from __future__ import annotations
@@ -51,7 +53,18 @@ from sci_adk.loop.claim_updater import ClaimUpdater
 # fixtures
 # --------------------------------------------------------------------------- #
 
-def _spec(novelty: bool, spec_id: str, hyp_id: str = "hyp-1") -> Spec:
+def _spec(
+    novelty: bool,
+    spec_id: str,
+    hyp_id: str = "hyp-1",
+    *,
+    novelty_result: bool | None = None,
+    novelty_method: bool = False,
+) -> Spec:
+    """``novelty`` is a convenience for the result-novelty flag (the kind most tests
+    exercise). ``novelty_result``/``novelty_method`` override for 2-kind tests."""
+    if novelty_result is None:
+        novelty_result = novelty
     return Spec(
         id=spec_id,
         version=1,
@@ -68,7 +81,8 @@ def _spec(novelty: bool, spec_id: str, hyp_id: str = "hyp-1") -> Spec:
                 ),
                 referent="formal",
                 non_circularity="the verifier checks a property not baked into the generator",
-                novelty=novelty,
+                novelty_result=novelty_result,
+                novelty_method=novelty_method,
             )
         ],
         method=MethodPlan(approaches=["a"], tools=[]),
@@ -98,20 +112,29 @@ def _refuting_evidence(hyp_id: str = "hyp-1", point: float = 0.10) -> EvidenceIt
     )
 
 
-def _novelty_decision(hyp_id: str, outcome: str, item_id: str | None = None) -> EvidenceItem:
+def _novelty_decision(
+    hyp_id: str, outcome: str, kind: str = "result", item_id: str | None = None
+) -> EvidenceItem:
     return EvidenceItem(
-        id=item_id or f"evi-nov-{outcome}",
+        id=item_id or f"evi-nov-{kind}-{outcome}",
         spec_id="s",
         kind=EvidenceKind.NOVELTY_DECISION,
-        provenance=Provenance(code_ref=f"novelty:{outcome}"),
-        result=Result(type="qualitative", finding=f"{outcome}: ..."),
+        provenance=Provenance(code_ref=f"novelty:{kind}:{outcome}"),
+        result=Result(type="qualitative", finding=f"{kind} {outcome}: ..."),
         bears_on=[],
-        literature_decision=LiteratureDecision(outcome=outcome, hypothesis_id=hyp_id),
+        literature_decision=LiteratureDecision(
+            outcome=outcome, hypothesis_id=hyp_id, kind=kind
+        ),
     )
 
 
-def _novelty_claim_path(tmp_path: Path, spec_id: str, hyp_id: str = "hyp-1") -> Path:
-    return tmp_path / "runs" / spec_id / "claims" / f"claim-novelty-{hyp_id}.json"
+def _novelty_claim_path(
+    tmp_path: Path, spec_id: str, hyp_id: str = "hyp-1", kind: str = "result"
+) -> Path:
+    return (
+        tmp_path / "runs" / spec_id / "claims"
+        / f"claim-novelty-{kind}-{hyp_id}.json"
+    )
 
 
 def _experiment_claim_path(tmp_path: Path, spec_id: str, hyp_id: str = "hyp-1") -> Path:
@@ -152,8 +175,8 @@ def test_novelty_claim_supported_on_found_nothing(tmp_path):
     by_id = {c.id: c for c in claims}
     # BOTH claims returned.
     assert "claim-hyp-1" in by_id
-    assert "claim-novelty-hyp-1" in by_id
-    nov = by_id["claim-novelty-hyp-1"]
+    assert "claim-novelty-result-hyp-1" in by_id
+    nov = by_id["claim-novelty-result-hyp-1"]
     assert nov.status == ClaimStatus.SUPPORTED
     assert nov.answers == "hyp-1"
     # persisted on disk
@@ -166,7 +189,7 @@ def test_novelty_claim_proposed_when_no_decision(tmp_path):
         [_supporting_evidence()]
     )
     by_id = {c.id: c for c in claims}
-    assert by_id["claim-novelty-hyp-1"].status == ClaimStatus.PROPOSED
+    assert by_id["claim-novelty-result-hyp-1"].status == ClaimStatus.PROPOSED
 
 
 def test_novelty_claim_proposed_on_skip(tmp_path):
@@ -174,7 +197,7 @@ def test_novelty_claim_proposed_on_skip(tmp_path):
     evidence = [_supporting_evidence(), _novelty_decision("hyp-1", "skipped")]
     claims = ClaimUpdater(spec, tmp_path).update_claims_from_evidence(evidence)
     by_id = {c.id: c for c in claims}
-    assert by_id["claim-novelty-hyp-1"].status == ClaimStatus.PROPOSED
+    assert by_id["claim-novelty-result-hyp-1"].status == ClaimStatus.PROPOSED
 
 
 def test_novelty_claim_never_supported_on_found_something(tmp_path):
@@ -184,7 +207,7 @@ def test_novelty_claim_never_supported_on_found_something(tmp_path):
     evidence = [_supporting_evidence(), _novelty_decision("hyp-1", "found_something")]
     claims = ClaimUpdater(spec, tmp_path).update_claims_from_evidence(evidence)
     by_id = {c.id: c for c in claims}
-    assert by_id["claim-novelty-hyp-1"].status == ClaimStatus.PROPOSED
+    assert by_id["claim-novelty-result-hyp-1"].status == ClaimStatus.PROPOSED
 
 
 # --------------------------------------------------------------------------- #
@@ -198,7 +221,7 @@ def test_non_novelty_hypothesis_gets_no_novelty_claim(tmp_path):
     )
     by_id = {c.id: c for c in claims}
     assert "claim-hyp-1" in by_id
-    assert "claim-novelty-hyp-1" not in by_id
+    assert "claim-novelty-result-hyp-1" not in by_id
     assert not _novelty_claim_path(tmp_path, spec.id).exists()
 
 
@@ -208,7 +231,7 @@ def test_non_novelty_hypothesis_gets_no_novelty_claim(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_novelty_claim_emitted_without_any_experiment_evidence(tmp_path):
-    """A novelty=True hypothesis with NO experiment evidence (so no experiment claim)
+    """A flagged novelty hypothesis with NO experiment evidence (so no experiment claim)
     still gets its novelty claim derived from the recorded decision."""
     spec = _spec(True, "nov-no-exp")
     evidence = [_novelty_decision("hyp-1", "found_nothing")]
@@ -218,7 +241,7 @@ def test_novelty_claim_emitted_without_any_experiment_evidence(tmp_path):
     assert "claim-hyp-1" not in by_id
     assert not _experiment_claim_path(tmp_path, spec.id).exists()
     # ... but the novelty claim is present and SUPPORTED.
-    assert by_id["claim-novelty-hyp-1"].status == ClaimStatus.SUPPORTED
+    assert by_id["claim-novelty-result-hyp-1"].status == ClaimStatus.SUPPORTED
 
 
 # --------------------------------------------------------------------------- #
@@ -290,3 +313,53 @@ def test_novelty_decision_does_not_change_experiment_verdict(tmp_path):
     assert exp.status == ClaimStatus.SUPPORTED
     supporting = exp.get_supporting_evidence()
     assert {link.evidence_id for link in supporting} == {"ev-num"}
+
+
+# --------------------------------------------------------------------------- #
+# 2-kind: the two axes are independent (result claim / method claim)
+# --------------------------------------------------------------------------- #
+
+def test_only_flagged_kind_gets_a_claim(tmp_path):
+    """Only the result flag is set -> only ``claim-novelty-result-<hyp>`` exists; no
+    method claim is created or persisted."""
+    spec = _spec(False, "nov-result-only", novelty_result=True, novelty_method=False)
+    claims = ClaimUpdater(spec, tmp_path).update_claims_from_evidence(
+        [_supporting_evidence()]
+    )
+    by_id = {c.id: c for c in claims}
+    assert "claim-novelty-result-hyp-1" in by_id
+    assert "claim-novelty-method-hyp-1" not in by_id
+    assert _novelty_claim_path(tmp_path, spec.id, kind="result").exists()
+    assert not _novelty_claim_path(tmp_path, spec.id, kind="method").exists()
+
+
+def test_both_kinds_get_independent_claims(tmp_path):
+    """Both flags set -> two distinct claims, each SUPPORTED only by a found_nothing of
+    its own kind (a result found_nothing does NOT support the method claim)."""
+    spec = _spec(False, "nov-both", novelty_result=True, novelty_method=True)
+    evidence = [
+        _supporting_evidence(),
+        _novelty_decision("hyp-1", "found_nothing", kind="result", item_id="evi-r"),
+    ]
+    claims = ClaimUpdater(spec, tmp_path).update_claims_from_evidence(evidence)
+    by_id = {c.id: c for c in claims}
+    # result has a found_nothing -> SUPPORTED; method has none -> PROPOSED.
+    assert by_id["claim-novelty-result-hyp-1"].status == ClaimStatus.SUPPORTED
+    assert by_id["claim-novelty-method-hyp-1"].status == ClaimStatus.PROPOSED
+    # statements name the kind
+    assert by_id["claim-novelty-result-hyp-1"].statement.startswith("Result-novelty")
+    assert by_id["claim-novelty-method-hyp-1"].statement.startswith("Method-novelty")
+
+
+def test_method_found_nothing_supports_only_method(tmp_path):
+    """A method found_nothing supports the method claim and leaves the result claim
+    PROPOSED -- the kinds are independent."""
+    spec = _spec(False, "nov-method-fn", novelty_result=True, novelty_method=True)
+    evidence = [
+        _supporting_evidence(),
+        _novelty_decision("hyp-1", "found_nothing", kind="method", item_id="evi-m"),
+    ]
+    claims = ClaimUpdater(spec, tmp_path).update_claims_from_evidence(evidence)
+    by_id = {c.id: c for c in claims}
+    assert by_id["claim-novelty-method-hyp-1"].status == ClaimStatus.SUPPORTED
+    assert by_id["claim-novelty-result-hyp-1"].status == ClaimStatus.PROPOSED
