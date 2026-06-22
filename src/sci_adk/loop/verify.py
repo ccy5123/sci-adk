@@ -53,7 +53,10 @@ from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Hypothesis, Spec
 from sci_adk.core.validity import (
     ValidityHalt,
+    check_analyticity,
     check_digitized_adequacy,
+    check_discriminating_power,
+    check_falsifiability_adequacy,
     derive_novelty_status,
 )
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
@@ -150,7 +153,7 @@ class VerifyReport:
     passed: bool = field(default=False)
 
 
-def verify_run(run_dir: Path) -> VerifyReport:
+def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     """Re-derive belief from the recorded run and compare it to the recorded Claims.
 
     PURE + READ-ONLY: re-applies the frozen ``DecisionRule`` to the recorded Evidence
@@ -160,6 +163,14 @@ def verify_run(run_dir: Path) -> VerifyReport:
 
     Args:
         run_dir: an existing ``runs/<spec.id>/`` directory.
+        strict_science: when True, ALSO re-apply the science-guard verdict gates
+            (design/science-guards.md G1/G2/G3) read-only over the recorded Evidence -- the
+            tamper-evidence companion to the digitized re-check. A recorded SUPPORTED
+            formal+threshold claim whose falsifying NEGATIVE_CONTROL was deleted (or whose
+            discriminating cases were dropped) NO LONGER re-derives in strict mode -> the
+            audit reports DIVERGED. Default False (the lenient PRIMITIVE contract): the
+            science re-check is skipped, so a faithful record re-derives exactly as before
+            (existing callers/behaviour unchanged). The CLI ``verify --strict-science`` opts in.
 
     Returns:
         A :class:`VerifyReport` -- inspect ``all_reproduced`` for the CI gate.
@@ -196,6 +207,13 @@ def verify_run(run_dir: Path) -> VerifyReport:
         ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
     ]
 
+    # Negative controls (science-guards G3): the bears_on=[] apparatus-falsification records.
+    # Gathered once for the strict-science re-check (tamper-evidence: a deleted control makes
+    # a recorded strict SUPPORTED no longer re-derive).
+    negative_controls = [
+        ev for ev in evidence if ev.kind == EvidenceKind.NEGATIVE_CONTROL
+    ]
+
     outcomes: List[VerifyOutcome] = []
     for claim_id, claim in sorted(recorded_claims.items()):
         hyp_id = claim.answers
@@ -230,7 +248,11 @@ def verify_run(run_dir: Path) -> VerifyReport:
             )
             continue
         outcomes.append(
-            _audit_hypothesis(engine, hypothesis, evidence, claim)
+            _audit_hypothesis(
+                engine, hypothesis, evidence, claim,
+                strict_science=strict_science,
+                negative_controls=negative_controls,
+            )
         )
 
     all_reproduced = bool(outcomes) and all(o.result == REPRODUCED for o in outcomes)
@@ -281,6 +303,9 @@ def _audit_hypothesis(
     hypothesis: Hypothesis,
     evidence: List[EvidenceItem],
     recorded_claim: Claim,
+    *,
+    strict_science: bool = False,
+    negative_controls: Optional[List[EvidenceItem]] = None,
 ) -> VerifyOutcome:
     """Re-derive one hypothesis's EXPERIMENT belief and compare it to its recorded Claim.
 
@@ -337,6 +362,32 @@ def _audit_hypothesis(
                 f"independent-verification gate (not reproducible from record): {halt.reason}"
             ),
         )
+
+    # Science-guard re-check (design/science-guards.md), strict-science only + read-only
+    # (no raise escapes -- the gate is CONSULTED, not enforced as a stop). Mirrors the
+    # digitized re-check above: a recorded SUPPORTED formal+threshold claim whose falsifying
+    # NEGATIVE_CONTROL was deleted (G3), or whose discriminating cases were dropped (G2), or
+    # that was never reclassified (G1), NO LONGER re-derives under strict mode -> DIVERGED.
+    # This is the tamper-evidence companion that makes the negative control part of the
+    # auditable record (the guards run only in strict mode, so a lenient verify is unchanged).
+    if strict_science:
+        try:
+            check_analyticity(hypothesis, counted, verdict.direction)
+            check_discriminating_power(hypothesis, verdict.direction)
+            check_falsifiability_adequacy(
+                hypothesis, negative_controls or [], verdict.direction
+            )
+        except ValidityHalt as halt:
+            return VerifyOutcome(
+                hypothesis_id=hypothesis.id,
+                recorded_status=recorded_claim.status,
+                rederived_status=None,
+                result=DIVERGED,
+                rederived_basis=(
+                    "recorded claim fails a science guard on re-derivation (not reproducible "
+                    f"from the record under strict science): {halt.reason}"
+                ),
+            )
 
     raw_directions = {b.direction for _, b in results.pairs}
     # SINGLE source of truth (Fix 1): the SAME public derivation ClaimUpdater uses to

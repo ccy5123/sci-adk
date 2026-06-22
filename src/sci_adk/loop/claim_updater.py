@@ -31,8 +31,11 @@ from sci_adk.core.claim import (
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind, BearingDirection
 from sci_adk.core.spec import Spec
 from sci_adk.core.validity import (
+    check_analyticity,
     check_digitized_adequacy,
+    check_discriminating_power,
     check_evidence_adequacy,
+    check_falsifiability_adequacy,
     derive_novelty_status,
 )
 
@@ -149,6 +152,7 @@ class ClaimUpdater:
         spec: Spec,
         workspace_dir: Optional[Path] = None,
         judge: Optional[Judge] = None,
+        strict_science: bool = False,
     ):
         """
         Initialize claim updater.
@@ -160,11 +164,24 @@ class ClaimUpdater:
                 proof/qualitative rules (Decision 4). When None (the default,
                 zero-cost path), those rules return inconclusive and are surfaced
                 as agent checkpoints rather than judged autonomously.
+            strict_science: whether the science-guard verdict-gate HALTS
+                (design/science-guards.md G1/G2/G3 -- analyticity, test-power,
+                falsifiability) are ENFORCED. ``False`` (default, the lenient PRIMITIVE
+                contract): the guards do not halt here -- they are surfaced at the spec
+                gate (always-on ``audit_spec_science``) and by ``verify``, so the
+                weakness is never silent, but a low-level caller exercising the
+                claim-derivation primitive is not blocked. ``True`` (the real-research
+                entrypoints inject it -- ``sci-adk run`` / the sci verb): a binding
+                formal+threshold SUPPORTS is REFUSED without the falsifying negative
+                control + discriminating cases. The evidence-validity gates
+                (check_evidence_adequacy / check_digitized_adequacy) ALWAYS fire
+                regardless of this flag -- only the three NEW science guards are gated.
         """
         self.spec = spec
         self.workspace_dir = workspace_dir or Path.cwd()
         self.claims_dir = self.workspace_dir / "runs" / spec.id / "claims"
         self.claims_dir.mkdir(parents=True, exist_ok=True)
+        self.strict_science = strict_science
         # The engine holds no state and no constants (D1); one instance suffices.
         self.engine = DecisionEngine(judge=judge)
 
@@ -195,6 +212,16 @@ class ClaimUpdater:
             if ev.kind == EvidenceKind.NOVELTY_DECISION
         ]
 
+        # Negative controls (science-guards G3) are gathered ONCE for the same reason as
+        # novelty decisions: they carry ``bears_on=[]`` (a record ABOUT the apparatus, not a
+        # belief about a hypothesis), so they never appear in ``relevant_evidence`` and never
+        # enter the engine -- the falsifiability gate consults them separately, bound to a
+        # hypothesis by ``negative_control.hypothesis_id``.
+        negative_controls = [
+            ev for ev in evidence_items
+            if ev.kind == EvidenceKind.NEGATIVE_CONTROL
+        ]
+
         # Process each hypothesis (the EXPERIMENT claim: experiment evidence only).
         for hypothesis in self.spec.hypotheses:
             # Find evidence bearing on this hypothesis
@@ -214,7 +241,7 @@ class ClaimUpdater:
                 continue
 
             # Create or update claim
-            claim = self._evaluate_hypothesis(hypothesis, counted)
+            claim = self._evaluate_hypothesis(hypothesis, counted, negative_controls)
             claims.append(claim)
             self._save_claim(claim)
 
@@ -359,6 +386,7 @@ class ClaimUpdater:
         self,
         hypothesis,
         evidence_items: List[EvidenceItem],
+        negative_controls: Optional[List[EvidenceItem]] = None,
     ) -> Claim:
         """
         Evaluate a hypothesis by DELEGATING belief to the DecisionEngine, then
@@ -408,6 +436,24 @@ class ClaimUpdater:
         # neither is weakened.
         check_digitized_adequacy(hypothesis, evidence_items, verdict.direction)
         check_evidence_adequacy(hypothesis, evidence_items, verdict.direction)
+        # Science guards (design/science-guards.md), in author-resolution order: G1
+        # reclassify framing -> G2 declare hard cases -> G3 supply a falsifying control.
+        # Each is a HARD halt that COMPOSES with the evidence-validity gates above (it only
+        # ADDS refusal paths; none is weakened) and fires ONLY on a formal+threshold binding
+        # SUPPORTS (fail-open elsewhere). They are ENFORCED only under ``strict_science`` --
+        # the lenient PRIMITIVE contract: a low-level caller exercising claim derivation is
+        # not blocked here (the weakness is still surfaced at the spec gate by the always-on
+        # ``audit_spec_science`` and by ``verify``, so it is never SILENT); the real-research
+        # entrypoints (``sci-adk run`` / the sci verb) inject ``strict_science=True`` so a
+        # binding formal+threshold SUPPORTS is refused without the artifacts. The
+        # evidence-validity gates ABOVE always fire regardless. ``negative_controls`` are the
+        # bears_on=[] control items gathered once by the caller (they never enter the engine).
+        if self.strict_science:
+            check_analyticity(hypothesis, evidence_items, verdict.direction)
+            check_discriminating_power(hypothesis, verdict.direction)
+            check_falsifiability_adequacy(
+                hypothesis, negative_controls or [], verdict.direction
+            )
         # B-replace (design/literature-acquisition.md): the novelty HALT is GONE. The
         # experiment claim now derives from EXPERIMENT evidence ONLY -- novelty is
         # decoupled into a separate revisable ``claim-novelty-<hyp>`` derived by rule
@@ -591,6 +637,7 @@ def update_claims(
     spec: Spec,
     evidence_items: List[EvidenceItem],
     workspace_dir: Optional[Path] = None,
+    strict_science: bool = False,
 ) -> List[Claim]:
     """
     Convenience function to update Claims from Evidence.
@@ -599,11 +646,13 @@ def update_claims(
         spec: Spec instance
         evidence_items: List of EvidenceItems
         workspace_dir: Output directory
+        strict_science: enforce the science-guard verdict-gate HALTS (default False,
+            the lenient primitive contract -- see :class:`ClaimUpdater`).
 
     Returns:
         Updated Claims
     """
-    updater = ClaimUpdater(spec, workspace_dir)
+    updater = ClaimUpdater(spec, workspace_dir, strict_science=strict_science)
     return updater.update_claims_from_evidence(evidence_items)
 
 

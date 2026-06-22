@@ -127,8 +127,12 @@ class TestCliCapabilitySelector:
 
         if shutil.which("docker") is None:
             pytest.skip("docker CLI not available; CLI demo path uses Docker executor")
+        # --no-strict-science: this is a CAPABILITY-SELECTION plumbing test, not a science
+        # rigor test. The bare t1 demo carries no falsifying negative control, so a strict
+        # run (the default) would correctly HALT it (design/science-guards.md G3); run lenient
+        # to exercise the selector path. Strict enforcement is covered in test_science_guards.
         rc = main(["run", "--capability", T1_CAPABILITY_ID, "-o", str(tmp_path),
-                   "--spec-id", "cap-demo"])
+                   "--spec-id", "cap-demo", "--no-strict-science"])
         out = capsys.readouterr().out
         assert rc == 0
         assert "compiled Spec 'cap-demo'" in out
@@ -140,7 +144,9 @@ class TestCliCapabilitySelector:
 
         if shutil.which("docker") is None:
             pytest.skip("docker CLI not available; --t1-demo path uses Docker executor")
-        rc = main(["run", "--t1-demo", "-o", str(tmp_path), "--spec-id", "alias-demo"])
+        # --no-strict-science: plumbing (alias) test -- run lenient (see the sibling test).
+        rc = main(["run", "--t1-demo", "-o", str(tmp_path), "--spec-id", "alias-demo",
+                   "--no-strict-science"])
         out = capsys.readouterr().out
         assert rc == 0
         assert "compiled Spec 'alias-demo'" in out

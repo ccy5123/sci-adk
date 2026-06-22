@@ -41,6 +41,7 @@ from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
+from sci_adk.core.spec_science import ScienceFinding, audit_spec_science
 from sci_adk.loop.claim_updater import ClaimUpdater, _NOVELTY_KINDS
 from sci_adk.loop.judge import Judge
 from sci_adk.loop.literature_triggers import (
@@ -117,6 +118,7 @@ class CompileResult:
     contested_checkpoints: List[ContestedCheckpoint] = field(default_factory=list)
     novelty_checkpoints: List[NoveltyCheckpoint] = field(default_factory=list)
     figure_consistency: Optional[FigureConsistencyReport] = None
+    science_findings: List[ScienceFinding] = field(default_factory=list)
 
     @property
     def needs_agent(self) -> bool:
@@ -137,9 +139,17 @@ class ResearchCompiler:
         self,
         workspace_dir: Optional[Path] = None,
         judge: Optional[Judge] = None,
+        strict_science: bool = False,
     ) -> None:
         self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
         self.judge = judge
+        # strict_science: forwarded to the ClaimUpdater so the science-guard verdict-gate
+        # HALTS (design/science-guards.md) are enforced. Default False -- the lenient
+        # PRIMITIVE contract (a library caller of compile()/stage_derive_claim is not
+        # blocked; the weakness is still surfaced at the spec gate + by verify). The CLI
+        # research entrypoints (`sci-adk run` / `derive-claim`, the sci verb) construct the
+        # compiler with strict_science=True so a real run refuses a weak SUPPORTED.
+        self.strict_science = strict_science
 
     def compile(
         self,
@@ -250,6 +260,7 @@ class ResearchCompiler:
             contested_checkpoints=contested_checkpoints,
             novelty_checkpoints=novelty_checkpoints,
             figure_consistency=figure_consistency,
+            science_findings=audit_spec_science(spec),
         )
 
     # -- stage functions (design/sci-adk-as-moai.md §4.6) -------------------
@@ -290,6 +301,13 @@ class ResearchCompiler:
         # prior-work decision (searched -> LITERATURE / skipped -> PRIOR_WORK_DECISION)
         # is recorded in the single Evidence log.
         self._save_prior_work_checkpoint(prior_work_checkpoint(spec), run_dir)
+
+        # Spec-gate science audit (design/science-guards.md): ALWAYS on, NEVER halts. Persist
+        # the structural findings (G1/G2/G4/G5 + a G3 reminder) so a weak Spec is never
+        # SILENTLY accepted -- the author resolves each by a Spec amendment, exactly like the
+        # prior-work / novelty / contested reminders. The verdict-gate HALTS enforce the same
+        # concerns at SUPPORTED-stamp time under strict_science.
+        self._save_science_findings(audit_spec_science(spec), run_dir)
         return spec
 
     def stage_execute(
@@ -414,7 +432,8 @@ class ResearchCompiler:
         claims: List[Claim] = []
         if evidence_list:
             claims = ClaimUpdater(
-                spec, self.workspace_dir, judge=self.judge
+                spec, self.workspace_dir, judge=self.judge,
+                strict_science=self.strict_science,
             ).update_claims_from_evidence(evidence_list)
 
         checkpoints = self._collect_checkpoints(spec, evidence_list)
@@ -865,6 +884,40 @@ class ResearchCompiler:
             json.dumps(checkpoint.model_dump(mode="json"), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _save_science_findings(
+        findings: Sequence[ScienceFinding], run_dir: Path
+    ) -> None:
+        """Persist the spec-gate science audit to ``checkpoints/science.json`` (+ a Markdown
+        view), a recording-type artifact alongside ``prior_work.json``.
+
+        ALWAYS written (even when empty) so ``science.json`` unambiguously records that the
+        audit ran: an absent file means a pre-science-guards run, an empty ``findings`` list
+        means audited-and-clean. Never halts -- the findings are reminders the author resolves
+        by a Spec amendment (design/science-guards.md).
+        """
+        cp_dir = run_dir / "checkpoints"
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        (cp_dir / "science.json").write_text(
+            json.dumps(
+                {"findings": [f.model_dump(mode="json") for f in findings]},
+                indent=2, ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        if findings:
+            lines = ["# Spec-gate science findings (design/science-guards.md)", ""]
+            lines.append("Structural weak-science patterns detected at spec-compile time "
+                         "(NEVER a halt). Resolve each by a Spec amendment (supply the "
+                         "missing artifact or a justification), then re-init/amend.")
+            lines.append("")
+            for f in findings:
+                tag = f.hypothesis_id or "(spec-wide)"
+                lines.append(f"## {f.guard} -- {tag}")
+                lines.append(f"- {f.message}")
+                lines.append("")
+            (run_dir / "science.md").write_text("\n".join(lines), encoding="utf-8")
 
     @staticmethod
     def _save_checkpoints(checkpoints: Sequence[Checkpoint], run_dir: Path) -> None:

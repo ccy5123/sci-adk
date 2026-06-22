@@ -129,9 +129,9 @@ def test_compile_writes_typed_checkpoint_json_alongside_markdown(tmp_path):
     # Unit 3: the compiler now writes typed checkpoints/<hyp-id>.json (the contract)
     # AND keeps checkpoints.md as a generated human view (F1).
     #
-    # Note: checkpoints/ now also holds the Spec-time prior_work.json (a different
-    # arm of the Checkpoint discriminated union); select the JUDGE files explicitly
-    # so this test verifies the judge-checkpoint contract specifically.
+    # Note: checkpoints/ now also holds the Spec-time prior_work.json AND the spec-gate
+    # science.json (other arms of the recording-type checkpoint family); select the JUDGE
+    # files explicitly so this test verifies the judge-checkpoint contract specifically.
     from sci_adk.loop.verdict import CheckpointModel
 
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
@@ -139,8 +139,9 @@ def test_compile_writes_typed_checkpoint_json_alongside_markdown(tmp_path):
     run_dir = tmp_path / "runs" / "t-typed-cp"
     cp_dir = run_dir / "checkpoints"
     assert cp_dir.is_dir()
+    _recording_cp = {"prior_work.json", "science.json"}
     judge_files = sorted(
-        p for p in cp_dir.glob("*.json") if p.name != "prior_work.json"
+        p for p in cp_dir.glob("*.json") if p.name not in _recording_cp
     )
     assert len(judge_files) == len(result.checkpoints) >= 1
     cp = CheckpointModel.model_validate(json.loads(judge_files[0].read_text()))

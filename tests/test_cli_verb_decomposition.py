@@ -344,7 +344,11 @@ def test_run_t1_demo_byte_identical_to_verb_chain_via_cli(tmp_path):
     assert main(["init-spec", "--t1-demo", "-o", str(ws_a)]) == 0
     run_a = ws_a / "runs" / "t1-godel"
     assert main(["execute", str(run_a), "--t1-demo"]) == 0
-    assert main(["derive-claim", str(run_a)]) == 0
+    # --no-strict-science on BOTH the verb chain and `run` below: this is a byte-identity
+    # plumbing test (run == verb chain), not a science test. The bare t1 demo has no
+    # negative control, so a strict derive/run would HALT (design/science-guards.md G3);
+    # both paths run lenient so the comparison exercises the decomposition, not the gate.
+    assert main(["derive-claim", str(run_a), "--no-strict-science"]) == 0
     assert main(["render", str(run_a)]) == 0
     verb_draft = (run_a / "paper" / "draft.tex").read_text(encoding="utf-8")
     verb_si = (run_a / "paper" / "si.tex").read_text(encoding="utf-8")
@@ -356,7 +360,7 @@ def test_run_t1_demo_byte_identical_to_verb_chain_via_cli(tmp_path):
     ev_dir_b.mkdir(parents=True, exist_ok=True)
     for src in (run_a / "evidence").glob("*.json"):
         (ev_dir_b / src.name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    assert main(["run", "--t1-demo", "-o", str(ws_b)]) == 0
+    assert main(["run", "--t1-demo", "--no-strict-science", "-o", str(ws_b)]) == 0
     run_b = ws_b / "runs" / "t1-godel"
     run_draft = (run_b / "paper" / "draft.tex").read_text(encoding="utf-8")
     run_si = (run_b / "paper" / "si.tex").read_text(encoding="utf-8")
@@ -547,7 +551,10 @@ def test_append_evidence_malformed_json_errors_no_traceback(tmp_path, capsys):
 
 def test_derive_claim_derives_supported(tmp_path, capsys):
     run_dir = _seed_spec_and_evidence(tmp_path, "dc-ok")
-    rc = main(["derive-claim", str(run_dir)])
+    # --no-strict-science: this verb test seeds a formal+threshold spec with no negative
+    # control; strict derive (the default) would correctly HALT it (G3). Run lenient to test
+    # the derive-claim VERB plumbing; the strict halt is covered in test_science_guards.
+    rc = main(["derive-claim", str(run_dir), "--no-strict-science"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "derived 1 Claim" in out
@@ -589,7 +596,9 @@ def test_render_missing_run_dir_errors(tmp_path, capsys):
 # --------------------------------------------------------------------------- #
 
 def test_run_wrapper_full_chain_produces_all_artifacts(tmp_path, capsys):
-    rc = main(["run", "--t1-demo", "-o", str(tmp_path)])
+    # --no-strict-science: full-chain ARTIFACT plumbing test (does run produce all files?),
+    # not a science test. The bare t1 demo has no negative control -> strict would HALT (G3).
+    rc = main(["run", "--t1-demo", "--no-strict-science", "-o", str(tmp_path)])
     out = capsys.readouterr().out
     assert rc == 0
     assert "compiled Spec 't1-godel'" in out

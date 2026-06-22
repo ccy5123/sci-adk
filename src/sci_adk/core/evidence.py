@@ -73,6 +73,16 @@ class EvidenceKind(str, Enum):
     #   in-text/table numbers are preferred). Asymmetric adoption -- this is the ONLY
     #   kind that is gated through the proposed->verified lifecycle (DigitizedData) and
     #   may NEVER auto-promote to measured. measured/reported carry no such obligation.
+    NEGATIVE_CONTROL = "negative_control"
+    # @MX:NOTE: [AUTO] science-guards G3 (falsifiability): a recorded run of a DELIBERATELY
+    #   MUTATED apparatus (a method broken in a way that MUST violate the hypothesis), whose
+    #   recorded outcome is that the decision rule returned NOT-SUPPORTED on the mutant. It
+    #   demonstrates the test apparatus can report FAIL (mutation testing for science).
+    #   Carries a ``NegativeControl`` payload + ``bears_on=[]`` (like NOVELTY_DECISION): a
+    #   meta-record about the APPARATUS, NOT evidence about the hypothesis, so it NEVER enters
+    #   the DecisionEngine. The G3 verdict gate requires one (failing on the declared
+    #   discriminating cases, with real execution provenance) before a deterministic+formal
+    #   hypothesis may be stamped SUPPORTED.
 
 
 class BearingDirection(str, Enum):
@@ -443,6 +453,85 @@ class LiteratureDecision(BaseModel):
     )
 
 
+class NegativeControl(BaseModel):
+    """
+    The typed payload of a ``negative_control`` EvidenceItem (design/science-guards.md G3 --
+    falsifiability).
+
+    A negative control records that a DELIBERATELY MUTATED apparatus -- the method broken
+    in a way that MUST violate the hypothesis -- was run, and the decision rule correctly
+    returned NOT-SUPPORTED. This is mutation testing applied to scientific verification: if
+    a method that should fail the test still passes, the test cannot report FAIL and a
+    SUPPORTED verdict carries no information. It mirrors :class:`LiteratureDecision`'s style
+    (a small frozen sub-model carried on ``EvidenceItem``), present ONLY on the
+    ``NEGATIVE_CONTROL`` kind, whose parent item always carries ``bears_on=[]`` (it is a
+    record ABOUT the apparatus, not a belief about the hypothesis, and never enters the
+    DecisionEngine).
+
+    The G3 gate (``check_falsifiability_adequacy``) admits a control only when ALL hold:
+      - ``outcome == "not_supported"`` (the mutant correctly FAILED the apparatus);
+      - ``discriminating_cases_covered`` covers the hypothesis's declared
+        ``discriminating_cases`` (G2): the mutant fails ON THE HARD CASES, not on a trivial
+        one -- a mutant that only fails an easy case proves nothing;
+      - the parent EvidenceItem carries REAL execution provenance (a non-empty
+        ``Provenance.code_ref`` or ``environment``): the control was actually RUN, not merely
+        asserted (the gate reads the parent's provenance, enforced there, not in this model).
+
+    Attributes:
+        hypothesis_id: the hypothesis whose apparatus this control falsifies (REQUIRED,
+            non-empty -- the gate binds the control to the hypothesis by this id, since
+            ``bears_on`` is empty).
+        mutant: a description of the deliberate mutation -- what was broken so the hypothesis
+            MUST be violated (e.g. for T-1 H1: "removed one tie-breaking invariant from the
+            canonicalizer so distinct graphs can share a label").
+        outcome: the decision rule's verdict on the mutant. MUST be ``not_supported`` for the
+            control to count (a ``supported`` mutant means the test did not detect the
+            deliberate break -- the apparatus is unfalsifiable on this mutation).
+        discriminating_cases_covered: the ``DiscriminatingCase.case`` keys the mutant was run
+            against and failed on. Must cover the hypothesis's declared discriminating cases
+            (G3<->G2 coupling); empty = the control demonstrates nothing about the hard cases.
+        statistic: which statistic the mutant moved (the same one the DecisionRule judges),
+            for the audit trail (optional).
+        observed_value: the mutant's measured statistic value (e.g. ``collision_count`` > 0),
+            recording HOW the mutant failed (optional, audit).
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
+
+    hypothesis_id: str = Field(
+        ..., min_length=1,
+        description="Hypothesis whose apparatus this control falsifies (REQUIRED, non-empty)",
+    )
+    mutant: str = Field(
+        ..., min_length=1,
+        description="The deliberate mutation that MUST violate the hypothesis",
+    )
+    outcome: Literal["not_supported", "supported"] = Field(
+        ...,
+        description="The decision rule's verdict on the mutant. The G3 gate counts a control "
+        "ONLY when this is ``not_supported`` (the mutant correctly FAILED). ``supported`` is "
+        "deliberately a legal value -- NOT a footgun: it records the HONEST, important "
+        "negative finding that a method which SHOULD have failed still passed, i.e. the "
+        "apparatus is UNFALSIFIABLE on this mutation. Per record/belief separation the record "
+        "holds what happened; the gate then refuses to let such a control ground a SUPPORTED "
+        "belief (a ``supported`` mutant does not demonstrate the test can report FAIL).",
+    )
+    discriminating_cases_covered: List[str] = Field(
+        default_factory=list,
+        description="DiscriminatingCase.case keys the mutant failed on (must cover the "
+        "hypothesis's declared discriminating_cases -- G3<->G2 coupling).",
+    )
+    statistic: Optional[str] = Field(
+        default=None, description="Statistic the mutant moved (audit)"
+    )
+    observed_value: Optional[float] = Field(
+        default=None, description="The mutant's measured statistic value (audit)"
+    )
+
+
 class EvidenceItem(BaseModel):
     """
     A single evidence item in the append-only evidence log.
@@ -497,6 +586,13 @@ class EvidenceItem(BaseModel):
         "(design/literature-acquisition.md §\"Discovery trigger model\"). None for every "
         "other kind. The parent item is a recorded decision, not a belief (bears_on=[]).",
     )
+    negative_control: Optional[NegativeControl] = Field(
+        default=None,
+        description="Negative-control payload, present ONLY when kind==NEGATIVE_CONTROL "
+        "(design/science-guards.md G3). None for every other kind. The parent item is a "
+        "record ABOUT the apparatus (a mutant run), not a belief about the hypothesis "
+        "(bears_on=[]); it never enters the DecisionEngine.",
+    )
 
     # @MX:ANCHOR: Evidence is append-only audit trail
     # @MX:REASON: Invariant E1 - enforces monotone scientific record
@@ -546,6 +642,7 @@ class EvidenceItem(BaseModel):
             supersedes=self.id,
             digitized=self.digitized,
             literature_decision=self.literature_decision,
+            negative_control=self.negative_control,
         )
 
     def supports_target(self, target_id: Id) -> bool:
@@ -590,5 +687,6 @@ __all__ = [
     "DigitizedVerification",
     "DigitizedData",
     "LiteratureDecision",
+    "NegativeControl",
     "EvidenceItem",
 ]

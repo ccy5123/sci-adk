@@ -175,6 +175,39 @@ class DecisionRule(BaseModel):
         return self
 
 
+class DiscriminatingCase(BaseModel):
+    """
+    A hard test case that must be present for a passing verdict to be informative
+    (design/science-guards.md G2 -- test-power).
+
+    A pass over an EASY test set carries little information: a plausibly-broken method
+    would pass it too. A ``DiscriminatingCase`` names a case that SEPARATES a correct
+    method from a plausibly-broken one, with the reason it does so. The set of declared
+    discriminating cases is what makes ``collision_count == 0`` (or any threshold pass)
+    a result rather than a triviality. The G3 falsifiability negative control must FAIL
+    on exactly these cases (a mutant that still passes the easy cases proves nothing) --
+    so ``case`` is a stable key the ``NegativeControl.discriminating_cases_covered`` list
+    references.
+
+    Attributes:
+        case: stable identifier/name of the hard case (e.g. "cospectral-pair-A"). The G3
+            negative control references this key to attest the mutant failed ON it.
+        why: why this case makes a pass meaningful -- what a plausibly-broken method would
+            get wrong here that an easy case would not catch.
+    """
+
+    model_config = {
+        "frozen": True,
+        "str_strip_whitespace": True,
+    }
+
+    case: str = Field(..., min_length=1, description="Stable identifier of the hard case")
+    why: str = Field(
+        ..., min_length=1,
+        description="Why a pass on this case is informative (what a broken method fails here)",
+    )
+
+
 class Hypothesis(BaseModel):
     """
     A research hypothesis derived from the goal pane.
@@ -260,6 +293,40 @@ class Hypothesis(BaseModel):
         "False; frozen (anti-HARKing). A SUPPORTED method-novelty claim requires a "
         "recorded found_nothing prior-art search bound to {hyp, method}; dropping the flag "
         "is a human-only Spec amendment (F7).",
+    )
+    epistemic_kind: Literal["finding", "capability_check", "unit_test"] = Field(
+        default="finding",
+        description="The EPISTEMIC class of this hypothesis (design/science-guards.md G1 -- "
+        "analyticity). ``finding`` = an empirical/open result whose truth is NOT settled by "
+        "construction (the default). ``capability_check`` = an assertion that a method has a "
+        "capability (e.g. 'the encoder runs on these inputs'). ``unit_test`` = a property "
+        "that is true BY CONSTRUCTION given a correct implementation (a known theorem; "
+        "failure is only possible as an implementation bug -- e.g. round-trip decode under a "
+        "prime-power encoding follows from unique factorization). Frozen with the Spec "
+        "(anti-HARKing): a result cannot be relabelled finding<->unit_test after seeing the "
+        "outcome. The G1 verdict gate REFUSES to stamp a triggered (formal + deterministic + "
+        "non-novel) hypothesis still marked ``finding`` as an empirical finding -- the author "
+        "must reclassify it (to capability_check/unit_test, changing the verdict framing from "
+        "'hypothesis SUPPORTED' to 'capability verified') or assert novelty, recorded as a "
+        "Spec amendment.",
+    )
+    discriminating_cases: Optional[List[DiscriminatingCase]] = Field(
+        default=None,
+        description="The hard cases that make a passing verdict informative "
+        "(design/science-guards.md G2 -- test-power). A binding-threshold formal hypothesis "
+        "with NONE declared yields a low-power pass (an easy test set a broken method would "
+        "also pass). The G3 negative control must FAIL on exactly these cases. ``None`` = not "
+        "declared (surfaced at the spec gate; the verdict gate caps a binding pass as "
+        "non-discriminating). Frozen with the Spec.",
+    )
+    cost_metrics: Optional[List[str]] = Field(
+        default=None,
+        description="The practical-property statistics this hypothesis commits to reporting "
+        "(design/science-guards.md G5 -- claim-cost). When the statement/target claim uses a "
+        "practical-property term (index, efficient, scalable, fast, compact, practical, ...), "
+        "the corresponding cost statistic (e.g. integer bit-length for an 'index'/'encoding') "
+        "must be declared here or the spec-gate lint surfaces it. A manual override: listing "
+        "the metric names satisfies the lint. ``None`` = none declared.",
     )
 
     # @MX:ANCHOR: Hypothesis uniquely maps evidence to claim via one mode + one rule
@@ -514,6 +581,7 @@ __all__ = [
     "DecisionRuleKind",
     "RawProposal",
     "DecisionRule",
+    "DiscriminatingCase",
     "Hypothesis",
     "ToolRef",
     "MethodPlan",

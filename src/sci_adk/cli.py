@@ -117,6 +117,16 @@ def build_parser() -> argparse.ArgumentParser:
              "fits its domain) the compiler co-locates into paper/figures/fig<N>. Never "
              "LLM-generated. Omit -> no figures",
     )
+    run.add_argument(
+        "--no-strict-science", dest="strict_science", action="store_false",
+        default=True,
+        help="disable the science-guard verdict-gate HALTS (design/science-guards.md: "
+             "analyticity / test-power / falsifiability). A real research run is STRICT by "
+             "default -- a formal+threshold hypothesis cannot be stamped SUPPORTED without a "
+             "falsifying negative control on its declared discriminating cases. Pass this to "
+             "run the plumbing leniently (the guards still surface their findings at the spec "
+             "gate and in verify; only the HALT is suppressed)",
+    )
 
     # -- Step 2: the 6 standalone CLI verbs (design/sci-adk-as-moai.md §4.6). They
     # decompose `run` into stage verbs for worker fan-out; `run` stays the chained
@@ -138,6 +148,15 @@ def build_parser() -> argparse.ArgumentParser:
              "recorded claims reproduce",
     )
     verify.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    verify.add_argument(
+        "--strict-science", dest="strict_science", action="store_true",
+        default=False,
+        help="ALSO re-apply the science-guard verdict gates (design/science-guards.md "
+             "G1/G2/G3) read-only -- tamper-evidence: a recorded SUPPORTED formal+threshold "
+             "claim whose falsifying negative control was deleted no longer re-derives "
+             "(DIVERGED). Opt-in (default off) so a plain audit re-derives belief exactly "
+             "as recorded",
+    )
 
     prior_work = sub.add_parser(
         "prior-work",
@@ -370,6 +389,12 @@ def _add_verb_parsers(sub) -> None:
              "from the run dir; persists claims/",
     )
     derive_claim.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    derive_claim.add_argument(
+        "--no-strict-science", dest="strict_science", action="store_false",
+        default=True,
+        help="disable the science-guard verdict-gate HALTS (strict by default -- see "
+             "`sci-adk run --no-strict-science`)",
+    )
 
     # render: compile the paper/ artifacts from the recorded spec/evidence/claims.
     render = sub.add_parser(
@@ -563,7 +588,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
 
-    compiler = ResearchCompiler(workspace_dir=Path(args.output))
+    compiler = ResearchCompiler(
+        workspace_dir=Path(args.output), strict_science=args.strict_science
+    )
     # Evidence-validity halt (design/evidence-validity.md E3): an inadequate record
     # (e.g. synthetic data fed to an empirical claim) raises before any Claim is
     # written. Surface it as a friendly non-zero exit -- never a raw traceback and
@@ -589,6 +616,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for c in result.checkpoints:
             print(f"    - {c.hypothesis_id} ({c.kind}): {c.expression[:60]}")
     print(f"  paper draft: {result.paper_path}")
+    if result.science_findings:
+        # Spec-gate science audit (design/science-guards.md): ALWAYS surfaced (never silent),
+        # never a halt. The verdict-gate HALTS (strict by default) enforce the same concerns
+        # at SUPPORTED-stamp time; these are the spec-time reminders.
+        print(f"  science-guard findings ({len(result.science_findings)}) "
+              f"-> {result.run_dir / 'science.md'}:")
+        for sf in result.science_findings:
+            tag = sf.hypothesis_id or "(spec-wide)"
+            print(f"    - {sf.guard} {tag}: {sf.message[:80]}")
     fc = result.figure_consistency
     if fc is not None and not fc.ok:
         # Non-blocking prose<->figure ref report (D4): a warning, not a gate.
@@ -624,6 +660,15 @@ def _cmd_init_spec(args: argparse.Namespace) -> int:
     print(f"init-spec: froze Spec '{frozen.id}' (v{frozen.version}) -> {run_dir}")
     print(f"  spec: {run_dir / 'spec.json'}")
     print(f"  prior-work checkpoint: {run_dir / 'checkpoints' / 'prior_work.json'}")
+    # Spec-gate science audit (design/science-guards.md): ALWAYS surfaced, never a halt.
+    from sci_adk.core.spec_science import audit_spec_science
+
+    findings = audit_spec_science(frozen)
+    if findings:
+        print(f"  science-guard findings ({len(findings)}) -> {run_dir / 'science.md'}:")
+        for sf in findings:
+            tag = sf.hypothesis_id or "(spec-wide)"
+            print(f"    - {sf.guard} {tag}: {sf.message[:80]}")
     print(f"  next: sci-adk execute {run_dir} [--capability <id> | --t1-demo]")
     return 0
 
@@ -766,7 +811,9 @@ def _cmd_derive_claim(args: argparse.Namespace) -> int:
 
     from sci_adk.core.validity import ValidityHalt
 
-    compiler = ResearchCompiler(workspace_dir=workspace)
+    compiler = ResearchCompiler(
+        workspace_dir=workspace, strict_science=args.strict_science
+    )
     try:
         claims, checkpoints, _contested, _novelty = compiler.stage_derive_claim(spec)
     except ValidityHalt as e:
@@ -895,7 +942,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     from sci_adk.loop.verify import verify_run
 
     try:
-        report = verify_run(run_dir)
+        report = verify_run(run_dir, strict_science=args.strict_science)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

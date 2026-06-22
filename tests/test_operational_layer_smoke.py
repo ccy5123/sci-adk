@@ -116,7 +116,11 @@ def test_operational_layer_install_then_verb_chain_to_passing_verify(tmp_path):
     }
 
     # derive-claim: apply the frozen DecisionRule to the recorded Evidence -> Claims.
-    assert main(["derive-claim", str(run_dir)]) == 0
+    # --no-strict-science: this smoke test exercises the install + verb-chain PLUMBING with a
+    # minimal formal+threshold spec that carries no falsifying negative control; a strict
+    # derive (the default) would correctly HALT it (design/science-guards.md G3). The strict
+    # science enforcement has its own coverage in test_science_guards.
+    assert main(["derive-claim", str(run_dir), "--no-strict-science"]) == 0
     claim_path = run_dir / "claims" / f"claim-{_HYP_ID}.json"
     assert claim_path.exists(), "derive-claim produced no Claim for the hypothesis"
 
