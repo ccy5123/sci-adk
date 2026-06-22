@@ -434,6 +434,63 @@ def test_verify_duplicate_label_fails_gate(tmp_path):
     assert report.passed is False
 
 
+def test_verify_residual_factref_macro_fails_gate(tmp_path):
+    # The fidelity gate (the "moved line"): a rendered .tex must carry NO \evval/\status
+    # macro (the engine substitutes them at render time). A residual one means substitution
+    # was bypassed / the .tex was hand-edited -> paper_factref_clean False, passed False --
+    # EVEN THOUGH the claim reproduces and the \ref/\label integrity is fine.
+    spec = _numeric_spec("v-factref", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"Zero collisions over \evval{ev-x}{point} pairs.")
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True            # claim signal unchanged
+    assert report.paper_consistent is True          # ref/label integrity is fine
+    assert report.paper_factref_clean is False       # but a residual fact macro survived
+    assert report.paper_factrefs["draft.tex"] == [r"\evval{ev-x}{point}"]
+    assert report.passed is False                   # combined gate fails
+
+
+def test_verify_no_residual_factref_is_clean(tmp_path):
+    spec = _numeric_spec("v-factref-ok", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} zero collisions.")
+    report = verify_run(run_dir)
+    assert report.paper_factrefs == {}
+    assert report.paper_factref_clean is True
+
+
+def test_verify_tool_vocabulary_leak_in_paper_fails_gate(tmp_path):
+    # §10: the PAPER must read as tool-agnostic science. A tool-vocabulary leak in
+    # draft.tex fails the gate (paper_tool_clean False, passed False), EVEN THOUGH the
+    # claim reproduces and \ref/\label integrity is fine.
+    spec = _numeric_spec("v-toolvocab", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"We pre-registered in the frozen Spec; the engine-derived verdicts hold.")
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True
+    assert report.paper_consistent is True
+    assert report.paper_tool_clean is False
+    assert "frozen spec" in report.paper_tool_vocab
+    assert "verdicts" in report.paper_tool_vocab
+    assert report.passed is False
+
+
+def test_verify_tool_vocabulary_in_si_is_exempt(tmp_path):
+    # The SI is the record dump and legitimately uses sci-adk vocabulary -- it is NOT
+    # gated. A clean draft.tex + a vocabulary-rich si.tex still passes the tool gate.
+    spec = _numeric_spec("v-si-exempt", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The collision count is 0.")
+    _write_paper(run_dir, "si.tex",
+                 r"\label{tab:s1} Table~\ref{tab:s1}. The append-only Evidence record; "
+                 r"frozen Spec; engine-derived verdicts; result.point.")
+    report = verify_run(run_dir)
+    assert report.paper_tool_clean is True   # the SI's vocabulary is exempt
+    assert report.paper_tool_vocab == []
+    assert report.passed is True
+
+
 def test_verify_paper_check_is_read_only(tmp_path):
     # Adding the paper check must not break the read-only invariant: verify reads the
     # .tex, never writes/recompiles.

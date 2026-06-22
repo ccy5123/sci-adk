@@ -64,6 +64,8 @@ from sci_adk.render.consistency import (
     LatexRefReport,
     check_latex_ref_consistency,
 )
+from sci_adk.render.factref import find_unresolved_factrefs
+from sci_adk.render.paper import check_paper_tool_vocabulary
 
 # The rendered paper documents verify re-checks for internal \ref<->\label integrity
 # (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN themselves; the
@@ -116,8 +118,23 @@ class VerifyReport:
             the run has no ``paper/`` directory (or neither document is present).
         paper_consistent: True iff EVERY present paper document's report is ``ok`` --
             and True (vacuously) when there is no paper to check. The paper HARD gate.
-        passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent``. This
-            is what the CLI exits on; ``all_reproduced`` alone is the claim signal.
+        paper_factrefs: per-paper-document residual ``\\evval``/``\\status`` macros (the
+            record-fidelity fact markup), keyed by file name. A rendered ``.tex`` should
+            contain NONE -- the engine substitutes them all at render time -- so a residual
+            means substitution was bypassed or the ``.tex`` was hand-edited (a fidelity
+            divergence). EMPTY when clean / no paper.
+        paper_factref_clean: True iff no paper document carries a residual factref macro
+            (and True vacuously with no paper). Part of the HARD gate.
+        paper_tool_vocab: tool-vocabulary leaks (§10) found in the PAPER (``draft.tex``
+            only -- the SI is the record dump and is EXEMPT): phrases/words that name the
+            sci-adk machinery instead of the science (``sci-adk``, ``frozen Spec``,
+            ``verdict``, ``Evidence record``, ...). EMPTY when the paper reads as
+            tool-agnostic science / no paper.
+        paper_tool_clean: True iff the paper carries no tool-vocabulary leak (and True
+            vacuously with no draft.tex). Part of the HARD gate.
+        passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
+            paper_factref_clean and paper_tool_clean``. This is what the CLI exits on;
+            ``all_reproduced`` alone is the claim signal.
     """
 
     spec_id: str
@@ -126,6 +143,10 @@ class VerifyReport:
     all_reproduced: bool = field(default=False)
     paper_consistency: Dict[str, LatexRefReport] = field(default_factory=dict)
     paper_consistent: bool = field(default=True)
+    paper_factrefs: Dict[str, List[str]] = field(default_factory=dict)
+    paper_factref_clean: bool = field(default=True)
+    paper_tool_vocab: List[str] = field(default_factory=list)
+    paper_tool_clean: bool = field(default=True)
     passed: bool = field(default=False)
 
 
@@ -221,6 +242,18 @@ def verify_run(run_dir: Path) -> VerifyReport:
     paper_consistency = _check_paper_consistency(run_dir)
     paper_consistent = all(rep.ok for rep in paper_consistency.values())
 
+    # Fidelity gate (the "moved line"): a rendered paper's record-derived facts are
+    # written as \evval/\status macros that the engine substitutes at render time, so a
+    # residual macro in the .tex means substitution was bypassed / the .tex was edited.
+    # READ-ONLY, no recompile, no LLM -- the same third-party spirit as the ref/label check.
+    paper_factrefs = _check_paper_factrefs(run_dir)
+    paper_factref_clean = not any(paper_factrefs.values())
+
+    # Tool-vocabulary gate (§10): the PAPER (draft.tex only -- the SI is exempt) must read
+    # as tool-agnostic science. READ-ONLY, no recompile, no LLM.
+    paper_tool_vocab = _check_paper_tool_vocab(run_dir)
+    paper_tool_clean = not paper_tool_vocab
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -228,7 +261,16 @@ def verify_run(run_dir: Path) -> VerifyReport:
         all_reproduced=all_reproduced,
         paper_consistency=paper_consistency,
         paper_consistent=paper_consistent,
-        passed=all_reproduced and paper_consistent,
+        paper_factrefs=paper_factrefs,
+        paper_factref_clean=paper_factref_clean,
+        paper_tool_vocab=paper_tool_vocab,
+        paper_tool_clean=paper_tool_clean,
+        passed=(
+            all_reproduced
+            and paper_consistent
+            and paper_factref_clean
+            and paper_tool_clean
+        ),
     )
 
 
@@ -428,6 +470,42 @@ def _check_paper_consistency(run_dir: Path) -> Dict[str, LatexRefReport]:
                 doc.read_text(encoding="utf-8")
             )
     return reports
+
+
+def _check_paper_factrefs(run_dir: Path) -> Dict[str, List[str]]:
+    """Re-scan each rendered paper document for RESIDUAL ``\\evval``/``\\status`` macros.
+
+    READ-ONLY (mirrors :func:`_check_paper_consistency`): a rendered ``.tex`` should carry
+    NONE -- :func:`sci_adk.render.factref.substitute_factrefs` substitutes every fidelity
+    macro at render time -- so a residual is a fidelity divergence (substitution bypassed /
+    the .tex hand-edited). Returns a map keyed by file name -> the residual macros found
+    (only for documents that have any); an empty map means clean / no paper.
+    """
+    paper_dir = run_dir / "paper"
+    residuals: Dict[str, List[str]] = {}
+    if not paper_dir.is_dir():
+        return residuals
+    for name in _PAPER_DOCS:
+        doc = paper_dir / name
+        if doc.is_file():
+            found = find_unresolved_factrefs(doc.read_text(encoding="utf-8"))
+            if found:
+                residuals[name] = found
+    return residuals
+
+
+def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
+    """Re-scan ``draft.tex`` for §10 tool-vocabulary leaks (READ-ONLY; the SI is EXEMPT).
+
+    Only the belief-narrative PAPER is checked -- ``si.tex`` is openly the record dump and
+    legitimately uses sci-adk vocabulary, so it is never scanned. Returns the distinct
+    forbidden terms found (empty = clean / no draft.tex), via the pure
+    :func:`sci_adk.render.paper.check_paper_tool_vocabulary`.
+    """
+    draft = run_dir / "paper" / "draft.tex"
+    if not draft.is_file():
+        return []
+    return check_paper_tool_vocabulary(draft.read_text(encoding="utf-8"))
 
 
 # -- read-only loaders -------------------------------------------------------

@@ -151,6 +151,7 @@ class ResearchCompiler:
         prose: Optional[PaperProse] = None,
         si_prose: Optional[SIProse] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
+        si_figures: Optional[Sequence[AnyFigure]] = None,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -189,7 +190,12 @@ class ResearchCompiler:
                 source fails loud, record fidelity). After rendering, a NON-BLOCKING
                 ``check_figure_consistency`` over the rendered body is surfaced in
                 ``CompileResult.figure_consistency`` (a report, not a gate; the hard
-                verify-gate is Phase 3). Absent -> no figures.
+                verify-gate is Phase 3). These are the MAIN figures -- they appear ONLY in
+                the paper's Results (the SI carries only ``si_figures``). Absent -> no
+                figures.
+            si_figures: optional SUPPLEMENTARY figures rendered ONLY in the SI (default
+                none). The main ``figures`` are never re-rendered in the SI, so a main
+                figure is not duplicated across draft.tex + si.tex (design feedback 5.2).
 
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
@@ -229,6 +235,7 @@ class ResearchCompiler:
             prose=prose,
             si_prose=si_prose,
             figures=figures,
+            si_figures=si_figures,
         )
 
         return CompileResult(
@@ -447,9 +454,15 @@ class ResearchCompiler:
         prose: Optional[PaperProse] = None,
         si_prose: Optional[SIProse] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
+        si_figures: Optional[Sequence[AnyFigure]] = None,
     ) -> tuple[Path, Optional[Path], Optional[FigureConsistencyReport]]:
         """Render the ``paper/`` artifacts -- ``draft.tex`` + ``si.tex`` + figures + bib
         (the ``render`` verb's stage).
+
+        The MAIN figures (``figures``) appear ONLY in the paper's Results; the SI carries
+        only ``si_figures`` (supplementary, default none) -- so a main figure is never
+        duplicated across the two documents (design feedback 5.2). The co-located
+        ``references.bib`` is wired into BOTH documents (the SI's ``\\citep`` resolved too).
 
         Loads Evidence, Claims, and the judge checkpoints from disk when not supplied
         (the verb path); the chained ``compile`` passes the in-memory values
@@ -489,6 +502,7 @@ class ResearchCompiler:
         bib_path = self._colocate_bib(run_dir, paper_dir)
 
         figures = list(figures or [])
+        si_figures = list(si_figures or [])
 
         # The .tex is THE paper artifact (Overleaf default pdflatex). Deterministic and
         # offline -- no LLM, no network (render_paper_latex is pure). The Markdown
@@ -536,8 +550,8 @@ class ResearchCompiler:
         # references the same paper/figures/fig<N> files the compiler co-located above --
         # one shared file set for both standalone documents.
         si_tex = render_si_latex(
-            spec, claims_list, evidence_list, figures=figures, digest=None,
-            prose=si_prose, paper_body=paper_tex,
+            spec, claims_list, evidence_list, figures=si_figures, digest=None,
+            prose=si_prose, paper_body=None, bib_path=bib_path,
         )
         si_path = paper_dir / "si.tex"
         si_path.write_text(si_tex, encoding="utf-8")

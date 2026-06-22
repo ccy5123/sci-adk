@@ -44,6 +44,7 @@ from sci_adk.core.spec import (
 from sci_adk.render.figures import FigureSpec, NativePlot, PlotPoint, PlotSeries
 from sci_adk.render.paper import _latex_escape, render_paper_latex
 from sci_adk.render.prose import PaperProse
+from sci_adk.render.si import render_si_latex
 
 _T0 = datetime(2026, 6, 17, 10, 0, 0, tzinfo=timezone.utc)
 _THRESHOLD = DecisionRule(
@@ -184,40 +185,49 @@ class TestLatexDocumentSkeleton:
         # begin precedes end (well-formed).
         assert tex.index(r"\begin{document}") < tex.index(r"\end{document}")
 
-    def test_section_per_hypothesis_with_status_confidence_basis(self):
+    def test_paper_has_no_stage_dump_sections(self):
+        # The reframe (moved line): the paper is belief narrative, so the engine emits
+        # NO stage-dump sections -- no Goal/Background/Evidence/Figures heading and no
+        # per-hypothesis verdict bullets. Those record facts live in the SI.
         hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED, basis="met collision_count == 0")
-        ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
-
-        tex = render_paper_latex(spec, [claim], [ev])
-
-        # A section carries the hypothesis statement.
-        assert r"\section{" in tex or r"\subsection{" in tex
-        assert "the encoding is injective on the tested set" in tex
-        # Status, confidence, basis all present.
-        assert "supported" in tex.lower()
-        assert "0.9" in tex
-        assert "met collision_count" in tex.replace(r"\_", "_")
-
-    def test_evidence_section_lists_items(self):
-        hyp = _basic_hyp()
-        spec = _spec(hyp)
-        claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("evi-xyz", "hyp-t1", "generated", BearingDirection.SUPPORTS)
 
         tex = render_paper_latex(spec, [claim], [ev])
 
-        # There is an Evidence section and the evidence id appears.
-        assert "Evidence" in tex
-        assert "evi-xyz" in tex
+        assert r"\section{Goal}" not in tex
+        assert r"\section{Background}" not in tex
+        assert r"\section{Evidence}" not in tex
+        assert r"\section{Figures}" not in tex
+        assert r"\section{Hypotheses and findings}" not in tex
+        # No raw evidence id and no mechanical "Hypothesis id:" / "confidence 0.9" bullet.
+        assert "evi-xyz" not in tex
+        assert "Hypothesis id:" not in tex
 
-    def test_no_claim_renders_no_claim_line(self):
+    def test_status_macro_substitutes_verdict_into_prose(self):
+        # The agent states the verdict via \status{<hyp>} in prose; the engine fills the
+        # recorded status (record-fidelity), so the narrative carries the true verdict.
         hyp = _basic_hyp()
         spec = _spec(hyp)
-        # No claim and no evidence bearing -> the "no claim" branch.
+        claim = _claim(hyp, ClaimStatus.SUPPORTED, basis="met collision_count == 0")
+        ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
+        prose = PaperProse(results=r"H1 resolved \status{hyp-t1} on the tested set.")
+
+        tex = render_paper_latex(spec, [claim], [ev], prose=prose)
+
+        assert "H1 resolved supported on the tested set." in tex
+        assert r"\status{" not in tex  # the macro is substituted, never left raw
+
+    def test_no_prose_no_figures_is_minimal_paper(self):
+        # No narrative authored yet -> a near-empty (honest) paper: title + note + the
+        # document delimiters, no per-hypothesis dump, no "no claim" skeleton line.
+        hyp = _basic_hyp()
+        spec = _spec(hyp)
         tex = render_paper_latex(spec, [], [])
-        assert "no claim" in tex.lower()
+        assert r"\begin{document}" in tex and r"\end{document}" in tex
+        assert "no claim" not in tex.lower()
+        assert r"\subsection{" not in tex
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +235,8 @@ class TestLatexDocumentSkeleton:
 # ---------------------------------------------------------------------------
 
 class TestLatexEscapingIsWired:
+    # The statement / finding / basis are RECORD facts -- after the reframe they render in
+    # the SI (the record dump), not the belief-narrative paper. Escaping is asserted there.
     def test_hypothesis_statement_with_specials_is_escaped(self):
         # A statement riddled with LaTeX specials.
         hyp = Hypothesis(
@@ -239,28 +251,27 @@ class TestLatexEscapingIsWired:
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("ev-1", "hyp_x", "generated", BearingDirection.SUPPORTS)
 
-        tex = render_paper_latex(spec, [claim], [ev])
+        tex = render_si_latex(spec, [claim], [ev])
 
-        # The escaped forms are present ...
+        # The escaped forms are present (the statement is the SI Claim subsection) ...
         assert r"A\_i" in tex
         assert r"B\%" in tex
         assert r"\$cost" in tex
         assert r"\#1" in tex
         assert r"\{set\}" in tex
-        # ... and NO raw special leaked from the statement. Check the underscore:
-        # the only underscores in the document must be escaped ones.
+        # ... and NO raw special leaked. Check the underscore:
         assert "_" not in tex.replace(r"\_", "")
 
     def test_finding_with_specials_is_escaped(self):
         hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
-        # A finding text full of specials, surfaced in the Evidence summary.
+        # A finding text full of specials, surfaced in the SI Evidence record summary.
         ev = _evidence(
             "ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS,
             finding="collision_count = 0 (100% pass) & cost $5",
         )
-        tex = render_paper_latex(spec, [claim], [ev])
+        tex = render_si_latex(spec, [claim], [ev])
         assert r"100\%" in tex
         assert "_" not in tex.replace(r"\_", "")
 
@@ -271,7 +282,7 @@ class TestLatexEscapingIsWired:
             hyp, ClaimStatus.SUPPORTED, basis="rule met: collision_count == 0 & ok"
         )
         ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
-        tex = render_paper_latex(spec, [claim], [ev])
+        tex = render_si_latex(spec, [claim], [ev])
         assert r"collision\_count" in tex
         assert r"\&" in tex
 
@@ -281,13 +292,15 @@ class TestLatexEscapingIsWired:
 # ---------------------------------------------------------------------------
 
 class TestLatexEvidenceValidityLabels:
+    # The honest evidence-validity label is structured record honesty -- after the reframe
+    # it renders in the SI's Claims-and-verdicts section (the record), not the paper.
     def test_formal_generated_supported_labelled_computational(self):
         hyp = _basic_hyp(referent="formal")
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
 
-        tex = render_paper_latex(spec, [claim], [ev])
+        tex = render_si_latex(spec, [claim], [ev])
 
         assert "referent=formal" in tex
         assert "generated" in tex
@@ -305,7 +318,7 @@ class TestLatexEvidenceValidityLabels:
         claim = _claim(hyp, ClaimStatus.PROPOSED)
         ev = _evidence("ev-1", "hyp-e", None, BearingDirection.NEUTRAL)
 
-        tex = render_paper_latex(spec, [claim], [ev])
+        tex = render_si_latex(spec, [claim], [ev])
 
         assert "referent=empirical" in tex
         assert "awaiting measured data" in tex.lower()
@@ -397,7 +410,9 @@ class TestLatexCitations:
         assert r"\url{https://doi.org/10.1021/c160017a018}" in tex
         assert r"\url{https://doi.org/10.48550/arXiv.1301.1493}" in tex
 
-    def test_no_dois_says_none_cited(self):
+    def test_no_dois_no_bib_emits_no_references_section(self):
+        # No bib and no cited DOIs -> no References at all (the manual "No literature
+        # cited." line is gone; there is simply nothing to cite).
         hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
@@ -405,10 +420,12 @@ class TestLatexCitations:
 
         tex_none = render_paper_latex(spec, [claim], [ev], cited_dois=None)
         tex_empty = render_paper_latex(spec, [claim], [ev], cited_dois=[])
-        assert "No literature cited." in tex_none
-        assert "No literature cited." in tex_empty
+        assert "No literature cited." not in tex_none
+        assert r"\section{References}" not in tex_none
+        assert r"\section{References}" not in tex_empty
+        assert r"\bibliography{" not in tex_none
 
-    def test_bib_path_existing_wires_bibliography(self, tmp_path):
+    def test_bib_path_existing_wires_natbib_bibliography(self, tmp_path):
         hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
@@ -421,10 +438,13 @@ class TestLatexCitations:
             cited_dois=["10.1/x"], bib_path=str(bib),
         )
 
-        # The existing .bib is wired (NOT generated): style + bibliography + nocite.
-        assert r"\bibliographystyle{plain}" in tex
+        # ONE reference source: natbib + plainnat + \bibliography. No \nocite{*}, and no
+        # manual \url DOI list (the cited_dois fallback is suppressed when a bib is wired).
+        assert r"\usepackage{natbib}" in tex
+        assert r"\bibliographystyle{plainnat}" in tex
         assert r"\bibliography{references}" in tex  # stem of references.bib
-        assert r"\nocite{*}" in tex
+        assert r"\nocite{*}" not in tex
+        assert r"\url{https://doi.org/10.1/x}" not in tex
 
     def test_bib_path_none_emits_no_bibliography(self):
         hyp = _basic_hyp()
@@ -487,7 +507,9 @@ def test_latex_render_does_no_filesystem_access(monkeypatch):
         cited_dois=["10.1/x"], bib_path="/any/path/references.bib",
     )
     assert r"\bibliography{references}" in tex
-    assert r"\nocite{*}" in tex
+    assert r"\bibliographystyle{plainnat}" in tex
+    # ONE reference source: natbib bibliography, never \nocite{*} nor a manual DOI list.
+    assert r"\nocite{*}" not in tex
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +556,7 @@ class TestLatexFigures:
         assert r"\usepackage{pgfplots}" not in baseline
         assert r"\section{Figures}" not in baseline
 
-    def test_figures_present_adds_pgfplots_and_section(self):
+    def test_figures_present_adds_pgfplots_in_results(self):
         hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
@@ -546,24 +568,25 @@ class TestLatexFigures:
         # Preamble carries pgfplots ...
         assert r"\usepackage{pgfplots}" in tex
         assert r"\pgfplotsset{compat=1.18}" in tex
-        # ... and the body has the Figures section + the figure env + the stable label.
-        assert r"\section{Figures}" in tex
+        # ... and the figure floats inside Results (no separate \section{Figures}).
+        assert r"\section{Results}" in tex
+        assert r"\section{Figures}" not in tex
         assert r"\begin{figure}" in tex
         assert r"\label{fig:growth}" in tex
         assert r"\begin{axis}" in tex
-        # The point (x from spec, y from evidence) is drawn.
-        assert "(1, 0)" in tex  # ev-1 point=0.0 from _evidence
+        assert "(1, 0)" in tex  # ev-1 point=0.0; x from spec, y from evidence
 
-    def test_figures_section_before_references(self):
+    def test_figures_in_results_before_references(self):
         hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
 
+        # No bib -> cited_dois render a \section{References}; figures sit in Results before it.
         tex = render_paper_latex(
             spec, [claim], [ev], figures=[_fig_spec("growth")], cited_dois=["10.1/x"]
         )
-        assert tex.index(r"\section{Figures}") < tex.index(r"\section{References}")
+        assert tex.index(r"\begin{figure}") < tex.index(r"\section{References}")
 
     def test_figures_y_pulled_from_evidence(self):
         # Changing the evidence value changes the drawn coordinate.

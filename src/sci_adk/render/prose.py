@@ -47,9 +47,26 @@ class PaperProse(BaseModel):
     ``\\textbf{...}`` is rendered as literal text -- so prose stays LaTeX-safe outside
     the ref/cite allowlist. See :func:`sci_adk.render.paper._latex_sanitize_prose`.
 
+    **Record-derived facts use the fidelity macros, not free literals.** Under the
+    reframed render contract (design/render-architecture-reframe.md, the "moved line"),
+    the paper's NARRATIVE is agent-authored but its record-derived FACTS must stay
+    faithful to the record. So a measured value is written
+    ``\\evval{<evidence-id>}{<field>}`` and a verdict ``\\status{<hypothesis-id>}``; the
+    engine substitutes the TRUE recorded value at render time, FAIL-LOUD on a fact the
+    record does not hold (:func:`sci_adk.render.factref.substitute_factrefs`). Write
+    ``\\evval``/``\\status`` for any measured number or verdict; only non-record prose is a
+    bare literal.
+
     Attributes:
+        title: the paper title -- a short, real title the agent generates from the
+            research (NOT the hypothesis statement). ``None`` -> the engine falls back to
+            ``spec.id`` (deterministic; never the goal/hypothesis wall).
         abstract: the paper abstract (rendered after the title / ``\\maketitle``).
         introduction: the Introduction section body.
+        methods: the Methods section body (approaches + the frozen decision rules, in
+            prose; the raw rule/verdict dump stays in the SI record).
+        results: the Results section body (the measured findings; figures are placed in
+            this section as floats by the engine, in body-reference order).
         discussion: the Discussion section body (rendered before References).
     """
 
@@ -58,11 +75,26 @@ class PaperProse(BaseModel):
         "str_strip_whitespace": True,
     }
 
+    title: Optional[str] = Field(
+        default=None,
+        description="Short paper title (agent-generated). None -> spec.id fallback.",
+    )
+    author: Optional[str] = Field(
+        default=None,
+        description="Paper author line. None -> empty \\author{} (tool-agnostic; the "
+        "paper never names the rendering toolchain).",
+    )
     abstract: Optional[str] = Field(
         default=None, description="Abstract narrative (rendered after the title)"
     )
     introduction: Optional[str] = Field(
         default=None, description="Introduction section body"
+    )
+    methods: Optional[str] = Field(
+        default=None, description="Methods section body (approaches + decision rules)"
+    )
+    results: Optional[str] = Field(
+        default=None, description="Results section body (figures placed here as floats)"
     )
     discussion: Optional[str] = Field(
         default=None, description="Discussion section body (rendered before References)"

@@ -301,8 +301,10 @@ def test_chain_byte_identical_multi_evidence_production_order_ne_sorted(tmp_path
     assert verb_si == mono_si, (
         "si.tex diverged on a multi-evidence run (production order != sorted-id order)"
     )
-    # Sanity: BOTH render the canonical (sorted) order -- evi-1-first precedes evi-9-last.
-    assert mono_draft.find("evi-1-first") < mono_draft.find("evi-9-last")
+    # Sanity: the SI record dump renders the canonical (sorted) Evidence order --
+    # evi-1-first precedes evi-9-last. (The belief-narrative draft no longer dumps the
+    # raw Evidence ids after the reframe; the record lives in the SI.)
+    assert mono_si.find("evi-1-first") < mono_si.find("evi-9-last")
 
 
 def test_chain_byte_identical_multi_hypothesis_and_novelty(tmp_path):

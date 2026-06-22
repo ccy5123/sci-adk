@@ -193,11 +193,16 @@ class TestUnicodeMap:
     """Specific curated maps land on the documented LaTeX-safe forms."""
 
     def _tex_with(self, text: str) -> str:
-        hyp = _basic_hyp(statement=text)
+        # The reframed paper renders the agent's PROSE (not the hypothesis statement);
+        # inject the unicode via the abstract prose, which is sanitized identically
+        # (the prose sanitizer routes non-ref/cite text through _latex_sanitize).
+        hyp = _basic_hyp()
         spec = _spec(hyp)
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
-        return render_paper_latex(spec, [claim], [ev])
+        return render_paper_latex(
+            spec, [claim], [ev], prose=PaperProse(abstract=text)
+        )
 
     def test_geq_maps_to_math(self):
         tex = self._tex_with("a ≥ b")  # >=

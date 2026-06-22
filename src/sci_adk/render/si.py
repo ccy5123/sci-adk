@@ -31,18 +31,21 @@ design/directory-structure.md (render/), design/rigor-shell-architecture.md (F4 
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 from sci_adk.core.claim import Claim
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Spec
+from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
     order_figures_by_reference,
     render_figure,
 )
 from sci_adk.render.paper import (
-    _confidence_str,
+    _confidence_display,
+    _latex_evidence_validity_label,
     _latex_sanitize,
     _latex_sanitize_prose,
     _result_summary,
@@ -112,6 +115,33 @@ def _kind_str(ev: EvidenceItem) -> str:
     return ev.kind.value if hasattr(ev.kind, "value") else str(ev.kind)
 
 
+def _dedupe_evidence_for_render(
+    evidence: Sequence[EvidenceItem],
+) -> List[tuple[EvidenceItem, int]]:
+    """Collapse repeated Evidence items into ``(item, count)`` for the SI render (3.3).
+
+    A repeated acquisition (e.g. the SAME DOI literature item recorded six times, or a
+    re-run novelty decision) clutters the record dump with byte-identical entries. This
+    is a RENDER-TIME view only -- it never touches the stored append-only log (E1); it
+    just shows one entry with a ``(recorded Nx)`` count instead of N identical lines.
+
+    Two items collapse iff they share ``(kind, finding, point)`` -- the record content a
+    reader sees. Distinct experiment runs (different findings) never collapse; the 6
+    identical literature items do. First-seen order is preserved (deterministic).
+    """
+    out: List[tuple[EvidenceItem, int]] = []
+    index: dict[tuple[str, str, object], int] = {}
+    for ev in evidence:
+        key = (_kind_str(ev), ev.result.finding or "", ev.result.point)
+        if key in index:
+            item, count = out[index[key]]
+            out[index[key]] = (item, count + 1)
+        else:
+            index[key] = len(out)
+            out.append((ev, 1))
+    return out
+
+
 def render_si_latex(
     spec: Spec,
     claims: Sequence[Claim],
@@ -121,6 +151,7 @@ def render_si_latex(
     digest: Optional[str] = None,
     prose: Optional[SIProse] = None,
     paper_body: Optional[str] = None,
+    bib_path: Optional[str] = None,
 ) -> str:
     """Render the full record as a STANDALONE Supporting Information ``si.tex``.
 
@@ -201,12 +232,21 @@ def render_si_latex(
     evidence = list(evidence)
     figures = list(figures or [])
 
+    def _si_slot(text: str) -> str:
+        # SI prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
+        # the prose sanitizer (\ref/\cite preserved). Same contract as the paper's prose.
+        return _latex_sanitize_prose(
+            substitute_factrefs(text.strip(), evidence, claims)
+        )
+
     # The Spec's frozen hypotheses, keyed by id, so each Claim's verdict can show the
     # decision rule it was judged against.
     hyp_by_id = {h.id: h for h in spec.hypotheses}
 
     lines: List[str] = []
-    title = (spec.raw_proposal.goal or "Untitled research").strip().splitlines()[0]
+    # The SI title is the spec id, not the goal/hypothesis wall (the same short title the
+    # paper falls back to; the agent's narrative title lives in the main paper).
+    title = spec.id
 
     # -- Preamble (standalone document; same inputenc/hyperref/url as the paper, so
     #    si.tex compiles on its own). Figure packages are added PER KIND (mirrors the
@@ -218,11 +258,18 @@ def render_si_latex(
     lines.append(r"\usepackage[utf8]{inputenc}")
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
+    lines.append(r"\usepackage{natbib}")
     if has_native:
         lines.append(r"\usepackage{pgfplots}")
         lines.append(r"\pgfplotsset{compat=1.18}")
     if has_image:
         lines.append(r"\usepackage{graphicx}")
+    # SI numbering convention: tables/figures are S-prefixed (Table S1, Figure S1, ...),
+    # so a main-paper cross-reference written as the plain text "Table S1" / "Figure S1"
+    # matches this document's printed numbers (cross-document \ref is deferred -- the xr
+    # package + compile-order dependency; design/paper-figures-and-si.md).
+    lines.append(r"\renewcommand{\thetable}{S\arabic{table}}")
+    lines.append(r"\renewcommand{\thefigure}{S\arabic{figure}}")
     lines.append(
         f"\\title{{Supporting Information: {_latex_sanitize(title)}}}"
     )
@@ -245,23 +292,27 @@ def render_si_latex(
     # byte-identical no-prose dump.
     if prose is not None and prose.overview:
         lines.append(r"\section{Overview}")
-        # Prose-only sanitizer: an author may \ref a figure / \cite literature here;
-        # every other special is still escaped (the record dump below stays fully escaped).
-        lines.append(_latex_sanitize_prose(prose.overview.strip()))
+        # Prose slot: \evval/\status substituted, then sanitized (\ref/\cite preserved);
+        # the record dump below stays fully escaped (no factref, no passthrough).
+        lines.append(_si_slot(prose.overview))
         lines.append("")
 
-    # -- Section: Evidence record (every item; stable order = as given) ------------
+    # -- Section: Evidence record (the append-only record, de-duplicated for render) --
+    # A repeated acquisition (the same DOI six times) collapses to one entry with a
+    # (recorded Nx) count -- a render-time VIEW only; the stored log is untouched (E1).
+    deduped = _dedupe_evidence_for_render(evidence)
     lines.append(r"\section{Evidence record}")
     if not evidence:
         lines.append(r"\emph{No evidence recorded.}")
     else:
         lines.append(r"\begin{description}")
-        for ev in evidence:
+        for ev, count in deduped:
             summary = _result_summary(ev)
+            times = f" (recorded {count}x)" if count > 1 else ""
             lines.append(
                 f"  \\item[\\texttt{{{_latex_sanitize(ev.id)}}} "
                 f"({_latex_sanitize(_kind_str(ev))})] "
-                f"{_latex_sanitize(summary)}"
+                f"{_latex_sanitize(summary)}{times}"
             )
             lines.append(
                 f"    \\\\ \\textit{{provenance:}} "
@@ -270,11 +321,14 @@ def render_si_latex(
         lines.append(r"\end{description}")
     lines.append("")
 
-    # -- Section: Quantitative data (a tabular of the numeric Result fields) -------
-    # A column is emitted ONLY when at least one item carries a value for it (empty
-    # columns skipped deterministically). Iterating _NUMERIC_FIELDS preserves order.
+    # -- Section: Quantitative data (a captioned, labelled TABLE of numeric Result
+    #    fields) -- the de-duplicated items, so a repeated item is not double-listed. A
+    #    column is emitted ONLY when at least one item carries a value for it (empty
+    #    columns skipped deterministically). The table is wrapped in a ``table`` float
+    #    with ``\caption`` + ``\label{tab:s1}`` and referenced within the SI (Table~\ref),
+    #    so the "Table S1" a main-paper author cites resolves to a real, S-numbered table.
     quant_items = [
-        ev for ev in evidence
+        ev for ev, _count in deduped
         if any(getattr(ev.result, f, None) is not None for f in _NUMERIC_FIELDS)
     ]
     active_fields = [
@@ -285,6 +339,16 @@ def render_si_latex(
     if not quant_items or not active_fields:
         lines.append(r"\emph{No quantitative results recorded.}")
     else:
+        lines.append(
+            r"The recorded numeric results are listed in Table~\ref{tab:s1}."
+        )
+        lines.append(r"\begin{table}[htbp]")
+        lines.append(r"\centering")
+        lines.append(
+            r"\caption{Recorded numeric results, one row per Evidence item (the "
+            r"append-only quantitative record).}"
+        )
+        lines.append(r"\label{tab:s1}")
         # Column spec: one for the id + one per active numeric field.
         col_spec = "l" + "r" * len(active_fields)
         lines.append(f"\\begin{{tabular}}{{{col_spec}}}")
@@ -301,6 +365,7 @@ def render_si_latex(
             lines.append(" & ".join(cells) + r" \\")
         lines.append(r"\hline")
         lines.append(r"\end{tabular}")
+        lines.append(r"\end{table}")
     lines.append("")
 
     # -- Section: Claims and verdicts ---------------------------------------------
@@ -316,10 +381,16 @@ def render_si_latex(
             f"  \\item Answers hypothesis: "
             f"\\texttt{{{_latex_sanitize(str(claim.answers))}}}"
         )
-        lines.append(
-            f"  \\item \\textbf{{Status: {_latex_sanitize(_status_str(claim))}}} "
-            f"--- confidence {_latex_sanitize(_confidence_str(claim))}"
+        # Status + confidence. The uninformative credence/posterior=0 default a
+        # deterministic threshold produces is SUPPRESSED (it would read as "confidence 0"
+        # next to SUPPORTED); the basis below carries the real judgment (C3).
+        confidence = _confidence_display(claim)
+        status_line = (
+            f"  \\item \\textbf{{Status: {_latex_sanitize(_status_str(claim))}}}"
         )
+        if confidence is not None:
+            status_line += f" --- confidence {_latex_sanitize(confidence)}"
+        lines.append(status_line)
         # C3: the basis is always present and load-bearing.
         lines.append(f"  \\item Basis: {_latex_sanitize(claim.confidence.basis)}")
 
@@ -331,7 +402,9 @@ def render_si_latex(
         lines.append(f"  \\item Refuting evidence: {ref_str}")
 
         # The frozen decision rule this hypothesis was judged against (the spine of
-        # anti-HARKing). Absent only if the claim answers an unknown hypothesis.
+        # anti-HARKing) + the honest evidence-validity label (referent + data_source(s),
+        # moved here from the paper -- the structured honesty now lives in the record).
+        # Absent only if the claim answers an unknown hypothesis.
         hyp = hyp_by_id.get(claim.answers)
         if hyp is not None:
             rule = hyp.decision_rule
@@ -341,6 +414,9 @@ def render_si_latex(
             lines.append(
                 f"  \\item Decision rule ({_latex_sanitize(rule_kind)}): "
                 f"{_latex_sanitize(rule.expression)}"
+            )
+            lines.append(
+                f"  \\item {_latex_evidence_validity_label(hyp, claim, evidence)}"
             )
         lines.append(r"\end{itemize}")
         lines.append("")
@@ -383,8 +459,18 @@ def render_si_latex(
     # byte-identical no-prose dump.
     if prose is not None and prose.notes:
         lines.append(r"\section{Notes}")
-        # Prose-only sanitizer (ref/cite preserved; all other specials escaped).
-        lines.append(_latex_sanitize_prose(prose.notes.strip()))
+        # Prose slot: \evval/\status substituted, then sanitized (\ref/\cite preserved).
+        lines.append(_si_slot(prose.notes))
+        lines.append("")
+
+    # Bibliography -- the SI cites the SAME references.bib as the paper, so its \citep in
+    # the prose resolves (and the references print) instead of showing [?]. natbib is in
+    # the preamble; an existing .bib is wired with plainnat + \bibliography (the compiler
+    # passes the co-located path; the renderer does no fs access). None -> no bibliography.
+    if bib_path is not None:
+        stem = Path(bib_path).stem
+        lines.append(r"\bibliographystyle{plainnat}")
+        lines.append(f"\\bibliography{{{stem}}}")
         lines.append("")
 
     lines.append(r"\end{document}")

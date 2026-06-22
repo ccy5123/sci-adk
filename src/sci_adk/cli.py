@@ -936,7 +936,23 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                     print(f"    - {name}: duplicate \\label (multiply defined): "
                           f"{', '.join(rep.duplicate_labels)}", file=sys.stderr)
 
-    # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent.
+    # Fidelity gate: a residual \evval/\status macro in a rendered .tex (substitution
+    # bypassed / .tex hand-edited) fails the combined gate.
+    if not report.paper_factref_clean:
+        print("  fidelity FAILED (unsubstituted \\evval/\\status fact macros):",
+              file=sys.stderr)
+        for name in sorted(report.paper_factrefs):
+            print(f"    - {name}: {', '.join(report.paper_factrefs[name])}",
+                  file=sys.stderr)
+
+    # Tool-vocabulary gate (§10): the PAPER must read as tool-agnostic science (the SI is
+    # exempt). A leak in draft.tex fails the combined gate.
+    if not report.paper_tool_clean:
+        print("  tool-vocabulary FAILED (draft.tex names the toolchain, not the "
+              "science -- §10): " + ", ".join(report.paper_tool_vocab), file=sys.stderr)
+
+    # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent
+    # AND no residual fact macro AND the paper is tool-agnostic.
     if report.passed:
         return 0
     return 1

@@ -84,11 +84,16 @@ def test_compile_with_experiment_produces_claims_and_checkpoints(tmp_path):
     on_disk = json.loads((run_dir / "spec.json").read_text(encoding="utf-8"))
     assert on_disk["id"] == "t-compile"
 
-    # The paper draft (LaTeX) carries the key sections.
+    # The paper draft is the belief narrative: NO stage-dump Evidence/Hypotheses
+    # sections (those record facts live in the SI); the qualitative checkpoints surface
+    # as a Pending section. The SI carries the append-only Evidence record.
     paper = result.paper_path.read_text(encoding="utf-8")
-    assert r"\section{Hypotheses and findings}" in paper
-    assert r"\section{Evidence}" in paper
     assert r"\section{Pending agent judgments}" in paper
+    assert r"\section{Evidence}" not in paper
+    assert r"\section{Hypotheses and findings}" not in paper
+    assert result.si_path is not None and result.si_path.exists()
+    si = result.si_path.read_text(encoding="utf-8")
+    assert r"\section{Evidence record}" in si
 
 
 def test_compile_without_experiment_still_emits_spec_and_draft(tmp_path):
@@ -104,15 +109,20 @@ def test_compile_without_experiment_still_emits_spec_and_draft(tmp_path):
     assert (run_dir / "paper" / "draft.tex").exists()
     assert not (run_dir / "paper" / "draft.md").exists()
     paper = (run_dir / "paper" / "draft.tex").read_text(encoding="utf-8")
-    assert r"\section{Goal}" in paper and r"\section{Hypotheses and findings}" in paper
+    # No stage-dump Goal section; qualitative hypotheses still surface as Pending.
+    assert r"\section{Goal}" not in paper
+    assert r"\section{Pending agent judgments}" in paper
+    assert r"\title{" in paper
 
 
-def test_paper_draft_renders_status_when_claims_exist(tmp_path):
+def test_si_records_status_when_claims_exist(tmp_path):
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-status", experiment=_fake_experiment)
-    paper = result.paper_path.read_text(encoding="utf-8")
-    # qualitative + no judge -> PROPOSED (inconclusive), shown in the LaTeX draft.
-    assert "Status: proposed" in paper
+    # qualitative + no judge -> PROPOSED (inconclusive), recorded in the SI (the record),
+    # not the belief-narrative paper.
+    assert result.si_path is not None
+    si = result.si_path.read_text(encoding="utf-8")
+    assert "Status: proposed" in si
 
 
 def test_compile_writes_typed_checkpoint_json_alongside_markdown(tmp_path):

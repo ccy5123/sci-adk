@@ -23,14 +23,16 @@ Reference: design/directory-structure.md (render/), design/abstractions.md.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from sci_adk.core.claim import Claim, ClaimStatus
+from sci_adk.core.claim import Claim, ClaimStatus, ConfidenceType
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Hypothesis, Spec
+from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
     order_figures_by_reference,
@@ -306,6 +308,26 @@ def _confidence_str(claim: Claim) -> str:
     return type_name
 
 
+def _confidence_display(claim: Claim) -> Optional[str]:
+    """The confidence string to SHOW, or ``None`` to suppress it (render decision).
+
+    A deterministic threshold verdict produces a ``credence``/``posterior`` confidence
+    whose numeric ``value`` is the uninformative ``0.0`` default (the real judgment lives
+    in ``basis``, C3). Rendering "confidence 0 (credence)" next to a SUPPORTED status reads
+    as incoherent, so that uninformative zero is SUPPRESSED (the basis carries the
+    judgment). A genuine graded level, or a non-zero numeric value, is shown via
+    :func:`_confidence_str`. Render-only -- it never changes belief, only what is printed.
+    """
+    c = claim.confidence
+    if (
+        c.value is not None
+        and c.value == 0.0
+        and c.type in (ConfidenceType.CREDENCE, ConfidenceType.POSTERIOR)
+    ):
+        return None
+    return _confidence_str(claim)
+
+
 def _status_str(claim: Claim) -> str:
     return claim.status.value if hasattr(claim.status, "value") else str(claim.status)
 
@@ -554,52 +576,53 @@ def render_paper_latex(
     figures: Optional[Sequence[AnyFigure]] = None,
 ) -> str:
     """
-    Render a compilable LaTeX paper draft -- the deterministic, OFFLINE twin of
-    :func:`render_paper`.
+    Render the BELIEF-NARRATIVE paper (``draft.tex``) -- agent prose + a record-fidelity
+    spine (the "moved line", design/render-architecture-reframe.md).
 
-    Mirrors the Markdown renderer's structure (proposal panes, per-hypothesis
-    findings, evidence trail, pending checkpoints) but emits valid LaTeX. EVERY
-    interpolated string is routed through :func:`_latex_escape` so the .tex compiles
-    and stays faithful. The same honest evidence-validity labels appear here as in the
-    Markdown output (no honesty dropped). No LLM, no network: data in, string out.
+    The reframe shrinks this renderer to its record-fidelity job and hands the paper's
+    narrative + structure to the in-session agent (rigor-shell-architecture.md §2.4:
+    "Writing paper prose" is OUT of the kernel). So the engine emits NO stage-dump
+    sections (no Goal/Background/Evidence/Figures heading, no per-hypothesis verdict
+    bullets) -- those record facts live in the deterministic SI (``render_si_latex``).
+    What it DOES emit deterministically: the IMRaD skeleton an agent fills (Abstract /
+    Introduction / Methods / Results / Discussion), the figures (drawn FROM the record),
+    the bibliography wiring, and -- the fidelity gate -- the substitution of every
+    ``\\evval``/``\\status`` macro in the agent prose with its TRUE recorded value
+    (:func:`sci_adk.render.factref.substitute_factrefs`, FAIL-LOUD). So the narrative is
+    the agent's, but every measured number / verdict it states is the record's.
+
+    PURE: no LLM, no network. The agent prose arrives as ``prose`` (input, never
+    generated here). Deterministic: same inputs -> byte-identical output.
 
     Args:
-        spec: the compiled Spec (provenance of the proposal + hypotheses).
-        claims: the Claims produced for the hypotheses (belief state).
-        evidence: the Evidence log (the record); optional.
-        pending: agent-judgment checkpoints; optional (same shape as
-            :func:`render_paper`'s ``pending``).
-        prose: optional agent-authored narrative; a present abstract becomes a LaTeX
-            ``abstract`` environment after ``\\maketitle``, introduction/discussion
-            become sections. ``None`` -> structural skeleton only.
-        cited_dois: DOIs to list in the References section as
-            ``\\url{https://doi.org/<doi>}`` entries; ``None``/empty -> a
-            "No literature cited." line. DOI list only -- no BibTeX is generated.
-        bib_path: if provided, MUST be a path to an EXISTING .bib file; the caller
-            (compiler ``_locate_bib_path``) performs the existence check -- the
-            renderer does no filesystem access. When provided, the already-existing
-            ``.bib`` is wired with ``\\bibliographystyle{plain}`` +
-            ``\\bibliography{<stem>}`` + ``\\nocite{*}`` (so its entries render).
-            ``None`` emits no ``\\bibliography``. No BibTeX is generated or fetched here.
-        figures: optional agent-authored figure list -- native (pgfplots) or image
-            (``\\includegraphics``) specs (design/paper-figures-and-si.md, Phase 1/4).
-            When non-empty a ``\\section{Figures}`` of ``figure`` envs is emitted before
-            the References, IN BODY-REFERENCE ORDER (the standard academic convention:
-            the first figure ``\\ref``'d in the body is Figure 1, the next distinct one
-            Figure 2, ...; unreferenced figures are appended last) -- see
-            :func:`order_figures_by_reference`. Emitting the environments in that order
-            makes LaTeX's source-order auto-numbering print the right "Figure N", while
-            each figure's SEMANTIC ``\\label{fig:<id>}`` is preserved so the body's
-            existing ``\\ref{fig:<id>}`` still resolves (no ref rewriting). Image specs
-            reference co-located ``figures/fig<N><ext>`` (the GENERIC figure-number
-            filename, domain-free); native y values are pulled from ``evidence`` (record
-            fidelity). The preamble pulls ``pgfplots`` ONLY when a NATIVE figure is
-            present and ``graphicx`` ONLY when an IMAGE figure is present, so a
-            native-only render stays byte-identical to the pre-image skeleton and an
-            image-only render does not load pgfplots. ``None``/empty -> NOTHING new is
-            emitted: the output stays byte-identical to the figure-less skeleton (a
-            regression invariant, like ``prose=None``; no figures -> no ordering ->
-            unchanged output).
+        spec: the compiled Spec (id + version for the title fallback + the header note).
+        claims: the Claims (their statuses back ``\\status{<hyp>}`` in the prose).
+        evidence: the Evidence record (figure y-values + ``\\evval`` values come from
+            here); optional.
+        pending: agent-judgment checkpoints; a NON-empty list emits a working-draft
+            "Pending agent judgments" section (a finished paper has none). Optional.
+        prose: the agent-authored narrative (``title``/``abstract``/``introduction``/
+            ``methods``/``results``/``discussion``). Each present slot is emitted as its
+            IMRaD section, after ``\\evval``/``\\status`` substitution + the prose
+            sanitizer (``\\ref``/``\\cite`` preserved). ``title`` is the paper title; absent
+            -> ``spec.id`` (NEVER the goal/hypothesis wall). ``None`` -> a near-empty paper
+            (an unwritten narrative -- the record still lives in the SI).
+        cited_dois: used ONLY as the no-bibtex fallback -- when ``bib_path`` is ``None`` and
+            these are present, a ``\\url`` DOI list is emitted as the References. Ignored
+            when ``bib_path`` is given (BibTeX is the single source then).
+        bib_path: path to an EXISTING ``.bib`` (the compiler checks existence; the renderer
+            does no fs access). Present -> ``\\usepackage{natbib}`` is wired with
+            ``\\bibliographystyle{plainnat}`` + ``\\bibliography{<stem>}`` (author-year, so
+            the prose's ``\\citep``/``\\citet`` resolve). NO ``\\nocite{*}`` and NO manual
+            DOI list (one reference source, never both). ``None`` -> the DOI-list fallback
+            (or nothing).
+        figures: agent-authored MAIN figures (native pgfplots / image) -- the ONLY place
+            main figures appear (the SI carries only supplementary figures). Placed as
+            floats inside Results, numbered by body-reference order across the WHOLE
+            narrative (a ``\\ref{fig:<id>}`` may be in Results or Discussion), so the order
+            is computed against all prose then the floats are emitted; the compiler
+            re-derives the SAME order from the rendered draft for co-located ``fig<N>``
+            filenames. ``None``/empty -> no figures.
 
     Returns:
         A LaTeX document string (``\\documentclass`` ... ``\\end{document}``).
@@ -607,22 +630,26 @@ def render_paper_latex(
     evidence = list(evidence or [])
     pending = list(pending or [])
     figures = list(figures or [])
-    rp = spec.raw_proposal
-    claim_by_hyp = {c.answers: c for c in claims}
+    claims = list(claims)
+
+    def _slot(text: str) -> str:
+        # Agent prose -> substitute record-fidelity facts (\evval/\status, fail-loud),
+        # THEN the prose sanitizer (specials escaped; \ref/\cite preserved). Substitute
+        # before sanitize so a substituted string value is escaped as ordinary text.
+        return _latex_sanitize_prose(
+            substitute_factrefs(text.strip(), evidence, claims)
+        )
+
+    # Title: the agent's short title, else spec.id -- NEVER the goal/hypothesis wall.
+    title = (prose.title.strip() if prose is not None and prose.title else "") or spec.id
 
     lines: list[str] = []
-    title = (rp.goal or "Untitled research").strip().splitlines()[0]
-
-    # Preamble. hyperref+url so \url{} renders; nothing network-dependent.
+    # Preamble. natbib (author-year \citep/\citet); figure packages PER KIND.
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
-    # Figure packages are added PER KIND so each path stays minimal and regression-safe:
-    # pgfplots ONLY when a NATIVE figure is present (a native-only render stays
-    # byte-identical to the pre-figures skeleton; an image-only render does not load
-    # pgfplots), graphicx ONLY when an IMAGE figure is present. Both ship with Overleaf
-    # -- no Python/pip dependency.
+    lines.append(r"\usepackage{natbib}")
     has_native = any(f.kind == "native" for f in figures)
     has_image = any(f.kind == "image" for f in figures)
     if has_native:
@@ -631,105 +658,71 @@ def render_paper_latex(
     if has_image:
         lines.append(r"\usepackage{graphicx}")
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
-    lines.append(r"\author{sci-adk (deterministic render)}")
+    # Author is agent-supplied; absent -> empty \author{} (the paper is tool-agnostic and
+    # never names the rendering toolchain -- design feedback §10, tool-vocabulary leakage).
+    author = (prose.author.strip() if prose is not None and prose.author else "")
+    lines.append(f"\\author{{{_latex_sanitize(author)}}}")
     lines.append(r"\date{\today}")
     lines.append("")
     lines.append(r"\begin{document}")
     lines.append(r"\maketitle")
     lines.append("")
-    lines.append(
-        f"\\noindent\\textit{{Draft compiled by sci-adk from Spec "
-        f"\\texttt{{{_latex_sanitize(spec.id)}}} (v{spec.version}). "
-        f"Belief state is revisable as Evidence accrues.}}"
-    )
-    lines.append("")
+    # NO engine-emitted "compiled by sci-adk from Spec ... Belief state ... Evidence"
+    # note here: that is tool self-reference, which the belief-narrative paper must not
+    # carry (§10). The provenance note lives in the SI (the record), which is exempt; a
+    # data/code-availability pointer, if wanted, is agent prose.
 
-    # Abstract (after \maketitle), when supplied. Prose-only sanitizer: an author may
-    # \ref a figure / \cite literature here; every other special is still escaped.
+    # Abstract.
     if prose is not None and prose.abstract:
         lines.append(r"\begin{abstract}")
-        lines.append(_latex_sanitize_prose(prose.abstract.strip()))
+        lines.append(_slot(prose.abstract))
         lines.append(r"\end{abstract}")
         lines.append("")
 
-    # Introduction, when supplied. Prose-only sanitizer (ref/cite preserved).
+    # IMRaD body -- agent-authored narrative; a section is emitted ONLY when its prose
+    # slot is present. The engine adds no stage-dump section of its own.
     if prose is not None and prose.introduction:
         lines.append(r"\section{Introduction}")
-        lines.append(_latex_sanitize_prose(prose.introduction.strip()))
+        lines.append(_slot(prose.introduction))
+        lines.append("")
+    if prose is not None and prose.methods:
+        lines.append(r"\section{Methods}")
+        lines.append(_slot(prose.methods))
         lines.append("")
 
-    lines.append(r"\section{Goal}")
-    lines.append(_latex_sanitize(rp.goal.strip()) or r"\emph{(none)}")
-    lines.append("")
-    lines.append(r"\section{Background}")
-    lines.append(_latex_sanitize(rp.background.strip()) or r"\emph{(none)}")
-    lines.append("")
-    lines.append(r"\section{Method}")
-    lines.append(_latex_sanitize(rp.method.strip()) or r"\emph{(none)}")
-    if spec.method and spec.method.approaches:
-        lines.append("")
-        lines.append("Planned approaches:")
-        lines.append(r"\begin{itemize}")
-        for a in spec.method.approaches:
-            lines.append(f"  \\item {_latex_sanitize(a)}")
-        lines.append(r"\end{itemize}")
-    lines.append("")
+    # Results: the agent's findings prose + the MAIN figures as floats (the only place
+    # they appear). Figures are numbered by body-reference order across the WHOLE
+    # narrative (a \ref may be in Results or Discussion), so the order is computed against
+    # ALL prose -- the canonical \ref text (figures add only \label, no \ref) -- then the
+    # floats are emitted here. Emitted when there is results prose OR at least one figure.
+    if (prose is not None and prose.results) or figures:
+        lines.append(r"\section{Results}")
+        if prose is not None and prose.results:
+            lines.append(_slot(prose.results))
+            lines.append("")
+        if figures:
+            ref_body = "\n".join(
+                s.strip()
+                for s in (
+                    (prose.abstract if prose else None),
+                    (prose.introduction if prose else None),
+                    (prose.methods if prose else None),
+                    (prose.results if prose else None),
+                    (prose.discussion if prose else None),
+                )
+                if s
+            )
+            for number, fig in order_figures_by_reference(figures, ref_body):
+                lines.append(render_figure(fig, evidence, number))
+                lines.append("")
 
-    # Hypotheses & findings: each hypothesis with the Claim the DecisionEngine
-    # produced (mirrors render_paper's "Hypotheses and findings" block).
-    lines.append(r"\section{Hypotheses and findings}")
-    lines.append("")
-    for h in spec.hypotheses:
-        claim = claim_by_hyp.get(h.id)
-        rule = h.decision_rule
-        rule_kind = rule.kind.value if hasattr(rule.kind, "value") else str(rule.kind)
-        mode = h.mode.value if hasattr(h.mode, "value") else str(h.mode)
-        lines.append(f"\\subsection{{{_latex_sanitize(h.statement)}}}")
-        lines.append(r"\begin{itemize}")
-        lines.append(
-            f"  \\item Hypothesis id: \\texttt{{{_latex_sanitize(h.id)}}} "
-            f"({_latex_sanitize(mode)})"
-        )
-        lines.append(
-            f"  \\item Decision rule ({_latex_sanitize(rule_kind)}): "
-            f"{_latex_sanitize(rule.expression)}"
-        )
-        if claim is not None:
-            lines.append(
-                f"  \\item \\textbf{{Status: {_latex_sanitize(_status_str(claim))}}} "
-                f"--- confidence {_latex_sanitize(_confidence_str(claim))}"
-            )
-            lines.append(f"  \\item Basis: {_latex_sanitize(claim.confidence.basis)}")
-        else:
-            lines.append(
-                r"  \item \textbf{Status: no claim} "
-                r"(no evidence bore on this hypothesis)"
-            )
-        # Honest self-description: referent + bearing data_source(s), same as the
-        # Markdown renderer (no honesty dropped).
-        lines.append(
-            f"  \\item {_latex_evidence_validity_label(h, claim, evidence)}"
-        )
-        lines.append(r"\end{itemize}")
+    if prose is not None and prose.discussion:
+        lines.append(r"\section{Discussion}")
+        lines.append(_slot(prose.discussion))
         lines.append("")
 
-    # Evidence trail (the append-only record).
-    lines.append(r"\section{Evidence}")
-    if not evidence:
-        lines.append(r"\emph{No evidence recorded.}")
-    else:
-        lines.append(r"\begin{itemize}")
-        for ev in evidence:
-            kind = ev.kind.value if hasattr(ev.kind, "value") else str(ev.kind)
-            summary = _result_summary(ev)
-            lines.append(
-                f"  \\item \\texttt{{{_latex_sanitize(ev.id)}}} "
-                f"({_latex_sanitize(kind)}): {_latex_sanitize(summary)}"
-            )
-        lines.append(r"\end{itemize}")
-    lines.append("")
-
-    # Pending agent judgments (proof/qualitative checkpoints -- filled in-session).
+    # Pending agent judgments -- only when present (an unresolved proof/qualitative
+    # hypothesis). A finished paper has none; this is the working-draft signal.
     if pending:
         lines.append(r"\section{Pending agent judgments}")
         lines.append(
@@ -748,69 +741,148 @@ def render_paper_latex(
         lines.append(r"\end{itemize}")
         lines.append("")
 
-    # Agent-authored discussion, when supplied (before References). Prose-only
-    # sanitizer: \ref{fig:<id>} here is what drives the body-reference figure numbering
-    # (order_figures_by_reference, below) -- it must survive as a real LaTeX ref.
-    if prose is not None and prose.discussion:
-        lines.append(r"\section{Discussion}")
-        lines.append(_latex_sanitize_prose(prose.discussion.strip()))
-        lines.append("")
-
-    # Figures (native pgfplots or image \includegraphics), when supplied -- before
-    # References. They are emitted IN BODY-REFERENCE ORDER: the body built SO FAR (every
-    # \ref{fig:...} appears in prose/hypotheses, which all precede this Figures section)
-    # is the canonical reference text, so order_figures_by_reference assigns Figure 1 =
-    # first-\ref'd, etc. Emitting in that order means LaTeX's source-order auto-numbering
-    # prints the right number; render_figure keeps each figure's semantic
-    # \label{fig:<id>} so the body's \ref still resolves, and passes the assigned NUMBER
-    # so an image figure includes figures/fig<N><ext> (native y is pulled from `evidence`
-    # for record fidelity). Absent -> nothing emitted (byte-identical skeleton, like
-    # prose: no figures -> no ordering -> no Figures section).
-    if figures:
-        # The body up to here is the canonical reference text (all \ref's precede the
-        # Figures section); the compiler re-derives the SAME numbering from the full
-        # rendered draft (the Figures section adds only \label's, no \ref's) so the
-        # co-located fig<N> files match these \includegraphics paths exactly.
-        body_so_far = "\n".join(lines)
-        ordered = order_figures_by_reference(figures, body_so_far)
-        lines.append(r"\section{Figures}")
-        lines.append("")
-        for number, fig in ordered:
-            lines.append(render_figure(fig, evidence, number))
-            lines.append("")
-
-    # References: a DOI list (no BibTeX generation). Always emitted.
-    lines.append(r"\section{References}")
-    dois = [d for d in (cited_dois or []) if d and d.strip()]
-    if not dois:
-        lines.append("No literature cited.")
-    else:
-        lines.append(r"\begin{itemize}")
-        for doi in dois:
-            # DOIs are inserted verbatim inside \url{} (NOT _latex_escape'd) -- \url
-            # handles % and other specials; escaping would corrupt the URL.
-            lines.append(f"  \\item \\url{{https://doi.org/{doi}}}")
-        lines.append(r"\end{itemize}")
-
-    # Wire an EXISTING .bib (never generate one). The renderer does NO filesystem
-    # access: a non-None bib_path is the caller's guarantee that the file exists (the
-    # compiler's _locate_bib_path performs the existence check and passes None
-    # otherwise). Path is used only for .stem here -- no .exists() call.
+    # References: ONE source, never both. An existing .bib -> natbib + plainnat +
+    # \bibliography (citations come from the prose's \citep/\citet; NO \nocite{*}, NO
+    # manual list). No .bib but cited DOIs -> a \url DOI list (the no-bibtex fallback).
     if bib_path is not None:
         stem = Path(bib_path).stem
-        lines.append("")
-        lines.append(r"\bibliographystyle{plain}")
+        lines.append(r"\bibliographystyle{plainnat}")
         lines.append(f"\\bibliography{{{stem}}}")
-        # \nocite{*} so every entry in the existing .bib renders even without \cite.
-        lines.append(r"\nocite{*}")
+    else:
+        dois = [d for d in (cited_dois or []) if d and d.strip()]
+        if dois:
+            lines.append(r"\section{References}")
+            lines.append(r"\begin{itemize}")
+            for doi in dois:
+                # DOIs go verbatim inside \url{} (NOT escaped -- \url handles specials).
+                lines.append(f"  \\item \\url{{https://doi.org/{doi}}}")
+            lines.append(r"\end{itemize}")
     lines.append("")
-
     lines.append(r"\end{document}")
     return "\n".join(lines)
 
 
+def _truncate_words(text: str, limit: int) -> str:
+    """Truncate ``text`` to ``limit`` chars at a WORD boundary, ellipsis OUTSIDE.
+
+    Never cuts mid-token (the bug behind the malformed JSON dumps was a fixed char cap
+    slicing through a value). The ellipsis is appended after the boundary, so it is never
+    inside a quoted string / number.
+    """
+    text = text.strip().replace("\n", " ")
+    if len(text) <= limit:
+        return text
+    head = text[:limit].rsplit(" ", 1)[0]
+    return (head or text[:limit]) + " ..."
+
+
+def _summarize_value(value: object) -> str:
+    """A short, STRUCTURED rendering of one finding value (never a raw mid-token cut).
+
+    A scalar -> its text (capped at a word boundary). A list of dicts -> the salient
+    fields (``doi``/``source``/``license``/``filename``) of the first entry + a ``(+N
+    more)`` count -- so a literature finding renders as a structured citation summary, not
+    a truncated JSON blob. A list of scalars -> a count. A nested dict -> ``{...}`` (the
+    SI's per-item record carries the full structure; this is the one-line summary).
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return _truncate_words(str(value), 80)
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        head = value[0]
+        if isinstance(head, dict):
+            keys = [k for k in ("doi", "source", "license", "filename") if k in head]
+            shown = ", ".join(f"{k}={_truncate_words(str(head[k]), 60)}" for k in keys)
+            more = f" (+{len(value) - 1} more)" if len(value) > 1 else ""
+            return f"[{{{shown or '...'}}}{more}]"
+        return f"[{len(value)} item(s)]"
+    if isinstance(value, dict):
+        return "{...}"
+    return _truncate_words(str(value), 80)
+
+
+def _summarize_finding(finding: str) -> str:
+    """Render a finding as a STRUCTURED, escaped-downstream summary -- never raw JSON.
+
+    A JSON object -> ``key=value; ...`` of structured per-field summaries (so the DOI /
+    source / license / filename of a literature finding read cleanly, design feedback
+    3.1). A JSON array -> a count. Non-JSON prose -> the text, truncated at a word
+    boundary with the ellipsis OUTSIDE (never mid-token). The caller escapes the result.
+    """
+    text = finding.strip()
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return f"finding={_truncate_words(text, 200)}"
+    if isinstance(data, dict):
+        bits = "; ".join(f"{k}={_summarize_value(v)}" for k, v in data.items())
+        return f"finding=({bits})" if bits else "finding=()"
+    if isinstance(data, list):
+        return f"finding=[{len(data)} item(s)]"
+    return f"finding={_summarize_value(data)}"
+
+
+# -- §10 tool-vocabulary leakage check (paper narrative only; SI is exempt) ----------
+#
+# A belief-narrative paper must read as legitimate science to a reader who does not know
+# sci-adk (the "tool-agnostic reader test"): no sentence may require knowing a sci-adk
+# internal object to make sense. These phrases/words name the MACHINERY, not the science,
+# so they must not appear in draft.tex. The SI (si.tex) is openly the record dump and is
+# EXEMPT -- this checker is for the PAPER only. (design feedback §10.)
+_PAPER_TOOL_PHRASES: tuple[str, ...] = (
+    "sci-adk",
+    "frozen spec",
+    "engine-derived",
+    "the engine",
+    "verify audit",
+    "append-only",
+    "evidence record",
+    "belief state",
+    "anti-harking",
+    "result.point",
+    "result.finding",
+    "decision rule",
+)
+# Bare jargon words (word-boundary, case-insensitive): a paper states a "result", not a
+# "verdict".
+_PAPER_TOOL_WORD_RE = re.compile(r"\b(?:verdict|verdicts)\b", re.IGNORECASE)
+# "Spec" as a sci-adk proper noun (case-sensitive). The generic word -- "specification",
+# "specifically", lowercase "spec" -- is fine; the capitalized object "Spec" is not.
+_PAPER_TOOL_PROPER_RE = re.compile(r"\bSpec\b")
+
+
+def check_paper_tool_vocabulary(paper_tex: str) -> list[str]:
+    """Return the tool-vocabulary leaks found in a rendered PAPER (``draft.tex``).
+
+    PURE. The §10 tool-agnostic check: returns the distinct forbidden phrases/words that
+    name the sci-adk machinery (``sci-adk``, ``frozen Spec``, ``engine-derived``,
+    ``verdict``, ``Evidence record``, ``result.point``, ...) found in ``paper_tex``. An
+    EMPTY list means the paper reads as tool-agnostic science. The SI is the record dump
+    and is intentionally NOT passed here (it is exempt). De-duplicated, first-seen order;
+    a verify gate and the render regression tests both consume it.
+    """
+    low = paper_tex.lower()
+    found: list[str] = []
+    for phrase in _PAPER_TOOL_PHRASES:
+        if phrase in low and phrase not in found:
+            found.append(phrase)
+    for match in _PAPER_TOOL_WORD_RE.finditer(paper_tex):
+        word = match.group(0).lower()
+        if word not in found:
+            found.append(word)
+    if _PAPER_TOOL_PROPER_RE.search(paper_tex) and "Spec" not in found:
+        found.append("Spec")
+    return found
+
+
 def _result_summary(ev: EvidenceItem) -> str:
-    """One-line summary of an Evidence item's Result."""
+    """One-line, STRUCTURED summary of an Evidence item's Result.
+
+    The numeric scalars (point/ci/posterior) plus a structured rendering of the qualitative
+    finding (:func:`_summarize_finding`) -- NO raw JSON dumped, NO mid-token truncation. The
+    SI carries the full per-item record; this is the readable one-line summary.
+    """
     r = ev.result
     parts: list[str] = []
     if r.point is not None:
@@ -820,6 +892,5 @@ def _result_summary(ev: EvidenceItem) -> str:
     if r.posterior is not None:
         parts.append(f"posterior={r.posterior:.6g}")
     if r.finding:
-        text = r.finding.strip().replace("\n", " ")
-        parts.append(f"finding={text[:120]}")
+        parts.append(_summarize_finding(r.finding))
     return ", ".join(parts) if parts else "(no result fields)"

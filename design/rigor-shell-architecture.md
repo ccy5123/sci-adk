@@ -168,6 +168,16 @@ cannot reduce to a formula. It already exists as a Protocol + an injection point
 | Provenance, replay, LaTeX/citation emission (deterministic spine) | — |
 | The frozen `DecisionRule` and its application (the verdict) | — |
 
+**Render-spine scope (the "moved line", 2026-06-22, design/render-architecture-reframe.md):**
+the "LaTeX/citation emission (deterministic spine)" row above is scoped to the
+RECORD-FIDELITY essentials — the SI record dump, figures drawn from the record, the
+bibliography wiring, and the `\evval`/`\status` fact substitution + a fidelity gate. The
+main paper's NARRATIVE, title, and section structure are the agent's ("Writing paper prose"
+is OUT, above); the spine no longer assembles them. A paper's measured numbers and verdicts
+stay record-faithful by construction because they are written as `\evval`/`\status` markup
+that the engine substitutes from the record at render time (FAIL-LOUD), so "no LLM in the
+verdict path" holds while the narrative moves to the agent.
+
 **The kernel must never:** import from the adapter; embed domain content; know that
 the capability is Claude Code; or autonomously call an LLM (Step-3 §7). It depends
 only on Interfaces A/B/C. This one-way dependency (`adapter → kernel` only, never the

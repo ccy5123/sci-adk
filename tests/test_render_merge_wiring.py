@@ -137,13 +137,12 @@ def test_compile_gathers_dois_from_manifest_and_wires_bib(tmp_path):
         PROPOSAL, spec_id="t-tex-manifest", experiment=_fake_experiment)
 
     tex = (run_dir / "paper" / "draft.tex").read_text(encoding="utf-8")
-    # The three manifest DOIs appear.
-    assert r"\url{https://doi.org/10.1021/c160017a018}" in tex
-    assert r"\url{https://doi.org/10.48550/arXiv.1301.1493}" in tex
-    assert r"\url{https://doi.org/10.1186/s13321-020-00453-4}" in tex
-    # The existing references.bib is wired (NOT generated).
+    # The existing references.bib is wired (NOT generated) as the SINGLE reference source:
+    # natbib + plainnat + \bibliography, never a manual \url DOI list and never \nocite{*}.
     assert r"\bibliography{references}" in tex
-    assert r"\nocite{*}" in tex
+    assert r"\bibliographystyle{plainnat}" in tex
+    assert r"\nocite{*}" not in tex
+    assert r"\url{https://doi.org/" not in tex
 
 
 def test_compile_copies_references_bib_into_paper_dir(tmp_path):
@@ -173,7 +172,7 @@ def test_compile_copies_references_bib_into_paper_dir(tmp_path):
     # ... and the stem the .tex references is 'references' (resolves in paper/).
     tex = (paper_dir / "draft.tex").read_text(encoding="utf-8")
     assert r"\bibliography{references}" in tex
-    assert r"\nocite{*}" in tex
+    assert r"\nocite{*}" not in tex
 
 
 def test_compile_no_bib_does_not_create_paper_bib(tmp_path):
@@ -191,8 +190,10 @@ def test_compile_without_literature_says_none_cited(tmp_path):
         PROPOSAL, spec_id="t-tex-nolit", experiment=_fake_experiment)
     tex = (tmp_path / "runs" / "t-tex-nolit" / "paper" / "draft.tex").read_text(
         encoding="utf-8")
-    assert "No literature cited." in tex
-    # No bib file -> no \bibliography wiring.
+    # No literature at all -> no References section and no \bibliography (the manual
+    # "No literature cited." line is gone -- there is simply nothing to cite).
+    assert "No literature cited." not in tex
+    assert r"\section{References}" not in tex
     assert r"\bibliography{" not in tex
 
 
@@ -338,9 +339,11 @@ def test_compile_threads_figures_into_tex(tmp_path):
 
     tex = (tmp_path / "runs" / "t-fig" / "paper" / "draft.tex").read_text(
         encoding="utf-8")
-    # pgfplots preamble + the Figures section + the stable label, y pulled from ev-pt-0.
+    # pgfplots preamble + the figure float inside Results + the stable label, y pulled
+    # from ev-pt-0 (the reframe places main figures in Results, no \section{Figures}).
     assert r"\usepackage{pgfplots}" in tex
-    assert r"\section{Figures}" in tex
+    assert r"\section{Results}" in tex
+    assert r"\section{Figures}" not in tex
     assert r"\label{fig:growth}" in tex
     assert "(1, 1)" in tex  # ev-pt-0 point=1.0 at x=1
 
@@ -436,10 +439,12 @@ def test_compile_colocates_image_figure_into_paper_figures(tmp_path):
     assert r"\includegraphics[width=\linewidth]{figures/fig1.png}" in draft
     assert r"\label{fig:scheme}" in draft
 
-    # si.tex (the SI shows every figure) references the SAME co-located fig1.png file.
+    # si.tex does NOT re-render the MAIN figure (the reframe: main figures live ONLY in
+    # the paper's Results; the SI carries only supplementary si_figures, none here). So a
+    # main figure is never duplicated across draft.tex + si.tex (design feedback 5.2).
     si = (paper_dir / "si.tex").read_text(encoding="utf-8")
-    assert r"\usepackage{graphicx}" in si
-    assert "{figures/fig1.png}" in si
+    assert "{figures/fig1.png}" not in si
+    assert r"\label{fig:scheme}" not in si
 
 
 def test_compile_image_figure_absolute_path(tmp_path):
@@ -556,11 +561,13 @@ def test_compile_shares_figure_numbering_and_filenames_main_and_si(tmp_path):
     # ONE shared file set -- no id-named or extra files.
     assert sorted(p.name for p in figures_dir.iterdir()) == ["fig1.png", "fig2.png"]
 
-    # The SI reuses the SAME fig<N> files + the SAME order (alpha fig1 before beta fig2).
-    assert "{figures/fig1.png}" in si
-    assert "{figures/fig2.png}" in si
-    assert si.index(r"\label{fig:alpha}") < si.index(r"\label{fig:beta}")
-    # The semantic labels survive in both documents so a body \ref{fig:<id>} resolves.
+    # The SI does NOT re-render the MAIN figures (the reframe: main figures live ONLY in
+    # the paper's Results; the SI carries only supplementary si_figures, none here), so
+    # they are never duplicated across draft.tex + si.tex (design feedback 5.2).
+    assert "{figures/fig1.png}" not in si
+    assert "{figures/fig2.png}" not in si
+    assert r"\label{fig:alpha}" not in si and r"\label{fig:beta}" not in si
+    # The semantic labels survive in the PAPER so a body \ref{fig:<id>} resolves there.
     assert r"\label{fig:alpha}" in draft and r"\label{fig:beta}" in draft
 
 
@@ -788,19 +795,23 @@ def test_compile_emits_si_next_to_draft(tmp_path):
     assert "ev-pt-0" in si
 
 
-def test_compile_si_dumps_record_with_figures(tmp_path):
-    """When figures are supplied, si.tex renders ALL of them (the SI shows every
-    figure) with the pgfplots preamble; y pulled from the recorded Evidence."""
+def test_compile_si_figures_render_in_si_only(tmp_path):
+    """The SI carries only SUPPLEMENTARY si_figures (the reframe: main figures live only
+    in the paper, 5.2). A si_figure renders into si.tex with the pgfplots preamble; y
+    pulled from the recorded Evidence. A MAIN figure does NOT appear in the SI."""
     from sci_adk.render.figures import PaperFigures
 
-    figs = PaperFigures.model_validate(_figures_json("growth", "ev-pt-0")).figures
+    main = PaperFigures.model_validate(_figures_json("main", "ev-pt-0")).figures
+    supp = PaperFigures.model_validate(_figures_json("supp", "ev-pt-0")).figures
     ResearchCompiler(workspace_dir=tmp_path).compile(
-        PROPOSAL, spec_id="t-si-fig", experiment=_point_experiment, figures=figs)
+        PROPOSAL, spec_id="t-si-fig", experiment=_point_experiment,
+        figures=main, si_figures=supp)
 
     si = (tmp_path / "runs" / "t-si-fig" / "paper" / "si.tex").read_text(
         encoding="utf-8")
     assert r"\usepackage{pgfplots}" in si
-    assert r"\label{fig:growth}" in si
+    assert r"\label{fig:supp}" in si      # the supplementary figure is in the SI
+    assert r"\label{fig:main}" not in si  # the main figure is NOT duplicated into the SI
     assert "(1, 1)" in si  # ev-pt-0 point=1.0 at x=1
 
 

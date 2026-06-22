@@ -142,3 +142,20 @@ DVC, tmux 등)는 *필요해진 시점에* 추가.
 `web_search`(이미 허용 목록)로 찾는다 — 연구자가 선행연구를 훑듯 on-demand로.
 discovery(주제→주요 논문→DOI)는 코드 모듈이 아니라 에이전트 행위이고, paperforge가
 그 DOI를 취득한다. 전체 흐름·진입점은 `design/literature-acquisition.md` 참조.
+
+### Render 결정성 원칙 재정립 — "선을 옮긴다" (2026-06-22, 사용자 승인됨)
+
+본 정책은 "sci-adk의 *완료 기준* = paper draft + 실행 가능한 코드 + 정합성 있는
+evidence"이며 render는 결정적(LLM 없는) 단계라는 가정을 깔고 있다. 이 결정성의
+*범위*가 재정립됐다(신규 도구 도입 아님 — 기존 render 레이어의 경계 이동):
+
+- **여전히 결정적(양보 불가)**: verdict·측정값·evidence·그림 y값·replay. `sci-adk
+  verify`가 record로 belief를 재현하는 근거(adoption-roadmap.md "no LLM in the verdict
+  path"). LLM이 이를 생성하면 rigor 게이트가 붕괴한다.
+- **에이전트로 이동**: 논문의 *서사·제목·구조*(rigor-shell-architecture.md §2.4에서
+  이미 "Writing paper prose"=커널 OUT). 결정적 spine이 이 영역을 침범하던 것을 제자리로
+  옮긴 것이며, **자율 `claude -p` 도입이 아니다** — 서사는 인세션 에이전트가 작성해
+  입력으로 전달하고(zero-cost), 측정값/판정은 `\evval`/`\status` 마크업으로 엔진이
+  record에서 치환한다(fail-loud). "no autonomous LLM call" 배제는 그대로 유효하다.
+
+전체 설계: `design/render-architecture-reframe.md`.
