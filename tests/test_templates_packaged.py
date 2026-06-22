@@ -16,14 +16,16 @@ future move/rename that breaks the editable path fails loudly.
 
 from __future__ import annotations
 
-import os
 import stat
 
 from sci_adk.init_session import _templates_root
 
 # The complete asset inventory the installer lays down (kept in lockstep with
 # init_session._PLAIN_ASSETS + CLAUDE.md + settings.json). If the kit grows an
-# asset, add it here so the packaging lock stays exhaustive.
+# asset, add it here so the packaging lock stays exhaustive. README.md is packaged
+# (rides in the wheel) but is NOT installed by the verb -- it documents the source
+# kit; it stays in this inventory because this test only asserts presence under the
+# templates root, not installation.
 _KIT_FILES = (
     "CLAUDE.md",
     "README.md",
@@ -31,6 +33,30 @@ _KIT_FILES = (
     ".claude/output-styles/science-orchestrator/science-orchestrator.md",
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
+    # v1 worker agents (5)
+    ".claude/agents/manager-prereg.md",
+    ".claude/agents/expert-experimentalist.md",
+    ".claude/agents/expert-statistician.md",
+    ".claude/agents/expert-writer.md",
+    ".claude/agents/expert-literature.md",
+    # v1 guard agents (3)
+    ".claude/agents/evaluator-rigor.md",
+    ".claude/agents/evaluator-novelty.md",
+    ".claude/agents/evaluator-validity.md",
+    # the sci orchestration hub + 4 knowledge-library Skills
+    ".claude/skills/sci/SKILL.md",
+    ".claude/skills/science-foundation-rigor/SKILL.md",
+    ".claude/skills/science-workflow-prereg/SKILL.md",
+    ".claude/skills/science-workflow-experiment/SKILL.md",
+    ".claude/skills/science-workflow-publish/SKILL.md",
+    # /sci thin command routers (root + 6 subcommands)
+    ".claude/commands/sci.md",
+    ".claude/commands/sci/plan.md",
+    ".claude/commands/sci/experiment.md",
+    ".claude/commands/sci/publish.md",
+    ".claude/commands/sci/verify.md",
+    ".claude/commands/sci/status.md",
+    ".claude/commands/sci/replicate.md",
 )
 _HOOK_SCRIPTS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",

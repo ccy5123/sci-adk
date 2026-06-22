@@ -23,7 +23,6 @@ command is installed by this verb (the ``/sci`` entry point lands in a later ste
 from __future__ import annotations
 
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -34,12 +33,38 @@ from sci_adk.init_session import InstallReport, install_session
 
 # The plain file assets the kit installs (relative to the target dir). CLAUDE.md
 # and settings.json have their own special handling and are asserted separately.
-# (The ``/research`` command was removed in the sci-adk-as-moai pivot; no command
-# is installed by this verb.)
+# As of the sci-adk-as-moai Phase C upgrade the verb installs the FULL kit: the two
+# enforcement hooks, the science-orchestrator output style, the 8 v1 worker/guard
+# agents, the 5 sci/science-* Skills, and the 7 /sci command routers. Kept in
+# lockstep with init_session._PLAIN_ASSETS.
 _FILE_ASSETS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
     ".claude/output-styles/science-orchestrator/science-orchestrator.md",
+    # v1 worker agents (5)
+    ".claude/agents/manager-prereg.md",
+    ".claude/agents/expert-experimentalist.md",
+    ".claude/agents/expert-statistician.md",
+    ".claude/agents/expert-writer.md",
+    ".claude/agents/expert-literature.md",
+    # v1 guard agents (3)
+    ".claude/agents/evaluator-rigor.md",
+    ".claude/agents/evaluator-novelty.md",
+    ".claude/agents/evaluator-validity.md",
+    # the sci orchestration hub + 4 knowledge-library Skills
+    ".claude/skills/sci/SKILL.md",
+    ".claude/skills/science-foundation-rigor/SKILL.md",
+    ".claude/skills/science-workflow-prereg/SKILL.md",
+    ".claude/skills/science-workflow-experiment/SKILL.md",
+    ".claude/skills/science-workflow-publish/SKILL.md",
+    # /sci thin command routers (root + 6 subcommands)
+    ".claude/commands/sci.md",
+    ".claude/commands/sci/plan.md",
+    ".claude/commands/sci/experiment.md",
+    ".claude/commands/sci/publish.md",
+    ".claude/commands/sci/verify.md",
+    ".claude/commands/sci/status.md",
+    ".claude/commands/sci/replicate.md",
 )
 _HOOK_SHELL_SCRIPTS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
@@ -78,7 +103,8 @@ def test_install_into_empty_dir_lays_down_every_asset(tmp_path):
     report = install_session(tmp_path)
 
     assert isinstance(report, InstallReport)
-    # all four plain assets + CLAUDE.md present
+    # every plain asset (hooks + output style + 8 agents + 5 Skills + 7 commands)
+    # + CLAUDE.md present
     for rel in _FILE_ASSETS:
         assert (tmp_path / rel).is_file(), f"missing asset: {rel}"
     assert (tmp_path / "CLAUDE.md").is_file()
@@ -92,10 +118,75 @@ def test_install_into_empty_dir_lays_down_every_asset(tmp_path):
     assert any("reanchor.sh" in c for c in ups_cmds)
 
     # the report names what it installed (asset basenames appear somewhere)
-    blob = "\n".join(report.installed + report.settings_changes)
     assert "settings.json" in "\n".join(report.settings_changes).lower() \
         or settings["outputStyle"] == "science-orchestrator"
     assert any("stop-verify-gate.sh" in a for a in report.installed)
+
+
+# the full kit's representative assets across each new family (agents, Skills,
+# commands) -- a spot-check that Phase C wires the operational layer, not just hooks.
+_AGENT_ASSETS = (
+    ".claude/agents/manager-prereg.md",
+    ".claude/agents/expert-experimentalist.md",
+    ".claude/agents/expert-statistician.md",
+    ".claude/agents/expert-writer.md",
+    ".claude/agents/expert-literature.md",
+    ".claude/agents/evaluator-rigor.md",
+    ".claude/agents/evaluator-novelty.md",
+    ".claude/agents/evaluator-validity.md",
+)
+_SKILL_ASSETS = (
+    ".claude/skills/sci/SKILL.md",
+    ".claude/skills/science-foundation-rigor/SKILL.md",
+    ".claude/skills/science-workflow-prereg/SKILL.md",
+    ".claude/skills/science-workflow-experiment/SKILL.md",
+    ".claude/skills/science-workflow-publish/SKILL.md",
+)
+_COMMAND_ASSETS = (
+    ".claude/commands/sci.md",
+    ".claude/commands/sci/plan.md",
+    ".claude/commands/sci/experiment.md",
+    ".claude/commands/sci/publish.md",
+    ".claude/commands/sci/verify.md",
+    ".claude/commands/sci/status.md",
+    ".claude/commands/sci/replicate.md",
+)
+
+
+def test_install_lays_down_the_full_kit_agents_skills_commands(tmp_path):
+    # Phase C (sci-adk-as-moai §10.3): a fresh install must place all 8 agents, the
+    # 5 sci/science-* Skills, and the 7 /sci command routers -- the install loop
+    # creates .claude/agents/, .claude/skills/<name>/ and .claude/commands/sci/ on
+    # the fly (no per-asset special-casing).
+    report = install_session(tmp_path)
+
+    for rel in _AGENT_ASSETS + _SKILL_ASSETS + _COMMAND_ASSETS:
+        assert (tmp_path / rel).is_file(), f"full kit missing asset: {rel}"
+
+    # the report names them as installed (every family represented)
+    assert any("manager-prereg.md" in a for a in report.installed)
+    assert any("sci/SKILL.md" in a for a in report.installed)
+    assert any("commands/sci/plan.md" in a for a in report.installed)
+
+    # the command routers are thin Skill("sci") wrappers, not workflow logic
+    plan = (tmp_path / ".claude/commands/sci/plan.md").read_text(encoding="utf-8")
+    assert 'Use Skill("sci") with arguments: plan' in plan
+    root = (tmp_path / ".claude/commands/sci.md").read_text(encoding="utf-8")
+    assert 'Use Skill("sci") with arguments:' in root
+
+
+def test_dry_run_reports_full_kit_but_writes_nothing(tmp_path):
+    # the dry-run plan must name the agents, the sci hub Skill, and a /sci command,
+    # proving Phase C is wired -- yet nothing lands on disk.
+    report = install_session(tmp_path, dry_run=True)
+
+    blob = "\n".join(report.installed)
+    assert ".claude/agents/manager-prereg.md" in blob
+    assert ".claude/skills/sci/SKILL.md" in blob
+    assert ".claude/commands/sci/plan.md" in blob
+
+    # truly nothing written
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_installed_hook_scripts_are_executable(tmp_path):

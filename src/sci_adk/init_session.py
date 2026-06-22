@@ -1,13 +1,16 @@
 """
 ``sci-adk init-session <dir>`` -- the Phase-3 research-workspace installer (D3).
 
-design/research-session-enforcement.md D3 + sci-adk-as-moai.md §10.5: install the
-``src/sci_adk/templates/research-workspace/`` enforcement kit (two hooks, the
-``science-orchestrator`` output style, ``CLAUDE.md``, and a ``settings.json``
-fragment) into a target research workspace, with one command, keeping the
-hook/``verify`` contracts version-pinned to the sci-adk release. (The ``/research``
-command was removed alongside the ``researcher`` persona in the sci-adk-as-moai
-pivot; the ``/sci`` entry point is installed in a later step, not here.)
+design/research-session-enforcement.md D3 + sci-adk-as-moai.md §10.3/§10.5: install
+the ``src/sci_adk/templates/research-workspace/`` kit into a target research
+workspace, with one command, keeping the hook/``verify`` contracts version-pinned to
+the sci-adk release. As of the sci-adk-as-moai Phase C upgrade the kit is the FULL
+operational layer: the two enforcement hooks, the ``science-orchestrator`` output
+style, ``CLAUDE.md``, a ``settings.json`` fragment, the 8 v1 worker/guard agents,
+the 5 ``sci``/``science-*`` Skills, and the 7 ``/sci`` command routers. (The
+``/research`` command and ``researcher`` persona were removed in the pivot;
+``science-orchestrator`` is the sole installed persona and ``/sci`` is the sole entry
+point.)
 
 Two load-bearing invariants, tested explicitly in tests/test_init_session.py:
 
@@ -49,12 +52,45 @@ from pydantic import BaseModel, Field
 
 # plain file assets copied verbatim (non-clobbering). CLAUDE.md and settings.json
 # have their own bespoke handling below and are NOT in this list. The ``/research``
-# command and ``researcher`` persona were removed in the sci-adk-as-moai pivot; the
-# ``/sci`` command is installed in a later step, not by this verb.
+# command and ``researcher`` persona were removed in the sci-adk-as-moai pivot; this
+# list now installs the FULL kit -- the two enforcement hooks, the
+# ``science-orchestrator`` output style, the 8 v1 worker/guard agents, the 5
+# ``sci``/``science-*`` knowledge-library Skills, and the 7 ``/sci`` command routers.
+# Every entry is copied through the same non-clobbering ``_copy_nonclobber`` path
+# (the loop's ``dst.parent.mkdir(parents=True)`` creates ``.claude/agents/``,
+# ``.claude/skills/<name>/`` and ``.claude/commands/sci/`` as needed -- no
+# per-asset special-casing). Only the two hooks are executable
+# (``_EXECUTABLE_ASSETS``); agents/skills/commands are plain data.
 _PLAIN_ASSETS = (
+    # enforcement hooks (Stop verify gate + UserPromptSubmit re-anchor)
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
+    # the always-on persona
     ".claude/output-styles/science-orchestrator/science-orchestrator.md",
+    # v1 worker agents (5)
+    ".claude/agents/manager-prereg.md",
+    ".claude/agents/expert-experimentalist.md",
+    ".claude/agents/expert-statistician.md",
+    ".claude/agents/expert-writer.md",
+    ".claude/agents/expert-literature.md",
+    # v1 guard agents (3) -- advisory; sci-adk verify is the sole verdict
+    ".claude/agents/evaluator-rigor.md",
+    ".claude/agents/evaluator-novelty.md",
+    ".claude/agents/evaluator-validity.md",
+    # the sci orchestration hub + 4 knowledge-library Skills
+    ".claude/skills/sci/SKILL.md",
+    ".claude/skills/science-foundation-rigor/SKILL.md",
+    ".claude/skills/science-workflow-prereg/SKILL.md",
+    ".claude/skills/science-workflow-experiment/SKILL.md",
+    ".claude/skills/science-workflow-publish/SKILL.md",
+    # /sci thin command routers (root + 6 subcommands)
+    ".claude/commands/sci.md",
+    ".claude/commands/sci/plan.md",
+    ".claude/commands/sci/experiment.md",
+    ".claude/commands/sci/publish.md",
+    ".claude/commands/sci/verify.md",
+    ".claude/commands/sci/status.md",
+    ".claude/commands/sci/replicate.md",
 )
 
 # the subset of _PLAIN_ASSETS whose executable bit must be preserved (the hooks
@@ -384,7 +420,9 @@ def install_session(target_dir: Path, *, dry_run: bool = False) -> InstallReport
     src_root = _templates_root()
     report = InstallReport(dry_run=dry_run)
 
-    # 1. the plain file assets (hooks + the science-orchestrator output style).
+    # 1. the plain file assets (hooks, science-orchestrator output style, the 8
+    #    worker/guard agents, the 5 sci/science-* Skills, the 7 /sci commands).
+    #    _copy_nonclobber's dst.parent.mkdir creates each needed subdir on the fly.
     for rel in _PLAIN_ASSETS:
         _copy_nonclobber(
             src_root / rel,
