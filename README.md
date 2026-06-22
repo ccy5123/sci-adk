@@ -199,7 +199,7 @@ kernel** — it adds delegation and early checks, never a new verdict path. See
 - **Literature triggers — novelty + contested**: contested = recording-only; **novelty is a 1st-class revisable Claim `claim-novelty-<hyp>` derived by rule (B-replace)** — SUPPORTED iff a recorded `found_nothing` prior-art search; NON-HALT compile-time checkpoint; `sci-adk novelty`/`sci-adk contested` CLI verbs; `verify` re-derives the novelty claim
 - **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
 - **paperforge re-pin → DOI→BibTeX**: pin `2cec69b` ships `paperforge.bibtex`
-- 764 unit tests passing (`python3 -m pytest -q`)
+- 1025 unit tests passing (`python3 -m pytest -q`)
 
 ### Remaining
 
@@ -263,10 +263,10 @@ sci-adk/
 │   ├── tool-policy.md        # Runtime tool governance (allowed / excluded)
 │   ├── directory-structure.md
 │   ├── constitution.md       # sci-adk identity and rules
-│   └── session-3-handoff.md  # Latest session handoff
+│   └── session-4-handoff.md  # Latest session handoff
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
-├── tests/                    # Engineering-layer tests (764 passing)
+├── tests/                    # Engineering-layer tests (1025 passing)
 │   ├── test_spec.py          # Spec invariants
 │   ├── test_evidence.py      # Evidence invariants
 │   ├── test_claim.py         # Claim invariants
@@ -279,7 +279,7 @@ sci-adk/
 │   ├── test_compiler.py
 │   ├── test_kernel_adapter_seam.py  # F4 lint: kernel must not import adapter
 │   ├── test_t1_end_to_end.py
-│   └── ...                   # 57 test files total
+│   └── ...                   # 68 test files total
 ├── runs/                     # Research output (per-run artifacts)
 │   └── <spec_id>/
 │       ├── spec.json         # Compiled Spec (frozen)
@@ -297,7 +297,7 @@ sci-adk/
 ## Testing
 
 ```bash
-# All tests (764 passing)
+# All tests (1025 passing)
 python3 -m pytest -q
 
 # Integration tests (require Docker)
