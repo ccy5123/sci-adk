@@ -39,16 +39,20 @@ _KIT_FILES = (
     ".claude/agents/expert-statistician.md",
     ".claude/agents/expert-writer.md",
     ".claude/agents/expert-literature.md",
+    # v2-promoted worker (1)
+    ".claude/agents/expert-replicator.md",
     # v1 guard agents (3)
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
-    # the sci orchestration hub + 4 knowledge-library Skills
+    # the sci orchestration hub + 6 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
     ".claude/skills/science-workflow-prereg/SKILL.md",
     ".claude/skills/science-workflow-experiment/SKILL.md",
+    ".claude/skills/science-workflow-replicate/SKILL.md",
     ".claude/skills/science-workflow-publish/SKILL.md",
+    ".claude/skills/science-tool-academic-search/SKILL.md",
     # /sci thin command routers (root + 6 subcommands)
     ".claude/commands/sci.md",
     ".claude/commands/sci/plan.md",

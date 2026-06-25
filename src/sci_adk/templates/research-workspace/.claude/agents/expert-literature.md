@@ -4,7 +4,7 @@ description: |
   Prior-work and novelty searcher for a sci-adk research cycle. Searches prior art per (hypothesis × kind) via web / academic MCP (arXiv, Semantic Scholar), and records the decision at the trigger moment — `found_nothing` or relevant prior art — for result-novelty and method-novelty independently. Also records contested-literature findings. Drives the Spec freeze at the PLAN stage; re-searches only on Spec amendment.
   Use when: conducting prior-art / novelty search and recording the decision before the Spec is frozen.
   NOT for: freezing the Spec (manager-prereg), running experiments (expert-experimentalist), deriving Claims (expert-statistician), rendering the paper (expert-writer).
-tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, WebFetch
+tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, WebFetch, Skill
 ---
 
 # expert-literature — Prior-work and Novelty Searcher
@@ -69,12 +69,17 @@ output, not the prose.
 
 ## Search Conduct
 
-- Use WebSearch / WebFetch and the academic search MCP (arXiv, Semantic Scholar)
-  as available. Search against the DRAFT Spec's exact hypothesis text per kind.
-- Record the search date — the novelty decision is "as of <date>", and the engine
-  later renders an honest "to our knowledge, as of <search date>" scope from it.
-- If the academic MCP is unavailable, fall back to WebFetch against official
-  sources and say so; do not let a missing MCP block the search.
+Load `Skill("science-tool-academic-search")` for the full search craft — sources and
+order (arXiv / Semantic Scholar / web), searching the exact hypothesis text per kind,
+recording the search date, the WebFetch fallback when the academic MCP is unavailable,
+and `found_nothing` as a recorded result. The essentials:
+
+- Search against the DRAFT Spec's exact hypothesis text, per kind — a vague query
+  manufactures a false `found_nothing`.
+- Record the search date — the novelty decision is "as of <date>", and the engine later
+  renders an honest "to our knowledge, as of <search date>" scope from it.
+- If the academic MCP is unavailable, fall back to WebFetch against official sources and
+  say so in the recorded basis; a missing MCP never excuses skipping the search.
 
 ## Frozen-Spec Reference
 

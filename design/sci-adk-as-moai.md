@@ -11,6 +11,12 @@
 > constraints injected. This document does NOT yet implement any agents/skills/commands;
 > it fixes the architecture for the build that follows.
 >
+> **Amendment (2026-06-25, Track A)**: the deferred `expert-replicator` worker +
+> `science-workflow-replicate` Skill were PROMOTED and built, and `/sci replicate`
+> activated; the `science-tool-academic-search` Skill (the literature search craft
+> expert-literature §4.5 declared) was added. The replication EVALUATOR
+> (`evaluator-replication`, §5) remains deferred. See the per-section notes below.
+>
 > **Scope**: resolves the "Claude usage pattern" gap observed by the user — current
 > sci-adk uses Claude as a sophisticated CLI user, whereas MoAI-ADK uses Claude as an
 > orchestrator of a specialist team. This doc commits sci-adk to the latter, while
@@ -337,9 +343,13 @@ These were considered but excluded from v1 to keep the catalog tight:
 - `expert-theorist` — Spec ↔ Claim semantic bridge. Currently handled by user input
   + `manager-prereg`. Promote when "derive testable hypothesis from informal theory"
   becomes a bottleneck.
-- `expert-replicator` — runs Spec on independent data/system. Currently handled by
-  re-running `expert-experimentalist` with new context. Promote when replication
-  semantics need their own checkpoint discipline.
+- `expert-replicator` — **PROMOTED + built (2026-06-25, Track A)**: runs the frozen Spec
+  on an independent data/system and appends concordant/discordant replication Evidence
+  (independence in `provenance`, `bears_on[]` per the pre-registered mapping); the engine
+  re-derives (non-monotone Claim). Backed by the `science-workflow-replicate` Skill;
+  `/sci replicate` activated. No new EvidenceKind/verb — reuses `execute` +
+  `append-evidence`. A deterministic re-run on identical input is a recomputation, not a
+  replication (blocked).
 
 ---
 
@@ -398,8 +408,11 @@ automatically.
 
 ### Deferred guards (v2+)
 
-- `evaluator-replication` — would require multiple independent Spec runs; defer with
-  `expert-replicator`.
+- `evaluator-replication` — still DEFERRED (2026-06-25): the `expert-replicator` worker is
+  now built (Track A), but its advisory replication GUARD is not — concordance/discordance
+  is judged by `sci-adk derive-claim` / `verify` over the combined record (non-monotone
+  Claim), which needs no separate evaluator. Promote only if a replication-specific
+  advisory pre-check proves useful.
 - `evaluator-figure-source` — would extend `evaluator-validity` to figure data
   (digitized vs measured promotion path). Currently covered by `figure-digitization.md`
   rules inside `sci-adk verify`; promote only if violations recur.
@@ -509,7 +522,7 @@ thin router (under 20 LOC body), all workflow logic lives in skill bodies.
 | `/sci experiment` | `[SPEC-id]` | `expert-experimentalist` → `expert-statistician` → `evaluator-rigor` (agent form) | Run one experimental cycle |
 | `/sci publish` | `[SPEC-id]` | `expert-writer` + `evaluator-rigor` (agent form) | Render `paper/` |
 | `/sci verify` | `[SPEC-id]` | `evaluator-*` agents + `sci-adk verify` CLI | Cross-check before close |
-| `/sci replicate` | `[SPEC-id] <new-context>` | `expert-experimentalist` with replication framing | Run Spec on independent data/system (v2 work, scaffold present) |
+| `/sci replicate` | `[SPEC-id] <independent-context>` | `expert-replicator` (+ `expert-statistician` to re-derive) | Re-run the frozen Spec on an independent data/system; append replication Evidence, engine revises the Claim (built 2026-06-25, Track A) |
 | `/sci status` | `[SPEC-id]` | `sci-adk status <run>` (no LLM) | Read open checkpoints / unresolved / contested Claims |
 
 ### 7.2 Default routing (no subcommand)
@@ -810,8 +823,10 @@ follows. Recording them here prevents future drift.
 - **Cross-doc main↔SI `\ref` verify gate** — deferred per `paper-figures-and-si.md`
   Phase 4c (Overleaf compile-order wrinkle); plain-text "Figure S1" authoring
   convention remains.
-- **Replicator worker + replication evaluator** — scaffolded in §4 (deferred) and §5
-  (deferred); promote when replication semantics surface as a real bottleneck.
+- **Replicator worker** — PROMOTED + built (2026-06-25, Track A): `expert-replicator` +
+  `science-workflow-replicate` Skill + `/sci replicate`. The **replication evaluator**
+  (`evaluator-replication`, §5) remains deferred — the engine judges concordance via the
+  non-monotone Claim, no separate guard needed yet.
 - **Theorist worker** — deferred to v2; current pre-reg flow uses user-driven
   hypothesis authoring.
 - **Domain-specific kernels** — `feedback_domain-generality` holds; sci-adk kernel

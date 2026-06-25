@@ -44,7 +44,7 @@ subcommand is CONTEXT for the matched workflow — it is NOT a routing signal.
 - **publish** (alias: render, paper): Render the `paper/` folder.
 - **verify** (alias: check, gate): Cross-check before close.
 - **status** (alias: state): Read open checkpoints / unresolved / contested claims.
-- **replicate** (alias: rerun): v2 stub — scaffolded, not active (see below).
+- **replicate** (alias: rerun): Re-run a frozen Spec on an INDEPENDENT data set / system.
 
 ### Priority 2 — SPEC-ID Detection
 
@@ -87,8 +87,9 @@ matching subcommands and let the user choose.
 
 Each subcommand: parse the argument, load the matching `science-workflow-*` Skill
 for domain knowledge, then spawn the worker(s) via `Agent(subagent_type: ...)`.
-Spawn implementation workers with `isolation: "worktree"` (all 5 v1 workers, per
-the design). Run independent agents in PARALLEL — a single message with multiple
+Spawn implementation workers with `isolation: "worktree"` (the 5 v1 workers + the
+`expert-replicator` writing worker, per the design). Run independent agents in
+PARALLEL — a single message with multiple
 `Agent()` calls. Pass each worker a `[FROZEN SPEC REFERENCE]` block (spec_id,
 spec_digest, frozen_at, amendment_policy) once the Spec is frozen.
 
@@ -100,7 +101,9 @@ needs the exact draft hypothesis text):
 1. `Agent(subagent_type: "manager-prereg")` → draft the Spec (goal + hypotheses +
    MethodPlan + per-hypothesis DecisionRule), NOT yet frozen.
 2. `Agent(subagent_type: "expert-literature")` → prior-art / novelty search per
-   (hypothesis × kind) against the draft; records `sci-adk prior-work` +
+   (hypothesis × kind) against the draft, per the search conduct in
+   `Skill("science-tool-academic-search")` (arXiv / Semantic Scholar / web, recorded
+   search date, WebFetch fallback); records `sci-adk prior-work` +
    `sci-adk novelty --kind {result|method}` at this trigger moment.
 3. `Agent(subagent_type: "manager-prereg")` (2nd call) → review the literature
    evidence, set `novelty_result` / `novelty_method`, freeze via `sci-adk init-spec`.
@@ -141,12 +144,25 @@ Run `sci-adk status <run>` directly — a cheap, read-only snapshot of recorded
 claim statuses, open checkpoints, unresolved and contested claims, and skipped-guard
 audit lines. No agent spawn.
 
-### replicate — v2 stub (scaffolded, NOT active)
+### replicate — Re-run a frozen Spec on an independent context
 
-`/sci replicate` is reserved for re-running a frozen Spec on independent
-data/system. It is scaffolded for v2 and not yet active. If invoked, explain that
-replication is currently handled by re-running `experiment` with new context, and
-that the dedicated `expert-replicator` worker is deferred (design §4 Deferred).
+Load `Skill("science-workflow-replicate")`.
+
+`Agent(subagent_type: "expert-replicator")` → re-run the FROZEN MethodPlan against the
+INDEPENDENT data set / system the user supplied (a different sample, implementation,
+operator, or seed); `sci-adk execute` + `sci-adk append-evidence` append replication
+Evidence whose `provenance` NAMES the axis of independence and whose `bears_on[]` follows
+the Spec's pre-registered mapping (concordant AND discordant results recorded). Then
+re-derive over the combined record (`Agent(subagent_type: "expert-statistician")` or
+`sci-adk derive-claim`): a concordant replication strengthens the Claim, a discordant one
+moves it to CONTESTED. The replication NEVER overwrites the original Evidence — it ADDS to
+the record; the engine revises the belief.
+
+[HARD] An identical deterministic re-run on the identical input is a RECOMPUTATION, not a
+replication — it adds no independent Evidence. If the requested replication has no genuine
+axis of independence, surface that to the user (via `AskUserQuestion`) before spawning the
+worker. Replication does NOT change the method — a method change is a `/sci plan`
+amendment, not a replication.
 
 ---
 

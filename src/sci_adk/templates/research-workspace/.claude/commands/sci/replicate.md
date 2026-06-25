@@ -1,6 +1,6 @@
 ---
-description: Re-run a frozen Spec on independent data or system (v2, scaffolded) — currently handled by re-running experiment with new context
-argument-hint: "[SPEC-id] <new-context>"
+description: Re-run a frozen Spec on an INDEPENDENT data set or system — append concordant or discordant replication Evidence (independence in provenance) and let the engine revise the Claim
+argument-hint: "[SPEC-id] <independent-context>"
 allowed-tools: Skill
 ---
 

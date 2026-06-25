@@ -34,9 +34,9 @@ from sci_adk.init_session import InstallReport, install_session
 # The plain file assets the kit installs (relative to the target dir). CLAUDE.md
 # and settings.json have their own special handling and are asserted separately.
 # As of the sci-adk-as-moai Phase C upgrade the verb installs the FULL kit: the two
-# enforcement hooks, the science-orchestrator output style, the 8 v1 worker/guard
-# agents, the 5 sci/science-* Skills, and the 7 /sci command routers. Kept in
-# lockstep with init_session._PLAIN_ASSETS.
+# enforcement hooks, the science-orchestrator output style, the 9 worker/guard
+# agents (8 v1 + the v2-promoted expert-replicator), the 7 sci/science-* Skills, and
+# the 7 /sci command routers. Kept in lockstep with init_session._PLAIN_ASSETS.
 _FILE_ASSETS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
@@ -47,16 +47,20 @@ _FILE_ASSETS = (
     ".claude/agents/expert-statistician.md",
     ".claude/agents/expert-writer.md",
     ".claude/agents/expert-literature.md",
+    # v2-promoted worker (1)
+    ".claude/agents/expert-replicator.md",
     # v1 guard agents (3)
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
-    # the sci orchestration hub + 4 knowledge-library Skills
+    # the sci orchestration hub + 6 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
     ".claude/skills/science-workflow-prereg/SKILL.md",
     ".claude/skills/science-workflow-experiment/SKILL.md",
+    ".claude/skills/science-workflow-replicate/SKILL.md",
     ".claude/skills/science-workflow-publish/SKILL.md",
+    ".claude/skills/science-tool-academic-search/SKILL.md",
     # /sci thin command routers (root + 6 subcommands)
     ".claude/commands/sci.md",
     ".claude/commands/sci/plan.md",
