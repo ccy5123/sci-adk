@@ -30,13 +30,19 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from sci_adk.core.claim import Claim, ClaimStatus, ConfidenceType
-from sci_adk.core.evidence import EvidenceItem
+from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Hypothesis, Spec
 from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
     order_figures_by_reference,
     render_figure,
+)
+from sci_adk.render.novelty import (
+    NOVELTY_NEWCOMMAND,
+    NOVELTY_RENDER_RE,
+    has_novelty_markup,
+    novelty_scope_suffix,
 )
 from sci_adk.render.prose import PaperProse
 
@@ -293,6 +299,51 @@ def _latex_sanitize_prose(s: str) -> str:
         out.append(match.group(0))                            # \cmd{key} -> verbatim
         pos = match.end()
     out.append(_latex_sanitize(s[pos:]))  # trailing gap (or the whole string if no spans)
+    return "".join(out)
+
+
+def _novelty_prose(
+    text: str,
+    spec: Spec,
+    novelty_decisions: Sequence[EvidenceItem],
+) -> str:
+    """Sanitize a prose slot AND render its ``\\novelty{kind}{hyp}{text}`` markup (N2 gate).
+
+    The novelty member of the prose pipeline (alongside :func:`_latex_sanitize_prose` and
+    :func:`factref.substitute_factrefs`). It SPLIT-and-stitches on
+    :data:`novelty.NOVELTY_RENDER_RE` exactly as ``_latex_sanitize_prose`` walks the ref/cite
+    allowlist: each GAP between/around the ``\\novelty`` spans is fully prose-sanitized, and
+    each SPAN ``\\novelty{kind}{hyp}{inner}`` is re-emitted SURVIVING into the ``.tex`` (the
+    preamble ``\\newcommand`` makes LaTeX render only the text) with:
+
+      - ``kind`` / ``hyp`` -- slugs, emitted VERBATIM (verify re-scans them; a sanitized
+        underscore would break the re-derivation, like a ref key);
+      - the inner text -- prose-sanitized (FLAT: specials escaped, no nested ref/cite -- the
+        documented honest limit), then immediately followed by the record-derived honest
+        scope from :func:`novelty.novelty_scope_suffix` (also sanitized -- it is plain ASCII
+        ``(to our knowledge, as of <date>)`` so the escape is a no-op, but routing it through
+        keeps the boundary uniform). The scope is INSIDE the ``\\novelty`` text arg so the
+        ``\\newcommand`` renders it.
+
+    A string with NO ``\\novelty`` markup never enters the loop -> falls straight to
+    ``_latex_sanitize_prose(text)`` (BYTE-IDENTICAL to the pre-N2 path). PURE + FAIL-LOUD:
+    an unsupported / unknown / bad-kind assertion raises ``ValueError`` via
+    ``novelty_scope_suffix`` (the HARD gate at render time).
+    """
+    out: list[str] = []
+    pos = 0
+    for match in NOVELTY_RENDER_RE.finditer(text):
+        out.append(_latex_sanitize_prose(text[pos : match.start()]))  # gap -> sanitized
+        kind, hyp, inner = match.group(1), match.group(2), match.group(3)
+        suffix = novelty_scope_suffix(kind, hyp, spec, novelty_decisions)  # fail-loud
+        out.append(
+            "\\novelty{" + kind + "}{" + hyp + "}{"
+            + _latex_sanitize_prose(inner)
+            + _latex_sanitize(suffix)
+            + "}"
+        )
+        pos = match.end()
+    out.append(_latex_sanitize_prose(text[pos:]))  # trailing gap / whole string if no spans
     return "".join(out)
 
 
@@ -631,13 +682,20 @@ def render_paper_latex(
     pending = list(pending or [])
     figures = list(figures or [])
     claims = list(claims)
+    # Novelty decisions (bears_on=[]) back the \novelty{} markup re-derivation (N2 gate).
+    novelty_decisions = [
+        ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
+    ]
 
     def _slot(text: str) -> str:
-        # Agent prose -> substitute record-fidelity facts (\evval/\status, fail-loud),
-        # THEN the prose sanitizer (specials escaped; \ref/\cite preserved). Substitute
-        # before sanitize so a substituted string value is escaped as ordinary text.
-        return _latex_sanitize_prose(
-            substitute_factrefs(text.strip(), evidence, claims)
+        # Agent prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
+        # render \novelty{} markup (scope baked / HARD fail) + the prose sanitizer (specials
+        # escaped; \ref/\cite preserved). Substitute factrefs before, so a substituted string
+        # value is escaped as ordinary text; _novelty_prose owns the prose sanitize.
+        return _novelty_prose(
+            substitute_factrefs(text.strip(), evidence, claims),
+            spec,
+            novelty_decisions,
         )
 
     # Title: the agent's short title, else spec.id -- NEVER the goal/hypothesis wall.
@@ -657,6 +715,22 @@ def render_paper_latex(
         lines.append(r"\pgfplotsset{compat=1.18}")
     if has_image:
         lines.append(r"\usepackage{graphicx}")
+    # \novelty{kind}{hyp}{text} survives into the .tex; this \newcommand makes LaTeX render
+    # only the text (kind/hyp are verify metadata). Emitted ONLY when novelty markup is
+    # present in a prose slot, so a no-novelty paper is byte-identical (regression invariant).
+    has_nov = prose is not None and any(
+        has_novelty_markup(s)
+        for s in (
+            prose.abstract,
+            prose.introduction,
+            prose.methods,
+            prose.results,
+            prose.discussion,
+        )
+        if s
+    )
+    if has_nov:
+        lines.append(NOVELTY_NEWCOMMAND)
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     # Author is agent-supplied; absent -> empty \author{} (the paper is tool-agnostic and
     # never names the rendering toolchain -- design feedback §10, tool-vocabulary leakage).

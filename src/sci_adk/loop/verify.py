@@ -68,6 +68,7 @@ from sci_adk.render.consistency import (
     check_latex_ref_consistency,
 )
 from sci_adk.render.factref import find_unresolved_factrefs
+from sci_adk.render.novelty import find_unsupported_novelty
 from sci_adk.render.paper import check_paper_tool_vocabulary
 
 # The rendered paper documents verify re-checks for internal \ref<->\label integrity
@@ -135,9 +136,17 @@ class VerifyReport:
             tool-agnostic science / no paper.
         paper_tool_clean: True iff the paper carries no tool-vocabulary leak (and True
             vacuously with no draft.tex). Part of the HARD gate.
+        paper_novelty_problems: per-paper-document ``\\novelty{kind}{hyp}{...}`` assertions
+            (the novelty/priority markup) that do NOT re-derive SUPPORTED from the record
+            (N3 gate), keyed by file name. A SUPPORTED assertion is silent; an unsupported /
+            unknown-hyp / bad-kind one (e.g. the backing ``found_nothing`` decision was
+            deleted) is a problem line. EMPTY when clean / no paper. BOTH ``draft.tex`` and
+            ``si.tex`` are scanned (no gap where an author sneaks ``\\novelty`` into SI prose).
+        paper_novelty_clean: True iff no paper document carries an unsupported novelty
+            assertion (and True vacuously with no paper). Part of the HARD gate.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
-            paper_factref_clean and paper_tool_clean``. This is what the CLI exits on;
-            ``all_reproduced`` alone is the claim signal.
+            paper_factref_clean and paper_tool_clean and paper_novelty_clean``. This is what
+            the CLI exits on; ``all_reproduced`` alone is the claim signal.
     """
 
     spec_id: str
@@ -150,6 +159,8 @@ class VerifyReport:
     paper_factref_clean: bool = field(default=True)
     paper_tool_vocab: List[str] = field(default_factory=list)
     paper_tool_clean: bool = field(default=True)
+    paper_novelty_problems: Dict[str, List[str]] = field(default_factory=dict)
+    paper_novelty_clean: bool = field(default=True)
     passed: bool = field(default=False)
 
 
@@ -276,6 +287,12 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     paper_tool_vocab = _check_paper_tool_vocab(run_dir)
     paper_tool_clean = not paper_tool_vocab
 
+    # Novelty gate (N3): every \novelty{kind}{hyp}{...} in the paper (draft.tex AND si.tex)
+    # must re-derive SUPPORTED from the recorded NOVELTY_DECISIONs -- else the paper asserts
+    # a priority the record does not back. READ-ONLY, no recompile, no LLM.
+    paper_novelty_problems = _check_paper_novelty(run_dir, spec, novelty_decisions)
+    paper_novelty_clean = not any(paper_novelty_problems.values())
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -287,11 +304,14 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_factref_clean=paper_factref_clean,
         paper_tool_vocab=paper_tool_vocab,
         paper_tool_clean=paper_tool_clean,
+        paper_novelty_problems=paper_novelty_problems,
+        paper_novelty_clean=paper_novelty_clean,
         passed=(
             all_reproduced
             and paper_consistent
             and paper_factref_clean
             and paper_tool_clean
+            and paper_novelty_clean
         ),
     )
 
@@ -543,6 +563,38 @@ def _check_paper_factrefs(run_dir: Path) -> Dict[str, List[str]]:
             if found:
                 residuals[name] = found
     return residuals
+
+
+def _check_paper_novelty(
+    run_dir: Path, spec: Spec, novelty_decisions: List[EvidenceItem]
+) -> Dict[str, List[str]]:
+    """Re-derive every ``\\novelty{kind}{hyp}{...}`` assertion in each paper document (N3).
+
+    READ-ONLY (mirrors :func:`_check_paper_factrefs`): reads ``run_dir/paper/<doc>.tex`` for
+    each of ``_PAPER_DOCS`` that EXISTS and re-runs the SAME record re-derivation the
+    renderer did (:func:`sci_adk.render.novelty.find_unsupported_novelty`, which re-derives
+    via ``derive_novelty_status`` -- the single source of truth, NOT the recorded claim). A
+    document with an unsupported / unknown-hyp / bad-kind novelty assertion (e.g. the backing
+    ``found_nothing`` decision was deleted) yields its problem lines; a fully-supported (or
+    novelty-free) document yields none. Returns a map keyed by file name -> the problems
+    (only for documents that have any); an empty map means clean / no paper.
+
+    BOTH ``draft.tex`` and ``si.tex`` are scanned -- there is no gap where an author could
+    sneak ``\\novelty`` into SI prose to dodge the gate (the SI also runs the N2 render gate).
+    """
+    paper_dir = run_dir / "paper"
+    problems: Dict[str, List[str]] = {}
+    if not paper_dir.is_dir():
+        return problems
+    for name in _PAPER_DOCS:
+        doc = paper_dir / name
+        if doc.is_file():
+            found = find_unsupported_novelty(
+                doc.read_text(encoding="utf-8"), spec, novelty_decisions
+            )
+            if found:
+                problems[name] = found
+    return problems
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> List[str]:

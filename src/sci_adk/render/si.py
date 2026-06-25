@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from sci_adk.core.claim import Claim
-from sci_adk.core.evidence import EvidenceItem
+from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Spec
 from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
@@ -43,11 +43,12 @@ from sci_adk.render.figures import (
     order_figures_by_reference,
     render_figure,
 )
+from sci_adk.render.novelty import NOVELTY_NEWCOMMAND, has_novelty_markup
 from sci_adk.render.paper import (
     _confidence_display,
     _latex_evidence_validity_label,
     _latex_sanitize,
-    _latex_sanitize_prose,
+    _novelty_prose,
     _result_summary,
     _status_str,
 )
@@ -231,12 +232,20 @@ def render_si_latex(
     claims = list(claims)
     evidence = list(evidence)
     figures = list(figures or [])
+    # Novelty decisions (bears_on=[]) back the \novelty{} markup re-derivation (N2 gate).
+    # The SI prose also gets the gate -- no gap where an author sneaks \novelty into the SI.
+    novelty_decisions = [
+        ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
+    ]
 
     def _si_slot(text: str) -> str:
         # SI prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
-        # the prose sanitizer (\ref/\cite preserved). Same contract as the paper's prose.
-        return _latex_sanitize_prose(
-            substitute_factrefs(text.strip(), evidence, claims)
+        # render \novelty{} markup (scope baked / HARD fail) + the prose sanitizer
+        # (\ref/\cite preserved). Same contract as the paper's prose.
+        return _novelty_prose(
+            substitute_factrefs(text.strip(), evidence, claims),
+            spec,
+            novelty_decisions,
         )
 
     # The Spec's frozen hypotheses, keyed by id, so each Claim's verdict can show the
@@ -264,6 +273,14 @@ def render_si_latex(
         lines.append(r"\pgfplotsset{compat=1.18}")
     if has_image:
         lines.append(r"\usepackage{graphicx}")
+    # \novelty{kind}{hyp}{text} survives into si.tex; this \newcommand makes LaTeX render
+    # only the text. Emitted ONLY when SI prose carries novelty markup, so a no-novelty SI
+    # is byte-identical to the no-prose dump (regression invariant).
+    has_nov = prose is not None and any(
+        has_novelty_markup(s) for s in (prose.overview, prose.notes) if s
+    )
+    if has_nov:
+        lines.append(NOVELTY_NEWCOMMAND)
     # SI numbering convention: tables/figures are S-prefixed (Table S1, Figure S1, ...),
     # so a main-paper cross-reference written as the plain text "Table S1" / "Figure S1"
     # matches this document's printed numbers (cross-document \ref is deferred -- the xr
