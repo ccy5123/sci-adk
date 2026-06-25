@@ -380,6 +380,12 @@ def _add_verb_parsers(sub) -> None:
         help="path to a JSON file holding one EvidenceItem (its bears_on[] carries the "
              "bearing on the hypotheses)",
     )
+    append_ev.add_argument(
+        "--spec-digest", default=None, metavar="SHA256",
+        help="the frozen Spec digest from the worker's [FROZEN SPEC REFERENCE] (§6.1); "
+             "when passed, it must match runs/<id>/spec.json or the verb fails (exit 2) "
+             "without writing. Lenient when omitted (no check)",
+    )
 
     # derive-claim: apply each DecisionRule to the recorded Evidence -> Claims.
     derive_claim = sub.add_parser(
@@ -394,6 +400,12 @@ def _add_verb_parsers(sub) -> None:
         default=True,
         help="disable the science-guard verdict-gate HALTS (strict by default -- see "
              "`sci-adk run --no-strict-science`)",
+    )
+    derive_claim.add_argument(
+        "--spec-digest", default=None, metavar="SHA256",
+        help="the frozen Spec digest from the worker's [FROZEN SPEC REFERENCE] (§6.1); "
+             "when passed, it must match runs/<id>/spec.json or the verb fails (exit 2) "
+             "without deriving. Lenient when omitted (no check)",
     )
 
     # render: compile the paper/ artifacts from the recorded spec/evidence/claims.
@@ -580,6 +592,38 @@ def _load_run_spec(run_dir: Path):
     return Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
 
 
+def _check_spec_digest(spec, run_dir: Path, passed_digest) -> None:
+    """Enforce the §6.1 spec-digest boundary for a record-advancing verb.
+
+    Lenient when ``passed_digest`` is ``None``: NO check runs (backward-compat -- a bare
+    CLI human user is not blocked; the orchestrator injects the flag for real worker
+    sessions per design/sci-adk-as-moai.md §6.1). When a digest IS passed, it must equal
+    the recorded Spec's digest; a mismatch raises :class:`SpecDigestMismatch` before any
+    record is written, so a worker cannot silently advance past a tampered Spec.
+
+    ``run_dir`` is accepted for context but the digest is taken from the in-memory
+    ``spec`` the verb already loaded via ``_load_run_spec`` -- it IS the on-disk
+    ``spec.json`` as read, so a silently-tampered file still yields a non-matching
+    digest, while avoiding a redundant disk re-read and the ``FileNotFoundError`` path a
+    re-read would expose to a TOCTOU race (spec.json deleted between load and check). The
+    passed digest is case/whitespace-normalized (sha256 hex is lowercase, but a
+    frozen-reference value injected as text may arrive upper-cased or padded); ``actual``
+    is canonical and left as-is.
+    """
+    if passed_digest is None:
+        return
+    from sci_adk.provenance import SpecDigestMismatch, spec_digest
+
+    # Digest the in-memory Spec the verb operates under (already loaded by _load_run_spec).
+    # It IS the on-disk spec.json as loaded, so a silently-tampered spec.json still yields
+    # a non-matching digest -- and digesting it here avoids a redundant re-read and the
+    # FileNotFoundError path a disk re-read exposes to a TOCTOU race.
+    actual = spec_digest(spec)
+    if passed_digest.strip().lower() != actual:
+        # expected=passed_digest (un-normalized) so the message shows what was passed.
+        raise SpecDigestMismatch(spec_id=spec.id, expected=passed_digest, actual=actual)
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
         spec, experiment, proposal_text = _resolve_capability_selection(args)
@@ -659,6 +703,11 @@ def _cmd_init_spec(args: argparse.Namespace) -> int:
     run_dir = Path(args.output) / "runs" / frozen.id
     print(f"init-spec: froze Spec '{frozen.id}' (v{frozen.version}) -> {run_dir}")
     print(f"  spec: {run_dir / 'spec.json'}")
+    # The frozen Spec's digest -- the orchestrator captures this for the worker's
+    # [FROZEN SPEC REFERENCE] block (design/sci-adk-as-moai.md §6.1).
+    from sci_adk.provenance import spec_digest
+
+    print(f"  spec_digest: {spec_digest(frozen)}")
     print(f"  prior-work checkpoint: {run_dir / 'checkpoints' / 'prior_work.json'}")
     # Spec-gate science audit (design/science-guards.md): ALWAYS surfaced, never a halt.
     from sci_adk.core.spec_science import audit_spec_science
@@ -698,6 +747,11 @@ def _cmd_amend_spec(args: argparse.Namespace) -> int:
     print(f"  rationale: {receipt.rationale}")
     print(f"  receipt: {run_dir / 'checkpoints' / f'amendment-v{receipt.new_version}.json'}")
     print(f"  spec.json now holds the amended (v{new_spec.version}) frozen Spec")
+    # The amended Spec's NEW digest -- it differs from the pre-amend one, so the worker's
+    # stale frozen reference will fail the §6.1 boundary until it re-fetches this value.
+    from sci_adk.provenance import spec_digest
+
+    print(f"  spec_digest: {spec_digest(new_spec)}")
     return 0
 
 
@@ -767,6 +821,16 @@ def _cmd_append_evidence(args: argparse.Namespace) -> int:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
 
+    # §6.1 spec-digest boundary: a worker-passed --spec-digest must match the recorded
+    # Spec BEFORE any Evidence is written (a mismatch means the Spec was silently revised).
+    from sci_adk.provenance import SpecDigestMismatch
+
+    try:
+        _check_spec_digest(spec, run_dir, args.spec_digest)
+    except SpecDigestMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
     ev_path = Path(args.evidence)
     if not ev_path.exists():
         print(f"error: evidence file not found: {ev_path}", file=sys.stderr)
@@ -808,6 +872,16 @@ def _cmd_derive_claim(args: argparse.Namespace) -> int:
     except _CliError as e:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
+
+    # §6.1 spec-digest boundary: a worker-passed --spec-digest must match the recorded
+    # Spec BEFORE any Claim is derived (a mismatch means the Spec was silently revised).
+    from sci_adk.provenance import SpecDigestMismatch
+
+    try:
+        _check_spec_digest(spec, run_dir, args.spec_digest)
+    except SpecDigestMismatch as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
 
     from sci_adk.core.validity import ValidityHalt
 
