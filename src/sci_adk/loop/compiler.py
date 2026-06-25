@@ -69,6 +69,11 @@ from sci_adk.render.figures import (
 )
 from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.prose import PaperProse, SIProse
+from sci_adk.render.reproduction import (
+    ReproListing,
+    listing_inlinable,
+    render_reproduce_driver,
+)
 from sci_adk.render.si import render_si_latex
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
@@ -568,12 +573,31 @@ class ResearchCompiler:
         # numbering as the main draft (Figure N here == Figure N there), so si.tex
         # references the same paper/figures/fig<N> files the compiler co-located above --
         # one shared file set for both standalone documents.
+        # F3 reproduction bundle (design/paper-publishing-requirements.md §3): resolve each
+        # Evidence item's provenance.code_ref -> (co-located script | bare-ref pointer),
+        # then (a) inline the listings in the SI's "Reproduction code" section, (b)
+        # co-locate the resolvable scripts into paper/code/, and (c) write paper/reproduce.py.
+        # The compiler -- the SOLE filesystem toucher -- does the resolution + fs; the SI
+        # renderer stays pure (it receives the resolved listings). When NO Evidence item
+        # carries a code_ref, repro_listings is empty -> no section, no paper/code/, no
+        # reproduce.py (the run's paper/ is byte-identical to today; the F3 regression
+        # invariant). Resolution is fail-open: a bare commit ref is a POINTER, never an error.
+        repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
+
         si_tex = render_si_latex(
             spec, claims_list, evidence_list, figures=si_figures, digest=None,
             prose=si_prose, paper_body=None, bib_path=bib_path,
+            repro_listings=repro_listings,
         )
         si_path = paper_dir / "si.tex"
         si_path.write_text(si_tex, encoding="utf-8")
+
+        # Land the runnable bundle (paper/code/ + paper/reproduce.py) ONLY when at least
+        # one code_ref resolved to a co-located script. A pointer-only set (every code_ref
+        # a bare commit, as in t1-godel) still documents the commits in reproduce.py, but
+        # only when there is something to drive: an entirely code_ref-free run writes
+        # nothing (byte-identical paper/). See _emit_reproduction_bundle.
+        self._emit_reproduction_bundle(repro_listings, paper_dir, spec.id)
 
         # Prose<->figure ref consistency (design/paper-figures-and-si.md D4): scan the
         # RENDERED body for \ref{fig:...}/\label integrity. NON-BLOCKING -- surfaced in
@@ -777,6 +801,147 @@ class ResearchCompiler:
                 )
             dest = figures_dir / image_figure_filename(fig, number)
             shutil.copyfile(src, dest)
+
+    def _resolve_repro_listings(
+        self, evidence: Sequence[EvidenceItem], run_dir: Path
+    ) -> List[ReproListing]:
+        """Resolve each Evidence item's ``provenance.code_ref`` for the F3 bundle (§3).
+
+        For each item carrying a ``code_ref``, decide -- DETERMINISTICALLY, no LLM -- one
+        of two outcomes (design/paper-publishing-requirements.md §3, OF-4 fail-open):
+
+          - ``script``  -- the ``code_ref``, interpreted as a path RELATIVE TO the run dir
+            (then the workspace), points at an EXISTING READABLE FILE whose body can be
+            safely inlined (:func:`listing_inlinable`). The body is read here (the compiler
+            is the sole filesystem toucher; the renderers stay pure) and the
+            ``paper/code/`` basename is recorded; the script is co-located + driven by
+            ``reproduce.py``.
+          - ``pointer`` -- everything else: a bare commit/ref (e.g. a 40-hex git hash, the
+            t1-godel shape), a missing path, an unreadable file, OR a body that cannot be
+            safely inlined. Recorded as a POINTER -- NEVER an error (fail-open), honest
+            about holding only the reference.
+
+        Items with no ``code_ref`` contribute nothing -> an entirely code_ref-free run
+        yields ``[]`` (the F3 byte-identical regression invariant). First-seen Evidence
+        order is preserved (deterministic). Co-located filenames are de-collided so two
+        scripts that share a basename land at distinct ``paper/code/`` names.
+        """
+        out: List[ReproListing] = []
+        used_names: set[str] = set()
+        for ev in evidence:
+            code_ref = (ev.provenance.code_ref or "").strip()
+            if not code_ref:
+                continue
+            resolved = self._resolve_code_ref_path(code_ref, run_dir)
+            if resolved is None:
+                out.append(
+                    ReproListing(
+                        evidence_id=ev.id, code_ref=code_ref, kind="pointer"
+                    )
+                )
+                continue
+            try:
+                body = resolved.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                # Unreadable / non-text: honest pointer, never a fail-loud (fail-open).
+                out.append(
+                    ReproListing(
+                        evidence_id=ev.id, code_ref=code_ref, kind="pointer"
+                    )
+                )
+                continue
+            if not listing_inlinable(body):
+                # Body carries the lstlisting closing delimiter -> cannot inline safely;
+                # record a pointer so the SI is never a broken document (honest).
+                out.append(
+                    ReproListing(
+                        evidence_id=ev.id, code_ref=code_ref, kind="pointer"
+                    )
+                )
+                continue
+            filename = self._dedupe_code_filename(resolved.name, used_names)
+            out.append(
+                ReproListing(
+                    evidence_id=ev.id,
+                    code_ref=code_ref,
+                    kind="script",
+                    text=body,
+                    filename=filename,
+                )
+            )
+        return out
+
+    def _resolve_code_ref_path(
+        self, code_ref: str, run_dir: Path
+    ) -> Optional[Path]:
+        """Resolve a ``code_ref`` to an existing readable FILE, or ``None`` (a pointer).
+
+        Interpret ``code_ref`` as a path relative to the run dir first (the natural home of
+        co-located generating code), then the workspace; an absolute path is honored as-is.
+        Returns the :class:`Path` iff it points at an existing regular file. A bare commit
+        hash (no such path) -> ``None`` -> a POINTER. Pure + deterministic; read-only.
+        """
+        candidate = Path(code_ref)
+        roots: List[Path]
+        if candidate.is_absolute():
+            roots = [candidate]
+        else:
+            roots = [run_dir / candidate, self.workspace_dir / candidate]
+        for path in roots:
+            if path.is_file():
+                return path
+        return None
+
+    @staticmethod
+    def _dedupe_code_filename(name: str, used: set[str]) -> str:
+        """A unique ``paper/code/`` basename for ``name`` (deterministic de-collision).
+
+        Two resolvable scripts that share a basename (e.g. both ``run.py``) must land at
+        distinct files; the second becomes ``run_1.py``, the third ``run_2.py`` -- so
+        ``reproduce.py`` drives each independently. Mutates ``used`` to record the choice.
+        """
+        if name not in used:
+            used.add(name)
+            return name
+        stem, dot, ext = name.partition(".")
+        suffix = f".{ext}" if dot else ""
+        i = 1
+        while f"{stem}_{i}{suffix}" in used:
+            i += 1
+        chosen = f"{stem}_{i}{suffix}"
+        used.add(chosen)
+        return chosen
+
+    def _emit_reproduction_bundle(
+        self,
+        listings: Sequence[ReproListing],
+        paper_dir: Path,
+        spec_id: str,
+    ) -> None:
+        """Land ``paper/code/`` + ``paper/reproduce.py`` for the F3 runnable bundle (§3).
+
+        The compiler is the SOLE filesystem toucher: it copies each resolvable script's
+        recorded body into ``paper/code/<filename>`` and writes the pure
+        :func:`render_reproduce_driver` text to ``paper/reproduce.py``. The bundle is
+        written ONLY when there is something to drive (at least one ``ReproListing``); an
+        entirely ``code_ref``-free run passes ``[]`` and NOTHING is written -- the run's
+        ``paper/`` stays byte-identical to today (the F3 regression invariant). A
+        pointer-only run still writes ``reproduce.py`` (documenting the commits) but no
+        ``paper/code/`` files.
+        """
+        if not listings:
+            return
+        scripts = [it for it in listings if it.is_script]
+        if scripts:
+            code_dir = paper_dir / "code"
+            code_dir.mkdir(parents=True, exist_ok=True)
+            for it in scripts:
+                # text/filename are guaranteed non-None for a script ReproListing.
+                (code_dir / (it.filename or "")).write_text(
+                    it.text or "", encoding="utf-8"
+                )
+        driver = render_reproduce_driver(listings, spec_id)
+        (paper_dir / "reproduce.py").write_text(driver, encoding="utf-8")
 
     def _collect_contested_checkpoints(
         self, spec: Spec, claims: Sequence[Claim]

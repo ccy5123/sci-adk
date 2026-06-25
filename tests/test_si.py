@@ -48,6 +48,7 @@ from sci_adk.core.spec import (
 )
 from sci_adk.render.figures import FigureSpec, NativePlot, PlotPoint, PlotSeries
 from sci_adk.render.prose import SIProse
+from sci_adk.render.reproduction import ReproListing
 from sci_adk.render.si import render_si_latex
 
 _T0 = datetime(2026, 6, 18, 10, 0, 0, tzinfo=timezone.utc)
@@ -598,3 +599,86 @@ def test_figure_bearing_si_emits_font_policy():
     figure_less = render_si_latex(spec, claims, evidence)
     assert r"\usepackage{newtxmath}" not in figure_less
     assert "helvet" not in figure_less
+
+
+# ---------------------------------------------------------------------------
+# F3 reproduction code (design/paper-publishing-requirements.md §3): an OPTIONAL
+# repro_listings arg adds a "Reproduction code" section in the SI (the exempt
+# record dump). repro_listings=None/empty is byte-identical to today (regression
+# invariant). The code listing belongs in the SI, NEVER in the tool-agnostic paper.
+# ---------------------------------------------------------------------------
+
+_REPRO_SCRIPT = ReproListing(
+    evidence_id="ev-1",
+    code_ref="code/run.py",
+    kind="script",
+    text="import sys\nprint(sys.argv)\n",
+    filename="run.py",
+)
+_REPRO_POINTER = ReproListing(
+    evidence_id="ev-2",
+    code_ref="a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4",  # bare 40-hex commit
+    kind="pointer",
+)
+
+
+class TestSIReproductionCode:
+    def test_no_repro_listings_byte_identical_regression(self):
+        """The keystone F3 regression lock: render_si_latex with no repro_listings must
+        equal the call made without the kwarg -- a code_ref-free run's si.tex is unchanged.
+        """
+        spec, claims, evidence = _basic_record()
+        figs = [_figure("growth", "ev-1")]
+        old = render_si_latex(spec, claims, evidence, figures=figs, digest="abc123")
+        new = render_si_latex(
+            spec, claims, evidence, figures=figs, digest="abc123", repro_listings=None
+        )
+        assert new == old, "repro_listings=None must not change the si.tex record dump"
+
+    def test_empty_repro_listings_byte_identical(self):
+        spec, claims, evidence = _basic_record()
+        base = render_si_latex(spec, claims, evidence)
+        empty = render_si_latex(spec, claims, evidence, repro_listings=[])
+        assert empty == base
+        # No section, no listings package.
+        assert r"\section{Reproduction code}" not in base
+        assert r"\usepackage{listings}" not in base
+
+    def test_script_inlines_listing_and_guards_listings_package(self):
+        spec, claims, evidence = _basic_record()
+        si = render_si_latex(spec, claims, evidence, repro_listings=[_REPRO_SCRIPT])
+        assert r"\section{Reproduction code}" in si
+        assert r"\usepackage{listings}" in si
+        assert r"\begin{lstlisting}" in si
+        assert "print(sys.argv)" in si
+        assert "paper/code/run.py" in si
+
+    def test_pointer_records_ref_without_listings_package(self):
+        spec, claims, evidence = _basic_record()
+        si = render_si_latex(spec, claims, evidence, repro_listings=[_REPRO_POINTER])
+        assert r"\section{Reproduction code}" in si
+        # A pointer-only set adds no listings package (guarded like pgfplots/graphicx).
+        assert r"\usepackage{listings}" not in si
+        assert _REPRO_POINTER.code_ref in si
+        assert r"\begin{lstlisting}" not in si
+
+    def test_reproduction_section_after_figures_before_integrity(self):
+        spec, claims, evidence = _basic_record()
+        si = render_si_latex(
+            spec, claims, evidence,
+            figures=[_figure("growth", "ev-1")],
+            repro_listings=[_REPRO_SCRIPT],
+        )
+        # Ordering: Figures -> Reproduction code -> Record integrity.
+        assert si.index(r"\section{Figures}") < si.index(r"\section{Reproduction code}")
+        assert (
+            si.index(r"\section{Reproduction code}")
+            < si.index(r"\section{Record integrity}")
+        )
+
+    def test_repro_render_is_deterministic(self):
+        spec, claims, evidence = _basic_record()
+        listings = [_REPRO_POINTER, _REPRO_SCRIPT]
+        a = render_si_latex(spec, claims, evidence, repro_listings=listings)
+        b = render_si_latex(spec, claims, evidence, repro_listings=listings)
+        assert a == b

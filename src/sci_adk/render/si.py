@@ -53,6 +53,11 @@ from sci_adk.render.paper import (
     _status_str,
 )
 from sci_adk.render.prose import SIProse
+from sci_adk.render.reproduction import (
+    ReproListing,
+    render_reproduction_section,
+    reproduction_uses_listings,
+)
 
 # The numeric Result scalar fields, in a fixed order, for the quantitative data table.
 # A column is emitted ONLY when at least one item carries a value for it (empty columns
@@ -153,6 +158,7 @@ def render_si_latex(
     prose: Optional[SIProse] = None,
     paper_body: Optional[str] = None,
     bib_path: Optional[str] = None,
+    repro_listings: Optional[Sequence[ReproListing]] = None,
 ) -> str:
     """Render the full record as a STANDALONE Supporting Information ``si.tex``.
 
@@ -185,6 +191,11 @@ def render_si_latex(
          ``paper/figures/fig<N>`` files the compiler co-locates -- one shared file set for
          both documents); ``pgfplots`` is added to the preamble when a NATIVE figure is
          present and ``graphicx`` when an IMAGE figure is present.
+      5b. Reproduction code (F3, OPTIONAL) -- when ``repro_listings`` is supplied: each
+         resolvable co-located script inlined as an ``lstlisting`` + each bare commit/ref
+         as a POINTER line. Emitted after Figures, before Record integrity; adds a guarded
+         ``\\usepackage{listings}`` when a script is present. Absent/empty -> no section
+         (byte-identical to today).
       6. Record integrity -- ``digest`` embedded as ``Record digest (sha256): <digest>``
          when provided; ELSE a note that the record is independently auditable via
          ``sci-adk verify <run>`` (which computes the digest over the persisted run).
@@ -225,6 +236,17 @@ def render_si_latex(
             for a standalone SI render with no companion paper. Affects ONLY figure
             numbering (the ``\\label{fig:<id>}`` anchors are unchanged), so a figure-less
             SI is byte-identical regardless of ``paper_body``.
+        repro_listings: optional reproduction-code entries (F3,
+            design/paper-publishing-requirements.md §3) -- one per Evidence item carrying
+            a ``provenance.code_ref``, ALREADY RESOLVED by the compiler (this renderer
+            stays PURE -- it reads no files). A resolvable co-located script becomes an
+            inlined ``lstlisting`` in a new "Reproduction code" section (after Figures,
+            before Record integrity) and adds a GUARDED ``\\usepackage{listings}`` to the
+            preamble; a bare commit/ref becomes an honest POINTER line. ``None``/empty ->
+            no section, no ``listings`` package: byte-identical to today (the F3
+            regression invariant, exactly like the ``figures``/``prose``/``digest``
+            defaults). The code listing lives in the SI (the exempt record dump), NEVER
+            in the tool-agnostic main paper.
 
     Returns:
         A STANDALONE LaTeX document string.
@@ -280,6 +302,13 @@ def render_si_latex(
         lines.append(r"\pgfplotsset{compat=1.18}")
     if has_image:
         lines.append(r"\usepackage{graphicx}")
+    # F3 reproduction code (design/paper-publishing-requirements.md §3): the listings
+    # package is added ONLY when a resolvable script will be inlined as an lstlisting --
+    # a code-less (or pointer-only) SI carries NO listings package, so its preamble stays
+    # byte-identical to today (the same per-kind guarding as pgfplots/graphicx above).
+    has_repro_listing = reproduction_uses_listings(repro_listings)
+    if has_repro_listing:
+        lines.append(r"\usepackage{listings}")
     # \novelty{kind}{hyp}{text} survives into si.tex; this \newcommand makes LaTeX render
     # only the text. Emitted ONLY when SI prose carries novelty markup, so a no-novelty SI
     # is byte-identical to the no-prose dump (regression invariant).
@@ -459,6 +488,19 @@ def render_si_latex(
         for number, fig in ordered:
             lines.append(render_figure(fig, evidence, number))
             lines.append("")
+
+    # -- Section: Reproduction code (F3; OPTIONAL) --------------------------------
+    # design/paper-publishing-requirements.md §3: the generating code retained with the
+    # paper -- resolvable co-located scripts inlined as lstlistings, bare commit/refs as
+    # honest POINTER lines. The compiler resolves code_ref -> (script | pointer) and
+    # co-locates paper/code/ + writes paper/reproduce.py; this renderer only lists. After
+    # Figures, before Record integrity. Empty/None -> "" (no section): byte-identical to
+    # today, the F3 regression invariant. The code listing lives in the SI (the exempt
+    # record dump), NEVER in the tool-agnostic main paper.
+    repro_section = render_reproduction_section(repro_listings)
+    if repro_section:
+        lines.append(repro_section)
+        lines.append("")
 
     # -- Section: Record integrity ------------------------------------------------
     lines.append(r"\section{Record integrity}")
