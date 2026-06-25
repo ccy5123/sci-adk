@@ -24,8 +24,7 @@ src/sci_adk/templates/research-workspace/
         └── reanchor.sh                                        # re-anchor: UserPromptSubmit -> sci-adk status
 ```
 
-(The `/sci` entry-point command is forthcoming; the persona drives sessions
-directly until it ships.)
+The `/sci` commands ship with the kit: `plan`, `experiment`, `publish`, `verify`, `status`, `replicate`, `package`.
 
 - **`stop-verify-gate.sh`** (Stop hook) — blocks ending the session while any
   run that has recorded belief (a `runs/<id>/claims/*.json`) fails
@@ -37,8 +36,7 @@ directly until it ships.)
 - **`science-orchestrator` output style** — the always-on persona contract: it
   clarifies intent, delegates to research workers, and gates every conclusion
   through `sci-adk verify`.
-- **`/sci`** — the planned single entry point (forthcoming). Until it ships, the
-  persona drives sessions directly.
+- **`/sci`** — the entry point for the research workflow. Available subcommands: `plan` (freeze a Spec), `experiment` (run + Evidence), `publish` (render paper), `verify` (headless audit), `status` (snapshot), `replicate` (independent replication), `package` (near-submission package).
 
 ## Install
 
@@ -67,9 +65,7 @@ directly until it ships.)
    chmod +x /path/to/research-workspace/.claude/hooks/sci-adk/*.sh
    ```
 
-4. **Start a session** in the research workspace and drive it under the
-   `science-orchestrator` persona for a proposal or research goal. (The `/sci`
-   entry-point command is forthcoming; until it ships, start sessions directly.)
+4. **Start a session** in the research workspace. Use `/sci plan` to begin from a proposal, or `/sci experiment`, `/sci publish`, `/sci package`, etc. to continue existing work. The `science-orchestrator` output style is the always-on persona.
 
 ## Two-environment warning [HARD]
 
@@ -78,9 +74,8 @@ repo while that repo is still the workspace for developing sci-adk itself: the
 research `verify` gate and the build harness's own Stop/quality hooks would
 fight. Research-on-sci-adk, if ever wanted, gets its own separate workspace.
 
-## Coming in Phase 3
+## Automated install
 
-A `sci-adk init-session <dir>` installer (design doc D3) will do the copy +
-`settings.json` merge in one version-pinned command, keeping the hook and
-`verify` contracts in sync with the sci-adk release. Until then, install
-manually as above.
+`sci-adk init-session <dir>` (shipped in v0.1.0) does the copy + `settings.json`
+merge in one idempotent command. Prefer it over the manual copy above; it keeps
+the hook and `verify` contracts in sync with the sci-adk release.

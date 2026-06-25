@@ -1,12 +1,12 @@
-# sci-adk: Rigor / Verification ADK
+# sci-adk: Agentic Discovery Kit (ADK)
 
 > Version: 0.1.0
-> Status: working rigor-ADK CLI — compiler + DecisionEngine + judge rail + headless `verify` + literature triggers (novelty + contested) + tex-only paper render
-> Last Updated: 2026-06-18
+> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 1281 tests passing
+> Last Updated: 2026-06-25
 
 ## What is sci-adk?
 
-**sci-adk** is a **domain-general rigor / verification ADK** — a *referee/scorekeeper, not a player* — for the user's own research.
+**sci-adk** is an **Agentic Discovery Kit (ADK)** — a domain-general rigor / verification system; a *referee/scorekeeper, not a player* — for the user's own research.
 
 It **builds** the rigor kernel (record vs belief, frozen criteria, verification, provenance, deterministic replay) and **borrows** capabilities (experiment authoring, literature, prose) via the in-session Claude agent and subagents. External release is a deferred, not foreclosed, future option. The operating rule is: **agents propose; the engine judges by frozen criteria. No self-certification. The verdict path is deterministic and rule-based.**
 
@@ -75,6 +75,32 @@ sci-adk prior-work <run-dir> --searched <DOI...>
 sci-adk prior-work <run-dir> --skip --reason "..."
 ```
 Record the Spec-time prior-work decision into the Evidence log. `--searched` acquires the given DOIs and records a `LITERATURE` EvidenceItem. `--skip` records a `PRIOR_WORK_DECISION` null with a required reason. Either closes the prior-work checkpoint.
+
+```
+sci-adk status <run-dir>
+```
+Terse, read-only session-state snapshot: recorded Claim statuses + open decisions. No LLM, no recompile. Cheap enough to call every turn. Exit 0 always (missing run dir → "nothing recorded" report).
+
+```
+sci-adk novelty <run-dir> --hyp <id> --kind result|method --found-nothing | --found <DOI...>
+sci-adk contested <run-dir> --hyp <id>
+```
+Record novelty decisions (`novelty_result` / `novelty_method`, independent per hypothesis) and contested status into the Evidence log. `sci-adk verify` re-derives both novelty Claims.
+
+```
+sci-adk pubreqs freeze <run-dir>
+```
+Elicit and freeze a `pubreqs.json` publishing contract (venue, required sections, figure font/DPI policy, reproduction bundle). Gated deterministically by `sci-adk verify`.
+
+```
+sci-adk pkgreqs freeze <workspace>
+sci-adk package <workspace>
+```
+Freeze the workspace-level package contract (`pkgreqs.json`) and assemble a near-submission package — one merged `main.tex` + `si.tex` + figures from all runs, plus a 6-folder reproduction bundle. Gated by the `package_requirements_clean` HARD gate inside `sci-adk verify`.
+
+### Decomposed CLI verbs (operational layer)
+
+The decomposed verbs (`init-spec` / `amend-spec` / `execute` / `append-evidence` / `derive-claim` / `render`) expose individual compiler stages for the operational-layer workers to call independently. `sci-adk run` remains the monolithic wrapper.
 
 ### Writing a proposal (4-pane format)
 
@@ -162,8 +188,7 @@ This lays down (non-clobbering, idempotent):
 - **Guard agents** (advisory) — `evaluator-rigor` / `evaluator-novelty` /
   `evaluator-validity`: soft pre-checks that catch problems early. They never grant a
   pass — `sci-adk verify` (run by the Stop hook) is the sole verdict.
-- **`/sci` commands** — `plan` / `experiment` / `publish` / `verify` / `status`
-  (+ `replicate`, a v2 stub) routing through the `sci` orchestration Skill.
+- **`/sci` commands** — `plan` / `experiment` / `publish` / `verify` / `status` / `replicate` / `package` routing through the `sci` orchestration Skill.
 - **Enforcement hooks** — a Stop gate (`sci-adk verify`) and a per-turn re-anchor.
 
 Workers fan out across the decomposed CLI verbs (`init-spec` / `amend-spec` / `execute` /
@@ -197,13 +222,19 @@ kernel** — it adds delegation and early checks, never a new verdict path. See
 - **PDF normalization**: owner/permission-restricted acquired PDFs auto-normalized (pypdf); user-password-locked PDFs surfaced as `locked`, never cracked — `search/pdf_normalize.py`
 - **Citation-key naming** for acquired PDFs: `<Surname><Year>` with DOI-sorted a/b on collision; rename is swap/cycle-safe (two-stage batch) — `search/citation_keys.py`
 - **Literature triggers — novelty + contested**: contested = recording-only; **novelty is a 1st-class revisable Claim `claim-novelty-<hyp>` derived by rule (B-replace)** — SUPPORTED iff a recorded `found_nothing` prior-art search; NON-HALT compile-time checkpoint; `sci-adk novelty`/`sci-adk contested` CLI verbs; `verify` re-derives the novelty claim
-- **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
+- **Science guards (G1–G5)**: spec-layer rigor gates enforced at compile time and verdict time — G1 analyticity (no known-theorem dressed as discovery), G2 test-power (discriminating-case declaration), G3 falsifiability (mutation test: apparatus must be able to report FAIL), G4 mode-coherence (threshold + exploratory = structural conflict), G5 claim-cost (practical-property claim with no declared cost metric). `strict_science` is on by default for `run` / `derive-claim`; guards surface findings in `runs/<id>/science.md`. Pure, no-LLM. See `design/science-guards.md`.
+- **Render reframe** — paper render is now a **deterministic record-fidelity SPINE + an agent-authored belief NARRATIVE + a markup fidelity gate**: the agent authors title/IMRaD/discussion; the engine substitutes measured values and verdicts via `\evval{<id>}{<field>}` / `\status{<hyp>}` macros at render time (FAIL-LOUD if the record does not hold the value); `sci-adk verify` flags any unresolved macro residuals. Produces a tool-agnostic paper (no sci-adk internal nouns in `draft.tex`). See `design/render-architecture-reframe.md`.
+- **Publishing requirements (F1/F2/F3)**: F1 — elicit + freeze a `pubreqs.json` contract (venue, required sections, length limits) at `/sci publish` time and gate the rendered paper deterministically; F2 — figure font/DPI policy (serif equations, sans figure text, minimum DPI for raster figures) enforced at render + re-checked by `verify`; F3 — reproduction bundle (generating code retained as SI code listing + `paper/reproduce.py` re-runner). CLI: `sci-adk pubreqs freeze`. See `design/paper-publishing-requirements.md`.
+- **Workspace near-submission package**: `sci-adk package` assembles a workspace-level submission — one merged `main.tex` + `si.tex` + figures from ALL runs, plus a standard 6-folder reproduction package. A `pkgreqs.json` frozen contract (venue + format) gates the package via the `package_requirements_clean` HARD gate inside `sci-adk verify`. CLI: `sci-adk package`, `sci-adk pkgreqs freeze`. `/sci package` drives the full [0]–[5] contract. See `design/near-submission-package.md`.
+- **Novelty 2-kind (result vs method)** — `novelty_result` / `novelty_method` are independent flags per hypothesis (N1); each produces a separate `claim-novelty-<hyp>-result` / `-method` Claim derived by the B-replace rule; `sci-adk novelty` + `sci-adk contested` CLI verbs; `verify` re-derives both. `\novelty{}` render markup (N2) and render/verify novelty gate (N3) track the 2-kind split into the rendered paper. See `design/literature-acquisition.md`.
+- **Paper figures + SI**: native pgfplots data-plot renderer with stable labels + Overleaf folder co-location; SI auto-record-dump (`si.tex`); a `\ref`↔`\label` within-document consistency gate as a `sci-adk verify` HARD gate; image-path figures (`ImageFigureSpec`, domain-general — the kernel carries zero domain code); optional `SIProse` hook around the SI record dump; body-order figure numbering. See `design/paper-figures-and-si.md`.
+- **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (IMRaD structure, no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
 - **paperforge re-pin → DOI→BibTeX**: pin `2cec69b` ships `paperforge.bibtex`
-- 1025 unit tests passing (`python3 -m pytest -q`)
+- 1281 unit tests passing (`python3 -m pytest -q`)
 
 ### Remaining
 
-- Paper render: tex-only `draft.tex` exists (Overleaf-compilable); **PDF compilation (LaTeX docker)** and the **render-time novelty 'first' output gate** remain deferred
+- Paper render: IMRaD `draft.tex` exists (Overleaf-compilable); **PDF compilation (LaTeX docker)** remains deferred; cross-document main↔SI `\ref` via `xr` (4c) deferred (Overleaf compile-order wrinkle outweighs value — authoring convention: refer to SI figures as plain text "Figure S1")
 - 2nd-domain generalization: the plug-seam is built and enforced; validated only once a second domain plugs in without a kernel edit (adoption-roadmap Stage 0 generalization gate)
 - Multi-capability auto-attempt orchestration: deferred (no consumer yet; append-only record + capability-in-provenance block method-shopping structurally)
 - Literature scale: `loop/literature_acquirer.py` exists; PaperQA2 and similar heavy literature plugins are Stage 2 (triggered by first-problem domain selection)
@@ -255,18 +286,27 @@ sci-adk/
 ├── design/                   # Design documents
 │   ├── abstractions.md       # Core type spec: record vs belief invariants
 │   ├── sci-adk-productization-plan.md  # Identity (referee/scorekeeper), Step 3
-│   ├── rigor-shell-architecture.md     # Kernel + seam architecture, Step 2
+│   ├── sci-adk-as-moai.md    # Operational layer design (workers, guards, /sci commands)
+│   ├── rigor-shell-architecture.md     # Kernel + seam architecture (F1–F7)
 │   ├── adoption-roadmap.md   # Staged external-system adoption (A done / B staged / C cut)
-│   ├── decision-engine.md    # DecisionEngine design
-│   ├── literature-acquisition.md       # Literature acquisition design
-│   ├── milestone-3.md        # Milestone 3 roadmap
+│   ├── decision-engine.md    # DecisionEngine design and invariants
+│   ├── literature-acquisition.md       # Literature acquisition, novelty 2-kind (v0.6)
+│   ├── evidence-validity.md  # Referent-typed evidence-validity gate
+│   ├── figure-digitization.md          # Digitized Evidence kind + proposed/verified gate
+│   ├── science-guards.md     # Science guards G1–G5 (spec-layer rigor enforcement)
+│   ├── render-architecture-reframe.md  # Render = record-fidelity spine + agent narrative
+│   ├── paper-publishing-requirements.md # F1/F2/F3 publishing requirements + pubreqs
+│   ├── near-submission-package.md      # Workspace package layer + pkgreqs
+│   ├── paper-figures-and-si.md         # Native figures + SI record-dump + ref-consistency gate
+│   ├── research-session-enforcement.md # Stop/UserPromptSubmit hook architecture
 │   ├── tool-policy.md        # Runtime tool governance (allowed / excluded)
+│   ├── milestone-3.md        # Milestone 3 roadmap
 │   ├── directory-structure.md
-│   ├── constitution.md       # sci-adk identity and rules
-│   └── session-4-handoff.md  # Latest session handoff
+│   ├── constitution.md       # sci-adk identity and session rules
+│   └── session-6-handoff.md  # Latest session handoff
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
-├── tests/                    # Engineering-layer tests (1025 passing)
+├── tests/                    # Engineering-layer tests (1281 passing)
 │   ├── test_spec.py          # Spec invariants
 │   ├── test_evidence.py      # Evidence invariants
 │   ├── test_claim.py         # Claim invariants
@@ -297,7 +337,7 @@ sci-adk/
 ## Testing
 
 ```bash
-# All tests (1025 passing)
+# All tests (1281 passing)
 python3 -m pytest -q
 
 # Integration tests (require Docker)
@@ -352,12 +392,21 @@ These exclusions apply to *sci-adk's research runtime*, NOT the build harness. F
 | Document | Contents |
 |----------|----------|
 | `design/abstractions.md` | Core type spec: Spec / Evidence / Claim invariants (v0.1 CONFIRMED) |
-| `design/sci-adk-productization-plan.md` | Identity: referee/scorekeeper, rigor ADK; Step 3 |
+| `design/sci-adk-productization-plan.md` | Identity: Agentic Discovery Kit, referee/scorekeeper; Step 3 |
+| `design/sci-adk-as-moai.md` | Operational layer: workers, guards, /sci commands, 6 CLI verbs |
 | `design/rigor-shell-architecture.md` | Kernel + seam architecture (F1–F7 decided); Step 2 |
 | `design/adoption-roadmap.md` | Staged adoption: A (done) / B (staged) / C (cut) |
 | `design/decision-engine.md` | DecisionEngine design and invariants |
-| `design/literature-acquisition.md` | Literature acquisition and prior-work trigger |
-| `design/tool-policy.md` | Runtime tool governance |
+| `design/science-guards.md` | Science guards G1–G5 (spec-layer rigor: analyticity / test-power / falsifiability / mode / cost) |
+| `design/literature-acquisition.md` | Literature acquisition, novelty 2-kind result/method (v0.6) |
+| `design/evidence-validity.md` | Referent-typed evidence-validity gate (synthetic data cannot ground empirical SUPPORTED) |
+| `design/figure-digitization.md` | Digitized Evidence kind: proposed→verified gate, deterministic digitizer |
+| `design/render-architecture-reframe.md` | Render = record-fidelity spine + agent belief narrative + `\evval`/`\status` fidelity gate |
+| `design/paper-publishing-requirements.md` | F1 publishing requirements + F2 figure font/DPI + F3 reproduction bundle; `pubreqs` |
+| `design/near-submission-package.md` | Workspace-level near-submission package; `pkgreqs` + `package_requirements_clean` gate |
+| `design/paper-figures-and-si.md` | Native figures (pgfplots), SI auto-record-dump, `\ref`↔`\label` consistency gate |
+| `design/research-session-enforcement.md` | Stop/UserPromptSubmit hook architecture |
+| `design/tool-policy.md` | Runtime tool governance (allowed / excluded) |
 | `design/milestone-3.md` | Milestone 3 roadmap |
 | `design/constitution.md` | sci-adk identity and session rules |
 
@@ -365,7 +414,7 @@ These exclusions apply to *sci-adk's research runtime*, NOT the build harness. F
 
 ## License
 
-TBD
+MIT License — Copyright (c) 2026 Chan Young Joe. See `LICENSE`.
 
 ## Authors
 

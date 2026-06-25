@@ -1,85 +1,83 @@
-# sci-adk Quick Start Guide
+# sci-adk Quick Start
 
-> Next Session Quick Reference
+> sci-adk v0.1.0 — Agentic Discovery Kit (ADK)
 
-## 1. 첫 번째로 할 것
-
-### 상태 확인 (3분)
+## 1. Install
 
 ```bash
-# Core types working? (sci_adk importable after `pip install -e .` or with PYTHONPATH=src)
-PYTHONPATH=src python3 -c "from sci_adk.core.spec import Spec; print('✅ OK')"
+# From the sci-adk repo root:
+pip install -e .
 
-# Git clean?
-git status
-
-# README 확인
-cat README.md | head -50
+# Confirm the console script is available:
+sci-adk --help
 ```
 
-## 2. 선택지 (하나 선택)
-
-### A. Docker 테스트 (추천, 30분)
+Optional: paperforge PDF acquisition (private repo, requires access):
 ```bash
-cd environments/python-base
-docker build -t sci-adk-python-base .
-cd ../..
-python3 demo_e2e.py
-ls -la runs/spec-t1-demo/
+pip install -e ".[tools]"
 ```
 
-### B. Milestone 2 계획 (1시간+)
-- Loop controller 구현
-- Convergence detection
-- Paper rendering 또는 DecisionRule engine
-
-### C. 테스트 실행 (15분)
-```bash
-pip install pytest
-pytest tests/ -v
-```
-
-## 3. 필독 문서
-
-1. **design/session-2-handoff.md** (전체 상황)
-2. **README.md** (프로젝트 개요)
-3. **design/milestone-1.md** (완료된 것)
-
-## 4. 커맨드 레퍼런스
+## 2. Run the T-1 demo (no proposal file needed)
 
 ```bash
-# E2E 데모
-python3 demo_e2e.py
-
-# 단위 테스트
-pytest tests/test_spec.py -v
-pytest tests/test_evidence.py -v
-pytest tests/test_claim.py -v
-
-# Docker 빌드
-docker build -t sci-adk-python-base environments/python-base/
-
-# Git 로그
-git log --oneline -10
+sci-adk run --t1-demo
 ```
 
-## 5. 문제 발생 시
+This runs the built-in T-1 molecular Godel-encoding capability over its designed
+molecule set and yields an autonomous injectivity verdict via the DecisionEngine
+(numeric threshold rule — no LLM invoked).
 
-**Docker 없음**: `sudo apt-get install docker.io`
-**Pytest 없음**: `pip install pytest`
-**Import error**: `cd /home/cyjoe/sci-adk` 먼저
-**Permission denied**: `sudo usermod -aG docker $USER`
+## 3. Inspect the run directory
 
-## 6. 다음 목표
+```bash
+ls runs/t1-godel/
+# spec.json        — frozen Spec
+# evidence/        — append-only Evidence log
+# claims/          — Claim state
+# checkpoints.md   — open agent checkpoints
+# science.md       — science-guard findings (G1–G5)
+# paper/           — LaTeX paper draft (draft.tex, references.bib)
+```
 
-Milestone 1 완료 → Milestone 2 시작:
-- Full loop 구현
-- Paper rendering
-- DecisionRule engine
-- Academic MCP integration
+## 4. Headless re-verification (no LLM required)
+
+```bash
+sci-adk verify runs/t1-godel
+# Exit 0 iff every recorded Claim reproduces from the record.
+# A third party can run this without Claude Code.
+```
+
+## 5. Compile your own proposal
+
+Write a four-pane Markdown proposal and run:
+
+```bash
+sci-adk run proposal.md
+```
+
+Accepted section headings (English or Korean):
+`# Background` / `# Goal` / `# Method` / `# Expected Output`
+
+## 6. Operational layer — research workspace
+
+Turn any directory into a disciplined sci-adk research workspace:
+
+```bash
+sci-adk init-session <dir>
+```
+
+This installs the Stop/UserPromptSubmit enforcement hooks, the `science-orchestrator`
+persona, and the `/sci` command entry point. Available `/sci` commands once installed:
+`plan`, `experiment`, `publish`, `verify`, `status`, `replicate`, `package`.
+
+## 7. All tests
+
+```bash
+python3 -m pytest -q          # 1281 tests passing
+python3 -m pytest -m integration -q  # integration tests (require Docker)
+```
 
 ---
 
-**세션 시작**: 이 파일부터 읽을 것
-**우선순위**: A → B → C 순서
-**도움**: design/session-2-handoff.md 참조
+Full documentation: `README.md`
+Design documents: `design/`
