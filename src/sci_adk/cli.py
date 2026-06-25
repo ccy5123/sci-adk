@@ -397,6 +397,79 @@ def _add_verb_parsers(sub) -> None:
         help="a free-form advisory condition surfaced in verify but NEVER gated (repeatable)",
     )
 
+    # pkgreqs: freeze the workspace-level PackageReqs contract into <ws>/pkgreqs.json.
+    pkgreqs = sub.add_parser(
+        "pkgreqs",
+        help="freeze the workspace package-requirements contract (design/near-submission-"
+             "package.md §2) into <ws>/pkgreqs.json with its tamper-evidence digest. The "
+             "umbrella `package`/`verify <ws>` gate (package_requirements_clean) checks the "
+             "assembled package against it",
+    )
+    pkgreqs_sub = pkgreqs.add_subparsers(dest="pkgreqs_command", required=True)
+    pkgreqs_freeze = pkgreqs_sub.add_parser(
+        "freeze",
+        help="freeze pkgreqs.json at the WORKSPACE ROOT (mirrors pubreqs freeze): the FROZEN "
+             "package contract + its digest beside runs/ (NOT inside the regenerated package/, "
+             "so `package` never clobbers it)",
+    )
+    pkgreqs_freeze.add_argument(
+        "workspace", help="path to a workspace root holding runs/ (pkgreqs.json is written here)"
+    )
+    pkgreqs_freeze.add_argument(
+        "--defaults", action="store_true",
+        help="use the proposed defaults (IMRaD required sections); the elicitation fast-path",
+    )
+    pkgreqs_freeze.add_argument(
+        "--venue", default=None, help="free-text venue label (reuses PubReqs.venue semantics)"
+    )
+    pkgreqs_freeze.add_argument(
+        "--required-section", action="append", default=None, metavar="NAME",
+        dest="required_sections",
+        help="a section that MUST be present in main.tex (repeatable). With --defaults, "
+             "appends to the IMRaD set; without, replaces it (default: none)",
+    )
+    pkgreqs_freeze.add_argument(
+        "--reference-style", default=None, metavar="STYLE",
+        help="declared bib style checked wired in main.tex (e.g. plainnat / natbib)",
+    )
+    pkgreqs_freeze.add_argument(
+        "--abstract-max-words", type=int, default=None, metavar="N",
+        help="venue abstract word limit (e.g. 300 for IEAM); omit to disable the abstract gate",
+    )
+    pkgreqs_freeze.add_argument(
+        "--body-word-min", type=int, default=None, metavar="N",
+        help="ADVISORY body word-range minimum (with --body-word-max; surfaced, never gated)",
+    )
+    pkgreqs_freeze.add_argument(
+        "--body-word-max", type=int, default=None, metavar="N",
+        help="ADVISORY body word-range maximum (with --body-word-min; surfaced, never gated)",
+    )
+    pkgreqs_freeze.add_argument(
+        "--run", action="append", default=None, metavar="ID", dest="runs",
+        help="restrict the package to these run ids (repeatable); omit to synthesize ALL runs",
+    )
+    pkgreqs_freeze.add_argument(
+        "--advisory", action="append", default=None, metavar="TEXT",
+        help="a free-form advisory condition surfaced in verify but NEVER gated (repeatable)",
+    )
+
+    # package: assemble the workspace package, then run the package_requirements_clean gate.
+    package = sub.add_parser(
+        "package",
+        help="assemble the workspace near-submission package (the 6-folder package/ from ALL "
+             "runs) then run the package_requirements_clean gate (design/near-submission-"
+             "package.md §C). Deterministic + read-only gate, no LLM. Exit 0 iff every declared "
+             "package requirement is met",
+    )
+    package.add_argument(
+        "workspace", help="path to a workspace root holding runs/ (and optionally pkgreqs.json)"
+    )
+    package.add_argument(
+        "--no-assemble", dest="assemble", action="store_false", default=True,
+        help="skip the assembly step and only run the gate over the existing package/ "
+             "(verify-only over a previously assembled package)",
+    )
+
     # amend-spec: apply Spec.amend(rationale) + write the checkpoint receipt.
     amend_spec = sub.add_parser(
         "amend-spec",
@@ -878,6 +951,166 @@ def _cmd_pubreqs_freeze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pkgreqs_freeze(args: argparse.Namespace) -> int:
+    """Freeze the workspace PackageReqs contract into <ws>/pkgreqs.json (design §2).
+
+    Mirrors ``pubreqs freeze`` at the WORKSPACE scope: builds a :class:`PackageReqs` from the
+    CLI options (a ``--defaults`` fast-path supplies the IMRaD required sections), computes the
+    tamper-evidence digest, and writes the FROZEN contract to ``<ws>/pkgreqs.json`` at the
+    workspace ROOT (beside runs/, NOT inside package/ so ``package`` never clobbers it). The
+    ``package``/``verify <ws>`` umbrella gate then checks the assembled package against it.
+    """
+    from sci_adk.core.pkgreqs import (
+        ALL_RUNS,
+        DEFAULT_REQUIRED_SECTIONS,
+        PackageReqs,
+    )
+    from sci_adk.provenance import pkgreqs_digest
+
+    workspace = Path(args.workspace)
+    if not (workspace / "runs").is_dir():
+        print(f"error: no runs/ directory under workspace: {workspace}", file=sys.stderr)
+        return 2
+
+    # Required sections: --defaults seeds the IMRaD set; explicit --required-section entries
+    # APPEND under --defaults, or REPLACE (start empty) without it (mirrors pubreqs freeze).
+    sections: list[str] = list(DEFAULT_REQUIRED_SECTIONS) if args.defaults else []
+    if args.required_sections:
+        sections.extend(args.required_sections)
+
+    # body_word_range: both bounds required to form the advisory range; one alone is rejected.
+    body_word_range = None
+    if (args.body_word_min is None) != (args.body_word_max is None):
+        print("error: --body-word-min and --body-word-max must be given together",
+              file=sys.stderr)
+        return 2
+    if args.body_word_min is not None and args.body_word_max is not None:
+        body_word_range = (args.body_word_min, args.body_word_max)
+
+    runs: object = list(args.runs) if args.runs else ALL_RUNS
+
+    pkgreqs = PackageReqs(
+        venue=args.venue,
+        required_sections=sections,
+        reference_style=args.reference_style,
+        abstract_max_words=args.abstract_max_words,
+        body_word_range=body_word_range,
+        runs=runs,
+        advisory=list(args.advisory) if args.advisory else [],
+    )
+    # The digest is computed over the gate-bearing contract and STORED in the artifact (design
+    # §2), unlike the Spec's on-demand digest. model_copy re-freezes with it set.
+    digest = pkgreqs_digest(pkgreqs)
+    frozen = pkgreqs.model_copy(update={"digest": digest})
+
+    pkgreqs_path = workspace / "pkgreqs.json"
+    pkgreqs_path.write_text(frozen.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    print(f"pkgreqs freeze: froze package requirements -> {pkgreqs_path}")
+    print(f"  digest (sha256): {digest}")
+    print(f"  venue: {frozen.venue if frozen.venue else '(unspecified)'}")
+    print(f"  required_sections: {', '.join(sections) if sections else '(none)'}")
+    print(
+        "  reference_style: "
+        f"{frozen.reference_style if frozen.reference_style else '(none)'}"
+    )
+    print(
+        "  abstract_max_words: "
+        f"{frozen.abstract_max_words if frozen.abstract_max_words is not None else '(none)'}"
+    )
+    print(f"  runs: {'all' if frozen.runs == ALL_RUNS else ', '.join(frozen.runs)}")
+    if frozen.body_word_range is not None:
+        lo, hi = frozen.body_word_range
+        print(f"  body_word_range (advisory): {lo}-{hi}")
+    if frozen.advisory:
+        print(f"  advisory ({len(frozen.advisory)}): surfaced in verify, never gated")
+    print(f"  next: sci-adk package {workspace}")
+    return 0
+
+
+def _cmd_package(args: argparse.Namespace) -> int:
+    """Assemble the workspace package, then run the package_requirements_clean gate (design §C).
+
+    ``sci-adk package <ws>`` drives the deterministic spine: it assembles the 6-folder
+    ``package/`` from ALL runs (unless ``--no-assemble``), then runs the read-only,
+    no-LLM ``package_requirements_clean`` gate over it, printing failures the same way the
+    other paper gates do. Exit 0 iff every declared package requirement is met.
+    """
+    from sci_adk.render.package import assemble_package
+
+    workspace = Path(args.workspace)
+    if not (workspace / "runs").is_dir():
+        print(f"error: no runs/ directory under workspace: {workspace}", file=sys.stderr)
+        return 2
+
+    if args.assemble:
+        pkgreqs = _load_workspace_pkgreqs(workspace)
+        try:
+            assembly = assemble_package(workspace, pkgreqs)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(f"package: assembled {assembly.package_dir} from {len(assembly.runs)} run(s)")
+        print(f"  runs: {', '.join(assembly.runs)}")
+        if not assembly.main_tex_authored:
+            print("  manuscript: 01_manuscript/main.tex is the record-derived SKELETON "
+                  "(author it via /sci package)")
+        for note in assembly.notes:
+            print(f"  note: {note}")
+
+    return _run_package_gate(workspace)
+
+
+def _load_workspace_pkgreqs(workspace: Path):
+    """Load <ws>/pkgreqs.json if present (the assembler scaffolds generically without it)."""
+    from sci_adk.core.pkgreqs import PackageReqs
+
+    pkgreqs_path = workspace / "pkgreqs.json"
+    if not pkgreqs_path.is_file():
+        return None
+    try:
+        return PackageReqs.model_validate(
+            json.loads(pkgreqs_path.read_text(encoding="utf-8"))
+        )
+    except ValueError:
+        return None
+
+
+def _run_package_gate(workspace: Path) -> int:
+    """Run the workspace package gate + print its report like the other paper gates.
+
+    Shared by ``package`` and ``verify <ws>``. Exit 0 iff ``package_requirements_clean``.
+    """
+    from sci_adk.loop.verify import verify_package
+
+    try:
+        report = verify_package(workspace)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    pkgdir = workspace / "package"
+    if not pkgdir.is_dir():
+        print(f"package gate: no package/ at {workspace} -> nothing to gate "
+              "(run `sci-adk package` to assemble it)")
+        return 0
+
+    print(f"package gate over {pkgdir}")
+    if report.runs:
+        reproduced = sum(1 for v in report.runs_reproduced.values() if v)
+        print(f"  runs synthesized: {len(report.runs)} "
+              f"({reproduced}/{len(report.runs)} reproduce)")
+    if report.package_requirements_clean:
+        print("  package requirements: OK (declared requirements met)")
+    else:
+        print("  package requirements FAILED (declared requirements not met):",
+              file=sys.stderr)
+        for problem in report.package_requirements_problems:
+            print(f"    - {problem}", file=sys.stderr)
+    for note in report.advisory:
+        print(f"  package advisory: {note}")
+    return 0 if report.passed else 1
+
+
 def _cmd_amend_spec(args: argparse.Namespace) -> int:
     """Amend the run's recorded Spec + record the checkpoint receipt (S5).
 
@@ -1101,6 +1334,21 @@ def _cmd_render(args: argparse.Namespace) -> int:
             print(f"    - dangling \\ref (no such figure): {', '.join(fc.dangling)}")
         if fc.orphan:
             print(f"    - orphan figure (never \\ref'd): {', '.join(fc.orphan)}")
+
+    # PF-7 (design/near-submission-package.md): a per-run render is the internal record,
+    # not the workspace submission. When the workspace holds more than one run, warn and
+    # point to `package` -- route-to-package + warn, never a refuse (single-run and
+    # mid-work renders stay unbroken).
+    runs_dir = run_dir.parent
+    if runs_dir.is_dir():
+        n_runs = sum(1 for d in runs_dir.iterdir() if (d / "spec.json").is_file())
+        if n_runs > 1:
+            print(
+                f"  note: this is the per-run internal record, not the submission "
+                f"({n_runs} runs in this workspace) -- for the near-submission package run "
+                f"`sci-adk package {workspace}` (or /sci package).",
+                file=sys.stderr,
+            )
     return 0
 
 
@@ -1162,6 +1410,15 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir)
     spec_path = run_dir / "spec.json"
     if not spec_path.exists():
+        # PF-5 (design/near-submission-package.md §6): `verify <ws>` auto-detects a WORKSPACE
+        # (no spec.json, but a runs/ dir + a package/ or a frozen pkgreqs.json) and runs the
+        # workspace-level package umbrella gate instead of the per-run audit. A target that is
+        # neither a run dir nor a package workspace is the original error.
+        is_workspace = (run_dir / "runs").is_dir() and (
+            (run_dir / "package").is_dir() or (run_dir / "pkgreqs.json").is_file()
+        )
+        if is_workspace:
+            return _run_package_gate(run_dir)
         print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
         return 2
 
@@ -1515,6 +1772,10 @@ def main(argv=None) -> int:
         return _cmd_init_spec(args)
     if args.command == "pubreqs":
         return _cmd_pubreqs_freeze(args)
+    if args.command == "pkgreqs":
+        return _cmd_pkgreqs_freeze(args)
+    if args.command == "package":
+        return _cmd_package(args)
     if args.command == "amend-spec":
         return _cmd_amend_spec(args)
     if args.command == "execute":

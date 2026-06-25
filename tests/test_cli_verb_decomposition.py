@@ -609,3 +609,31 @@ def test_run_wrapper_full_chain_produces_all_artifacts(tmp_path, capsys):
     assert (run_dir / "paper" / "draft.tex").exists()
     assert (run_dir / "paper" / "si.tex").exists()
     assert (run_dir / "checkpoints" / "prior_work.json").exists()
+
+
+def test_render_warns_in_multi_run_workspace_pf7(tmp_path, capsys):
+    """PF-7 (design/near-submission-package.md): a per-run render in a multi-run
+    workspace WARNS and points to `package` -- route-to-package + warn, never a refuse."""
+    ws = tmp_path
+    assert main(["init-spec", "--t1-demo", "-o", str(ws)]) == 0
+    run = ws / "runs" / "t1-godel"
+    assert main(["execute", str(run), "--t1-demo"]) == 0
+    assert main(["derive-claim", str(run), "--no-strict-science"]) == 0
+
+    # single-run workspace: no PF-7 warning
+    assert main(["render", str(run)]) == 0
+    err_single = capsys.readouterr().err
+    assert "per-run internal record" not in err_single
+
+    # a second run (any dir carrying a spec.json) makes it a multi-run workspace
+    second = ws / "runs" / "second"
+    second.mkdir()
+    (second / "spec.json").write_text(
+        (run / "spec.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    # render still succeeds (no refuse) but now warns and points to `package`
+    assert main(["render", str(run)]) == 0
+    err_multi = capsys.readouterr().err
+    assert "per-run internal record" in err_multi
+    assert "sci-adk package" in err_multi

@@ -1,0 +1,279 @@
+"""
+The workspace PACKAGE gate -- ``verify_package`` / ``package_requirements_clean``
+(design/near-submission-package.md §3).
+
+Builds a tiny 2-run fixture workspace, assembles the package, and asserts the umbrella gate is
+green; then drives EACH deterministic fail mode (missing folder, unresolved cite, tool-vocab
+leak in main.tex, missing required section, abstract over limit, a run that does not reproduce,
+a residual fact macro, a missing traceability table) and the two vacuity cases (no package/ ->
+vacuously clean; package but no pkgreqs.json -> the venue-format checks vacuous, the
+layout/traceability checks still run). READ-ONLY, deterministic, no LLM.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+from sci_adk.core.evidence import (
+    Bearing,
+    BearingDirection,
+    EvidenceItem,
+    EvidenceKind,
+    Provenance,
+    Result,
+)
+from sci_adk.core.pkgreqs import DEFAULT_REQUIRED_SECTIONS, PackageReqs
+from sci_adk.core.spec import (
+    DecisionRule,
+    DecisionRuleKind,
+    Hypothesis,
+    HypothesisMode,
+    MethodPlan,
+    RawProposal,
+    Spec,
+    TargetClaim,
+)
+from sci_adk.loop.checkpoint_loop import run_checkpoint_loop
+from sci_adk.loop.verify import PackageVerifyReport, verify_package
+from sci_adk.provenance import pkgreqs_digest
+from sci_adk.render.package import assemble_package
+
+_NON_CIRC = "the verifier checks a property not baked into the generator"
+
+
+# -- fixture builders --------------------------------------------------------
+
+def _numeric_spec(spec_id: str, value: float = 0.9) -> Spec:
+    return Spec(
+        id=spec_id, version=1,
+        raw_proposal=RawProposal(background="b", goal="g", method="m", expected_output="o"),
+        hypotheses=[Hypothesis(
+            id="hyp-n", statement="the encoder is injective on the tested set",
+            mode=HypothesisMode.CONFIRMATORY,
+            decision_rule=DecisionRule(
+                kind=DecisionRuleKind.THRESHOLD,
+                expression="point >= threshold => support",
+                params={"statistic": "point", "op": ">=", "value": value},
+            ),
+            referent="formal", non_circularity=_NON_CIRC,
+        )],
+        method=MethodPlan(approaches=["a"], tools=[]),
+        target_claims=[TargetClaim(id="tc", statement="t", answers="hyp-n")],
+    )
+
+
+def _numeric_experiment(point: float):
+    def experiment(s, w):
+        return [EvidenceItem(
+            id="ev-num", spec_id=s.id, kind=EvidenceKind.EXPERIMENT_RUN,
+            provenance=Provenance(code_ref="abc123", data_source="generated"),
+            result=Result(type="quantitative", point=point),
+            bears_on=[Bearing(target_id="hyp-n", direction=BearingDirection.SUPPORTS)],
+        )]
+    return experiment
+
+
+def _seed_workspace(tmp_path: Path) -> Path:
+    """A 2-run workspace, each run verify-green (a supported numeric claim)."""
+    ws = tmp_path / "ws"
+    for rid, val, pt in [("run-alpha", 0.9, 0.95), ("run-beta", 0.8, 0.85)]:
+        run_checkpoint_loop(
+            run_dir=ws / "runs" / rid, spec=_numeric_spec(rid, value=val),
+            experiment=_numeric_experiment(pt), workspace_dir=ws,
+        )
+    return ws
+
+
+def _freeze_pkgreqs(ws: Path, **kw) -> None:
+    sections = kw.pop("required_sections", list(DEFAULT_REQUIRED_SECTIONS))
+    pr = PackageReqs(required_sections=sections, **kw)
+    frozen = pr.model_copy(update={"digest": pkgreqs_digest(pr)})
+    (ws / "pkgreqs.json").write_text(frozen.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _assembled(tmp_path: Path, *, freeze=True, **freeze_kw) -> Path:
+    ws = _seed_workspace(tmp_path)
+    pkgreqs = None
+    if freeze:
+        _freeze_pkgreqs(ws, **freeze_kw)
+        pkgreqs = PackageReqs.model_validate(
+            json.loads((ws / "pkgreqs.json").read_text(encoding="utf-8"))
+        )
+    assemble_package(ws, pkgreqs)
+    return ws
+
+
+def _main_tex(ws: Path) -> Path:
+    return ws / "package" / "01_manuscript" / "main.tex"
+
+
+# -- (1) the pass case -------------------------------------------------------
+
+def test_package_gate_passes_for_a_clean_assembled_package(tmp_path):
+    ws = _assembled(tmp_path, venue="IEAM", abstract_max_words=300, reference_style="plainnat")
+    report = verify_package(ws)
+    assert isinstance(report, PackageVerifyReport)
+    assert report.package_requirements_clean is True
+    assert report.package_requirements_problems == []
+    assert report.passed is True
+    assert sorted(report.runs) == ["run-alpha", "run-beta"]
+    assert all(report.runs_reproduced.values())
+
+
+# -- (2) vacuity / backward compatibility ------------------------------------
+
+def test_package_gate_no_package_is_vacuously_clean(tmp_path):
+    ws = _seed_workspace(tmp_path)        # runs only, never assembled
+    report = verify_package(ws)
+    assert report.package_requirements_clean is True
+    assert report.runs == []
+
+
+def test_package_gate_no_pkgreqs_still_runs_layout_and_traceability(tmp_path):
+    # A package with NO pkgreqs.json: the venue-FORMAT checks are vacuous, but the layout +
+    # traceability + record-green checks still run (and pass for a clean assembly).
+    ws = _assembled(tmp_path, freeze=False)
+    assert not (ws / "pkgreqs.json").exists()
+    report = verify_package(ws)
+    assert report.package_requirements_clean is True
+    assert sorted(report.runs) == ["run-alpha", "run-beta"]
+
+
+# -- (3) fail modes ----------------------------------------------------------
+
+def test_package_gate_fails_on_missing_folder(tmp_path):
+    ws = _assembled(tmp_path)
+    shutil.rmtree(ws / "package" / "02_data")
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("02_data" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_unresolved_cite(tmp_path):
+    ws = _assembled(tmp_path)
+    main = _main_tex(ws)
+    main.write_text(
+        main.read_text(encoding="utf-8").replace(
+            r"\bibliography{references}", r"\citep{ghostkey}\bibliography{references}"
+        ),
+        encoding="utf-8",
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("ghostkey" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_tool_vocabulary_leak(tmp_path):
+    ws = _assembled(tmp_path)
+    main = _main_tex(ws)
+    main.write_text(
+        main.read_text(encoding="utf-8").replace(
+            r"\maketitle", r"\maketitle The frozen Spec and the sci-adk verdict say so."
+        ),
+        encoding="utf-8",
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("tool-vocabulary" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_missing_required_section(tmp_path):
+    ws = _assembled(tmp_path)
+    main = _main_tex(ws)
+    main.write_text(
+        main.read_text(encoding="utf-8").replace(r"\section{Methods}", "% removed methods"),
+        encoding="utf-8",
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("Methods" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_abstract_over_limit(tmp_path):
+    # A tiny abstract limit (5 words) the record-derived skeleton abstract exceeds.
+    ws = _assembled(tmp_path, abstract_max_words=5)
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("abstract word count" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_unwired_reference_style(tmp_path):
+    # The assembler honors the contract (wires the declared style), so to exercise the FAIL
+    # mode we hand-strip the \bibliographystyle the contract declared (a divergent .tex).
+    ws = _assembled(tmp_path, reference_style="apalike")
+    main = _main_tex(ws)
+    main.write_text(
+        main.read_text(encoding="utf-8").replace(r"\bibliographystyle{apalike}", ""),
+        encoding="utf-8",
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("reference style" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_when_a_run_does_not_reproduce(tmp_path):
+    ws = _assembled(tmp_path)
+    # Tamper a recorded claim so run-alpha no longer re-derives -> DIVERGED.
+    claim = next((ws / "runs" / "run-alpha" / "claims").glob("*.json"))
+    data = json.loads(claim.read_text(encoding="utf-8"))
+    data["status"] = "refuted"
+    claim.write_text(json.dumps(data), encoding="utf-8")
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("does not reproduce" in p for p in report.package_requirements_problems)
+    assert report.runs_reproduced["run-alpha"] is False
+
+
+def test_package_gate_fails_on_residual_fact_macro(tmp_path):
+    # A residual \evval/\status macro (substitution bypassed / hand-edited) fails the fidelity
+    # check (REUSED from the per-run reframe gate).
+    ws = _assembled(tmp_path)
+    main = _main_tex(ws)
+    main.write_text(
+        main.read_text(encoding="utf-8").replace(
+            r"\maketitle", r"\maketitle The value is \evval{ev-num}{point}."
+        ),
+        encoding="utf-8",
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("value fidelity" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_missing_claims_table(tmp_path):
+    ws = _assembled(tmp_path)
+    (ws / "package" / "02_data" / "claims_all.csv").unlink()
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("claims_all.csv" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_unbalanced_braces(tmp_path):
+    ws = _assembled(tmp_path)
+    main = _main_tex(ws)
+    main.write_text(main.read_text(encoding="utf-8") + "\n{unbalanced\n", encoding="utf-8")
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("unbalanced braces" in p for p in report.package_requirements_problems)
+
+
+def test_package_gate_fails_on_missing_submission_readiness(tmp_path):
+    ws = _assembled(tmp_path)
+    readme = ws / "package" / "README.md"
+    # Strip the submission-readiness section heading (keep the file present).
+    readme.write_text("# Near-submission package\n\nNo self-assessment here.\n", encoding="utf-8")
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("submission-readiness" in p.lower() for p in report.package_requirements_problems)
+
+
+# -- (4) advisory is surfaced, never gated -----------------------------------
+
+def test_package_gate_body_word_range_is_advisory_not_gated(tmp_path):
+    # body_word_range surfaces in advisory but never fails the gate, even for a tiny skeleton.
+    ws = _assembled(tmp_path, body_word_range=(4000, 7000))
+    report = verify_package(ws)
+    assert report.package_requirements_clean is True
+    assert any("body word range" in note for note in report.advisory)

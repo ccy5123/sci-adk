@@ -50,6 +50,7 @@ from typing import Dict, List, Literal, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
+from sci_adk.core.pkgreqs import PackageReqs
 from sci_adk.core.pubreqs import PubReqs
 from sci_adk.core.spec import Hypothesis, Spec
 from sci_adk.core.validity import (
@@ -72,6 +73,13 @@ from sci_adk.render.consistency import (
 from sci_adk.render.factref import find_unresolved_factrefs
 from sci_adk.render.novelty import find_unsupported_novelty
 from sci_adk.render.paper import check_paper_tool_vocabulary
+from sci_adk.render.pkgreqs_checks import (
+    abstract_max_words_problems,
+    cite_resolution_problems,
+    figure_presence_problems,
+    layout_problems,
+    readme_submission_readiness_problems,
+)
 from sci_adk.render.pubreqs_checks import (
     figure_font_policy_problems,
     image_dpi_problems,
@@ -87,6 +95,13 @@ from sci_adk.render.pubreqs_checks import (
 # _check_cross_doc_refs (it counts SI floats, no xr package, no recompile). A document
 # absent from paper/ is simply skipped.
 _PAPER_DOCS: tuple[str, ...] = ("draft.tex", "si.tex")
+
+# The merged-manuscript documents the workspace-PACKAGE gate checks (design/near-submission-
+# package.md §3). main.tex is the tool-agnostic submission; si.tex is the record dump (EXEMPT
+# from the tool-vocabulary gate, like the per-run si.tex). Both live in package/01_manuscript/.
+_PACKAGE_MAIN: str = "main.tex"
+_PACKAGE_SI: str = "si.tex"
+_PACKAGE_DOCS: tuple[str, ...] = (_PACKAGE_MAIN, _PACKAGE_SI)
 
 # Per-hypothesis audit results. Strings (not an enum) keep the report trivially
 # printable/serializable; the set is closed and small.
@@ -195,6 +210,49 @@ class VerifyReport:
     paper_requirements_problems: List[str] = field(default_factory=list)
     paper_requirements_clean: bool = field(default=True)
     passed: bool = field(default=False)
+
+
+@dataclass(frozen=True)
+class PackageVerifyReport:
+    """The outcome of the workspace-level PACKAGE gate (design/near-submission-package.md §3).
+
+    The umbrella ``package_requirements_clean`` gate over an assembled ``<ws>/package/`` and
+    its FROZEN ``<ws>/pkgreqs.json``: a deterministic, read-only, no-LLM audit of the merged
+    submission. It is the workspace-scope companion to :class:`VerifyReport` (which is per-run);
+    a package is not a run, so it carries its own report rather than overloading the per-run one.
+
+    Attributes:
+        workspace_dir: the workspace root audited.
+        runs: the run ids the ``06_provenance/run_index.csv`` lists (the runs the package
+            synthesizes). EMPTY when no package / no run index.
+        runs_reproduced: per-run REPRODUCED-flag (True iff that run's record re-derives via the
+            headless audit). A listed run that does NOT reproduce is a gate failure.
+        package_requirements_problems: every declared package requirement the assembled package
+            does NOT meet (design §3): a missing layout element, a broken main.tex/si.tex
+            (ref/label, figure, brace, cite), a tool-vocabulary leak in main.tex, a missing
+            required section, an over-limit abstract, an unwired reference style, a missing
+            ``claims_all.csv`` / ``run_index.csv``, a non-reproducing run, a residual
+            ``\\evval``/``\\status`` fidelity macro, or a README with no submission-readiness
+            section. EMPTY when the package meets the contract OR when there is NO ``package/``
+            (nothing to gate -- vacuously clean). When ``pkgreqs.json`` is ABSENT the
+            venue-FORMAT sub-checks (required_sections / reference_style / abstract limit) are
+            vacuously clean, but the layout/traceability/compile checks still run if a
+            ``package/`` exists (design §3, backward compatible).
+        advisory: the contract's body_word_range + free-form advisory, SURFACED never gated.
+        package_requirements_clean: True iff no declared package requirement failed (and True
+            vacuously when no ``package/`` exists). The HARD gate.
+        passed: the package exit gate -- equal to ``package_requirements_clean`` (the package
+            gate has no separate per-claim signal; the per-run reproduction is folded into the
+            requirements as the ``record green`` check).
+    """
+
+    workspace_dir: Path
+    runs: List[str] = field(default_factory=list)
+    runs_reproduced: Dict[str, bool] = field(default_factory=dict)
+    package_requirements_problems: List[str] = field(default_factory=list)
+    advisory: List[str] = field(default_factory=list)
+    package_requirements_clean: bool = field(default=True)
+    passed: bool = field(default=True)
 
 
 def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
@@ -367,6 +425,62 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             and paper_cross_doc_clean
             and paper_requirements_clean
         ),
+    )
+
+
+def verify_package(workspace_dir: Path) -> PackageVerifyReport:
+    """The workspace-level PACKAGE gate (design/near-submission-package.md §3).
+
+    PURE + READ-ONLY: audits the assembled ``<ws>/package/`` against the FROZEN
+    ``<ws>/pkgreqs.json`` -- a deterministic, no-LLM, no-recompile umbrella over the merged
+    submission. It REUSES the same pure checkers the per-run paper gates use (compile integrity,
+    tool vocabulary, required sections, reference style, value fidelity) so "compiles", "names
+    the science", and "re-derives from the record" mean the same thing for a package as for a
+    per-run paper; it adds the package-SPECIFIC checks (layout, cite resolution, abstract limit,
+    traceability tables, every listed run reproduces, README submission-readiness).
+
+    Vacuity / backward-compat (design §3):
+      - NO ``package/`` -> vacuously clean (nothing to gate; an empty workspace is fine).
+      - ``package/`` present but NO ``pkgreqs.json`` -> the venue-FORMAT sub-checks
+        (required_sections / reference_style / abstract limit) are vacuously clean, while the
+        layout / traceability / compile / fidelity / record-green checks still run.
+
+    The ``record green`` check re-uses :func:`verify_run` over each run the ``run_index.csv``
+    lists (the headless record audit) -- a listed run that does not reproduce fails the gate.
+
+    Args:
+        workspace_dir: the workspace root holding ``package/`` and (optionally) ``pkgreqs.json``.
+
+    Returns:
+        A :class:`PackageVerifyReport` -- inspect ``package_requirements_clean`` for the gate.
+    """
+    # @MX:ANCHOR: [AUTO] the single workspace-level package re-audit entry (design §3) -- the
+    #   deterministic, read-only, no-LLM gate over the merged submission package.
+    # @MX:REASON: [AUTO] the CLI `package`/`verify <ws>` verbs and the package test suites call
+    #   this; it owns the no-LLM + read-only + reuse-the-per-run-checkers contract, and folds
+    #   the per-run record audit (verify_run) in as the "record green" traceability check so a
+    #   package cannot pass while a synthesized run does not reproduce.
+    workspace_dir = Path(workspace_dir)
+    package_dir = workspace_dir / "package"
+
+    # No package -> nothing to gate (vacuously clean), exactly as an absent paper/ is for a run.
+    if not package_dir.is_dir():
+        return PackageVerifyReport(workspace_dir=workspace_dir)
+
+    pkgreqs = _load_pkgreqs(workspace_dir)
+    problems, runs, runs_reproduced = _check_package_requirements(
+        workspace_dir, package_dir, pkgreqs
+    )
+    advisory = _package_advisory(pkgreqs)
+    clean = not problems
+    return PackageVerifyReport(
+        workspace_dir=workspace_dir,
+        runs=runs,
+        runs_reproduced=runs_reproduced,
+        package_requirements_problems=problems,
+        advisory=advisory,
+        package_requirements_clean=clean,
+        passed=clean,
     )
 
 
@@ -831,6 +945,228 @@ def _reproduction_bundle_problems(
     return []
 
 
+# -- package-requirements gate (design/near-submission-package.md §3) --------
+
+def _load_pkgreqs(workspace_dir: Path) -> Optional[PackageReqs]:
+    """Load the FROZEN ``<ws>/pkgreqs.json`` package contract, or None if absent (read-only).
+
+    Absent -> None (the venue-FORMAT sub-checks are vacuously clean; the layout/traceability
+    checks still run). A malformed contract re-raises as a ValueError (verify surfaces it).
+    """
+    pkgreqs_path = workspace_dir / "pkgreqs.json"
+    if not pkgreqs_path.is_file():
+        return None
+    return PackageReqs.model_validate(
+        json.loads(pkgreqs_path.read_text(encoding="utf-8"))
+    )
+
+
+def _package_advisory(pkgreqs: Optional[PackageReqs]) -> List[str]:
+    """The contract's ADVISORY items: the body_word_range + free-form advisory (design §3).
+
+    SURFACED in the report, NEVER gated. Returns the human-readable advisory lines (empty when
+    no contract / nothing advisory). The body_word_range is rendered as a note; the gate never
+    fails on a thin or long body (an author concern, not a mechanical one).
+    """
+    if pkgreqs is None:
+        return []
+    notes: List[str] = []
+    if pkgreqs.body_word_range is not None:
+        lo, hi = pkgreqs.body_word_range
+        notes.append(f"body word range {lo}-{hi} (advisory only -- never gated)")
+    notes.extend(pkgreqs.advisory)
+    return notes
+
+
+def _read_package_doc(package_dir: Path, name: str) -> str:
+    """Read ``package/01_manuscript/<name>`` (or '' if absent), read-only."""
+    doc = package_dir / "01_manuscript" / name
+    return doc.read_text(encoding="utf-8") if doc.is_file() else ""
+
+
+def _run_index_runs(package_dir: Path) -> Optional[List[str]]:
+    """The run ids listed in ``06_provenance/run_index.csv`` (read-only), or None if absent.
+
+    PURE-ish: parses the CSV's ``run_id`` column. Returns ``[]`` for a present-but-empty index
+    (header only) and ``None`` when the file is absent (the traceability gate distinguishes
+    "no run index" from "an index listing zero runs").
+    """
+    idx = package_dir / "06_provenance" / "run_index.csv"
+    if not idx.is_file():
+        return None
+    import csv
+
+    runs: List[str] = []
+    with idx.open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            rid = (row.get("run_id") or "").strip()
+            if rid:
+                runs.append(rid)
+    return runs
+
+
+def _check_package_requirements(
+    workspace_dir: Path,
+    package_dir: Path,
+    pkgreqs: Optional[PackageReqs],
+) -> tuple[List[str], List[str], Dict[str, bool]]:
+    """Run the deterministic PACKAGE checks (design §3), READ-ONLY, no recompile, no LLM.
+
+    REUSES the per-run pure checkers (compile integrity, tool vocabulary, required sections,
+    reference style, value fidelity) so the package and per-run gates share one definition of
+    "compiles" / "names the science" / "re-derives", and adds the package-SPECIFIC checks
+    (layout, cite resolution, abstract limit, traceability tables, every listed run reproduces,
+    README submission-readiness). The venue-FORMAT checks (required_sections / reference_style /
+    abstract limit) run ONLY when ``pkgreqs`` declares them (absent contract -> vacuously clean
+    for those, design §3); the layout / compile / traceability / fidelity / record-green checks
+    run regardless (a ``package/`` exists, so they are meaningful).
+
+    Returns ``(problems, runs, runs_reproduced)`` -- the failure lines (empty = clean), the run
+    ids the run_index lists, and each listed run's REPRODUCED flag.
+    """
+    problems: List[str] = []
+    manuscript_dir = package_dir / "01_manuscript"
+
+    main_tex = _read_package_doc(package_dir, _PACKAGE_MAIN)
+    si_tex = _read_package_doc(package_dir, _PACKAGE_SI)
+    bib = ""
+    bib_path = manuscript_dir / "references.bib"
+    if bib_path.is_file():
+        bib = bib_path.read_text(encoding="utf-8")
+
+    # 1. Layout: the 6 folders + MANIFEST.md + README.md present.
+    problems.extend(layout_problems(package_dir))
+
+    # 2. Compile integrity: main.tex + si.tex \ref<->\label, figure presence, braces.
+    for name, tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
+        if not tex:
+            problems.append(f"package manuscript: 01_manuscript/{name} is missing or empty")
+            continue
+        report = check_latex_ref_consistency(tex)
+        for ref in report.unresolved_refs:
+            problems.append(f"compile integrity: {name} has an unresolved \\ref{{{ref}}}")
+        for label in report.duplicate_labels:
+            problems.append(f"compile integrity: {name} has a duplicate \\label{{{label}}}")
+        if not _braces_balanced(tex):
+            problems.append(f"compile integrity: {name} has unbalanced braces")
+    # main.tex figures must resolve to co-located files (the manuscript's figures/ dir).
+    if main_tex:
+        problems.extend(figure_presence_problems(main_tex, manuscript_dir))
+
+    # 3. Citations wired: every \cite* key in main.tex resolves in references.bib.
+    if main_tex:
+        problems.extend(cite_resolution_problems(main_tex, bib))
+
+    # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. The package's si.tex is the
+    #    record dump, but the design §3 table gates BOTH main.tex AND si.tex tool-agnostic (the
+    #    merged manuscript reads as science end to end) -- REUSE the per-run paper checker.
+    for name, tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
+        leaks = check_paper_tool_vocabulary(tex) if tex else []
+        if leaks:
+            problems.append(
+                f"tool-vocabulary: {name} names the toolchain, not the science: "
+                + ", ".join(leaks)
+            )
+
+    # 5. Value fidelity: no residual \evval/\status fact macro in main.tex/si.tex (REUSE the
+    #    reframe gate -- a residual means substitution was bypassed / the .tex was hand-edited).
+    for name, tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
+        residuals = find_unresolved_factrefs(tex) if tex else []
+        if residuals:
+            problems.append(
+                f"value fidelity: {name} carries unsubstituted fact macro(s): "
+                + ", ".join(residuals)
+            )
+
+    # 6. Venue-FORMAT checks (only when the contract declares them).
+    if pkgreqs is not None and main_tex:
+        if pkgreqs.required_sections:
+            problems.extend(
+                f"missing required section: {sec}"
+                for sec in required_sections_problems(main_tex, pkgreqs.required_sections)
+            )
+        if pkgreqs.reference_style:
+            problems.extend(
+                reference_style_problems(main_tex, pkgreqs.reference_style)
+            )
+        problems.extend(
+            abstract_max_words_problems(main_tex, pkgreqs.abstract_max_words)
+        )
+
+    # 7. Traceability + record green: claims_all.csv + run_index.csv present, every listed run
+    #    reproduces (REUSE verify_run -- the headless record audit).
+    runs, runs_reproduced, traceability_problems = _check_package_traceability(
+        workspace_dir, package_dir
+    )
+    problems.extend(traceability_problems)
+
+    # 8. README submission-readiness section present.
+    readme = package_dir / "README.md"
+    if readme.is_file():
+        problems.extend(
+            readme_submission_readiness_problems(readme.read_text(encoding="utf-8"))
+        )
+    # (a missing README.md is already reported by layout_problems; do not double-report)
+
+    return problems, runs, runs_reproduced
+
+
+def _braces_balanced(tex: str) -> bool:
+    """True iff ``tex`` has equal ``{`` and ``}`` counts (the package self-check's brace rule).
+
+    The same coarse balance test ``check_package.py`` uses -- a deterministic compile-integrity
+    signal (an unbalanced brace is a hard LaTeX error), not a full TeX parse.
+    """
+    return tex.count("{") == tex.count("}")
+
+
+def _check_package_traceability(
+    workspace_dir: Path, package_dir: Path
+) -> tuple[List[str], Dict[str, bool], List[str]]:
+    """The traceability + record-green checks (design §3), READ-ONLY.
+
+    Confirms ``02_data/claims_all.csv`` + ``06_provenance/run_index.csv`` exist, then re-runs
+    the headless audit (:func:`verify_run`) over every run the index lists -- a listed run that
+    does NOT reproduce fails the gate (the package cannot stand on a record that does not
+    re-derive). Returns ``(runs, runs_reproduced, problems)``.
+    """
+    problems: List[str] = []
+
+    claims_csv = package_dir / "02_data" / "claims_all.csv"
+    if not claims_csv.is_file():
+        problems.append("traceability: 02_data/claims_all.csv is missing")
+
+    runs = _run_index_runs(package_dir)
+    runs_reproduced: Dict[str, bool] = {}
+    if runs is None:
+        problems.append("record green: 06_provenance/run_index.csv is missing")
+        return [], runs_reproduced, problems
+
+    for rid in runs:
+        run_dir = workspace_dir / "runs" / rid
+        if not (run_dir / "spec.json").is_file():
+            problems.append(
+                f"record green: run '{rid}' in run_index.csv has no runs/{rid}/spec.json"
+            )
+            runs_reproduced[rid] = False
+            continue
+        try:
+            report = verify_run(run_dir)
+        except (FileNotFoundError, ValueError) as exc:
+            problems.append(
+                f"record green: run '{rid}' could not be audited: {exc}"
+            )
+            runs_reproduced[rid] = False
+            continue
+        runs_reproduced[rid] = report.all_reproduced
+        if not report.all_reproduced:
+            problems.append(
+                f"record green: run '{rid}' does not reproduce from its record "
+                "(at least one claim DIVERGED or is UNRESOLVED)"
+            )
+    return runs, runs_reproduced, problems
+
+
 # -- read-only loaders -------------------------------------------------------
 
 def _load_spec(run_dir: Path) -> Spec:
@@ -878,4 +1214,6 @@ __all__ = [
     "VerifyOutcome",
     "VerifyReport",
     "verify_run",
+    "PackageVerifyReport",
+    "verify_package",
 ]

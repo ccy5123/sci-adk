@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import List
 
 from sci_adk.core.evidence import EvidenceItem
+from sci_adk.core.pkgreqs import PackageReqs
 from sci_adk.core.pubreqs import PubReqs
 from sci_adk.core.spec import Spec
 from sci_adk.loop.verdict import VerdictTrail
@@ -158,6 +159,39 @@ def pubreqs_digest(pubreqs: PubReqs) -> str:
     return hasher.hexdigest()
 
 
+def pkgreqs_digest(pkgreqs: PackageReqs) -> str:
+    """Return a deterministic sha256 (hex) over the canonical serialization of ``pkgreqs``.
+
+    The workspace-level package digest (design/near-submission-package.md §2): tamper-evidence
+    over the FROZEN package contract, mirroring :func:`pubreqs_digest`'s canonicalization (the
+    typed ``PackageReqs`` model dumped with sorted keys, so the digest is invariant to cosmetic
+    JSON differences but changes on ANY gate-bearing edit -- a relaxed ``abstract_max_words`` or
+    a dropped ``required_sections`` entry shifts it). The design STORES this digest in
+    ``pkgreqs.json``, so the freeze step records it once and the gate trusts the recorded
+    contract.
+
+    The ``digest`` field itself is EXCLUDED from the hash (a digest cannot cover the slot it is
+    written into -- that would be circular). The ``frozen_at`` timestamp is likewise excluded,
+    so the digest is a function of the GATE-BEARING contract only (two freezes of the same
+    requirements at different times share a digest, and a re-freeze that only bumps the
+    timestamp does not falsely look "tampered"). Every other field -- the ones that actually
+    gate the package -- is folded in (``body_word_range`` and ``advisory`` included: though they
+    are ADVISORY at gate time, they are still part of the frozen contract the digest attests).
+
+    Domain-general: it hashes only PackageReqs fields; it knows nothing of any capability.
+
+    Args:
+        pkgreqs: the package-requirements contract to digest.
+
+    Returns:
+        The 64-char hex sha256 of the canonical gate-bearing PackageReqs serialization.
+    """
+    hasher = hashlib.sha256()
+    payload = pkgreqs.model_dump(mode="json", exclude={"digest", "frozen_at"})
+    _absorb(hasher, "pkgreqs", payload)
+    return hasher.hexdigest()
+
+
 def spec_digest_of_run(run_dir: Path) -> str:
     """Load ``run_dir/spec.json`` and return its :func:`spec_digest`.
 
@@ -257,6 +291,7 @@ __all__ = [
     "record_digest",
     "spec_digest",
     "pubreqs_digest",
+    "pkgreqs_digest",
     "spec_digest_of_run",
     "SpecDigestMismatch",
 ]
