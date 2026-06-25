@@ -90,6 +90,24 @@ HARD gate — a dangling `\ref`, an orphan figure, or an unsupported `\novelty` 
 makes verify exit non-zero EVEN IF the Claims reproduce. Run `sci-adk verify` as a
 read-only self-check before returning.
 
+### Publishing requirements (the frozen contract)
+
+`/sci publish` may FREEZE a publishing contract at `runs/<id>/pubreqs.json` (via
+`sci-adk pubreqs freeze`, beside `spec.json` so `render` never clobbers it) — venue,
+required sections, figure font policy, raster `image_min_dpi`, reference style, length
+limits, and free-form advisory conditions. It is a RECORD (frozen + digest, like the
+Spec): authored TO, then checked AGAINST. The orchestrator elicits it (`AskUserQuestion`);
+a worker authors to it but never freezes or relaxes it.
+
+`sci-adk verify` enforces it as the `paper_requirements_clean` HARD gate: each declared,
+deterministically-checkable requirement — sections present (`\section{...}` in
+`draft.tex`), the F2 figure font policy + raster DPI, the reference style wired, word
+count ≤ limit, the F3 reproduction bundle present (`paper/reproduce.py` referencing the
+recorded `code_ref`s) — must pass; `advisory` items and `max_pages` (no page count
+without a compile) are surfaced but NEVER gate. ABSENT `pubreqs.json` → the gate is
+vacuously clean (backward compatible). A gate-bearing field cannot be relaxed after a
+failure except by an explicit re-freeze (anti-moving-the-goalposts).
+
 ### Authoring constraints
 
 - **Body-order figure numbering.** A prose `\ref{fig:<id>}` drives the numbering —

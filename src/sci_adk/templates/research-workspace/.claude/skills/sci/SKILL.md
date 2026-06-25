@@ -125,10 +125,28 @@ Load `Skill("science-workflow-experiment")`. SEQUENTIAL (3b reads 3a's Evidence)
 ### publish — Render the paper
 
 Load `Skill("science-workflow-publish")`.
-`Agent(subagent_type: "expert-writer")` → author `PaperProse` / `SIProse` /
-`FigureSpec` hooks (figures pull `y` FROM Evidence by `evidence_id`) → `sci-adk render`
-→ `paper/{draft.tex, si.tex, figures/, references.bib}`. Optionally
-`Agent(subagent_type: "evaluator-rigor")` for the paper-consistency pre-check.
+
+1. **Elicit + freeze the publishing requirements** (orchestrator-only — a worker
+   cannot prompt). BEFORE spawning the writer, ask the user (via `AskUserQuestion`)
+   for the venue, the required sections, figure font policy on/off, raster
+   `image_min_dpi`, reference style, length limits, and any free-form advisory
+   conditions — offering a "use the proposed defaults" fast-path (IMRaD sections,
+   font policy on, `image_min_dpi` 300, reproduction bundle on). Freeze the answers:
+   `sci-adk pubreqs freeze <run> [--defaults | --venue … --required-section … …]`
+   writes the FROZEN `runs/<id>/pubreqs.json` (+ its digest) beside `spec.json`. Skip
+   ONLY if the user declines declared requirements (the gate is then vacuously clean —
+   backward compatible). A frozen requirement's gate-bearing fields are immutable;
+   relaxing one after a figure fails needs an explicit re-freeze (anti-moving-the-goalposts).
+2. `Agent(subagent_type: "expert-writer")` → author `PaperProse` / `SIProse` /
+   `FigureSpec` hooks (figures pull `y` FROM Evidence by `evidence_id`) authoring TO
+   the frozen `pubreqs.json` contract (declared sections present, font policy, length
+   limits) → `sci-adk render` → `paper/{draft.tex, si.tex, figures/, references.bib}`
+   + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`). Pass the frozen
+   `pubreqs.json` path in the spawn prompt. Optionally
+   `Agent(subagent_type: "evaluator-rigor")` for the paper-consistency pre-check.
+3. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
+   declared sections, F2 font/DPI policy, reference style, max-words, F3 reproduction
+   bundle) as a HARD gate; `advisory` items + `max_pages` are surfaced, never gated.
 
 ### verify — Cross-check before close
 

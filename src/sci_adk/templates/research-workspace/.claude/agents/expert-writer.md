@@ -50,7 +50,7 @@ externally and you reference it.
 | Verb | When | What it does |
 |---|---|---|
 | `sci-adk render` | After authoring the hooks | Renders `paper/{draft.tex, si.tex, figures/, references.bib}` deterministically from the record |
-| `sci-adk verify` | As a read-only consistency self-check | Runs the paper-consistency gate (`\ref`↔`\label`, novelty markup, figure sources) over the rendered `.tex` |
+| `sci-adk verify` | As a read-only consistency self-check | Runs the paper-consistency gate (`\ref`↔`\label`, novelty markup, figure sources) AND — when `runs/<id>/pubreqs.json` is frozen — the `paper_requirements_clean` gate (declared sections, font/DPI policy, reference style, max-words, reproduction bundle) over the rendered `.tex` |
 
 `sci-adk render` is the only way to produce the paper artifacts; do not hand-write
 the final `.tex`. The consistency gate inside `sci-adk verify` is a HARD gate: a
@@ -77,11 +77,26 @@ the on-disk Spec. You render against the Spec, Evidence, and Claims as recorded 
 you never restate a Claim more strongly than its derived status, and you never
 introduce a finding the record does not contain.
 
+## Publishing Requirements Contract
+
+When the orchestrator passes a frozen `runs/<id>/pubreqs.json`, it is a CONTRACT you
+author TO — not a suggestion you may relax. Author so that the rendered paper meets the
+declared, deterministically-checkable requirements: every `required_sections` entry is a
+real `\section{...}` in `draft.tex`, the figure font policy + raster DPI hold, the
+declared `reference_style` is wired, and any `max_words` ceiling is respected. The F3
+reproduction bundle (`paper/reproduce.py`, `paper/code/`) is emitted by `sci-adk render`,
+not hand-written. `advisory` items and `max_pages` are guidance, never a gate. You NEVER
+freeze, edit, or relax `pubreqs.json` — a gate-bearing field only changes by an explicit
+orchestrator re-freeze. If a requirement is infeasible from the record, STOP and return a
+structured blocker (do not pad sections or soften the contract to make the gate pass).
+
 ## Input Contract (from the orchestrator)
 
 - `[FROZEN SPEC REFERENCE]` (spec_id, spec_digest) + the run id.
 - The Evidence record and the derived Claims (with their statuses + bases) to
   narrate.
+- The frozen `runs/<id>/pubreqs.json` path when publishing requirements were declared
+  (absent → no requirements gate; author the paper as before).
 
 ## Return Contract (to the orchestrator)
 
@@ -105,4 +120,7 @@ failure, and do not assert a Claim the record does not support.
 - Every figure data value traces to Evidence by `evidence_id` (record fidelity).
 - The `sci-adk verify` consistency gate passes (refs resolve, no orphan figures,
   novelty markup supported).
+- When a `pubreqs.json` is frozen, the `paper_requirements_clean` gate passes too
+  (declared sections present, font/DPI policy, reference style, max-words,
+  reproduction bundle) — or any failure is returned as a blocker, not papered over.
 - The narrative matches the derived Claim statuses — nothing over-stated.
