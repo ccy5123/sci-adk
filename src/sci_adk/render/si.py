@@ -268,6 +268,13 @@ def render_si_latex(
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")
+    # Figure font policy (design/paper-publishing-requirements.md F2), mirroring the paper:
+    # newtxmath (Times-compatible MATH only, body text unchanged) + helvet (Arial-compatible
+    # sans for figure text). Only for a figure-bearing SI -- a figure-less SI is unchanged.
+    if has_native or has_image:
+        lines.append(r"\usepackage{amsmath}")
+        lines.append(r"\usepackage{newtxmath}")
+        lines.append(r"\usepackage[scaled]{helvet}")
     if has_native:
         lines.append(r"\usepackage{pgfplots}")
         lines.append(r"\pgfplotsset{compat=1.18}")

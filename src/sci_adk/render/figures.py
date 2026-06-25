@@ -370,8 +370,12 @@ def render_native_figure(
     lines.append(r"\begin{figure}[htbp]")
     lines.append(r"\centering")
     lines.append(r"\begin{tikzpicture}")
+    # Figure font policy (design/paper-publishing-requirements.md F2): ``font=\sffamily``
+    # sets all axis TEXT (labels, ticks, legend) in the Arial-compatible sans (helvet from
+    # the preamble), while inline math in a label stays in the Times-compatible serif
+    # (newtxmath). The preamble emits the font packages for any figure-bearing paper.
     lines.append(
-        f"\\begin{{axis}}[xlabel={{{_sanitize(plot.xlabel)}}}, "
+        f"\\begin{{axis}}[font=\\sffamily, xlabel={{{_sanitize(plot.xlabel)}}}, "
         f"ylabel={{{_sanitize(plot.ylabel)}}}]"
     )
 

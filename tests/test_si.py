@@ -584,3 +584,17 @@ class TestSIProse:
         a = render_si_latex(spec, claims, evidence, prose=prose)
         b = render_si_latex(spec, claims, evidence, prose=prose)
         assert a == b
+
+
+def test_figure_bearing_si_emits_font_policy():
+    # F2 (design/paper-publishing-requirements.md): a figure-bearing SI mirrors the paper's
+    # font policy (newtxmath Times-compatible math + helvet Arial-compatible sans); a
+    # figure-less SI carries neither (figure-scoped, regression-invariant).
+    spec, claims, evidence = _basic_record()
+    with_fig = render_si_latex(spec, claims, evidence, figures=[_figure("growth", "ev-1")])
+    assert r"\usepackage{newtxmath}" in with_fig
+    assert r"\usepackage[scaled]{helvet}" in with_fig
+
+    figure_less = render_si_latex(spec, claims, evidence)
+    assert r"\usepackage{newtxmath}" not in figure_less
+    assert "helvet" not in figure_less

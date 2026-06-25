@@ -707,3 +707,11 @@ class TestOrderFiguresByReference:
         figs = [_line_spec("dup"), _image_spec("dup", "d.pdf")]
         with pytest.raises(ValueError):
             order_figures_by_reference(figs, r"\ref{fig:dup}")
+
+
+def test_native_figure_axis_uses_sans_font_policy():
+    # F2 (design/paper-publishing-requirements.md): figure TEXT (axis labels, ticks,
+    # legend) is set in the Arial-compatible sans via ``font=\sffamily``; inline math in a
+    # label stays in the Times-compatible serif (newtxmath, emitted in the preamble).
+    tex = render_native_figure(_line_spec("growth"), _series_evidence())
+    assert r"font=\sffamily" in tex

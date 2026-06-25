@@ -629,3 +629,22 @@ class TestLatexFigures:
         assert r"\label{fig:beta}" in tex
         # The agent id is NEVER the include filename.
         assert "{figures/alpha.png}" not in tex
+
+
+def test_figure_bearing_paper_emits_font_policy():
+    # F2 (design/paper-publishing-requirements.md): a figure-bearing paper emits the font
+    # policy -- Times-compatible math (newtxmath, MATH only so body text is unchanged) +
+    # Arial-compatible sans (helvet) for figure text. A figure-LESS paper carries NEITHER
+    # (the policy is figure-scoped; the skeleton stays byte-identical).
+    hyp = _basic_hyp()
+    spec = _spec(hyp)
+    claim = _claim(hyp, ClaimStatus.SUPPORTED)
+    ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
+
+    with_fig = render_paper_latex(spec, [claim], [ev], figures=[_fig_spec("growth")])
+    assert r"\usepackage{newtxmath}" in with_fig
+    assert r"\usepackage[scaled]{helvet}" in with_fig
+
+    figure_less = render_paper_latex(spec, [claim], [ev])
+    assert r"\usepackage{newtxmath}" not in figure_less
+    assert "helvet" not in figure_less

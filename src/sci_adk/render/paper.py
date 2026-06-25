@@ -710,6 +710,16 @@ def render_paper_latex(
     lines.append(r"\usepackage{natbib}")
     has_native = any(f.kind == "native" for f in figures)
     has_image = any(f.kind == "image" for f in figures)
+    # Figure font policy (design/paper-publishing-requirements.md F2): equations in a
+    # Times-compatible serif (newtxmath -- MATH only, so the body TEXT font is unchanged),
+    # other figure text in an Arial-compatible sans (helvet, scaled). pdflatex
+    # metric-compatible -- no font files, no engine change. Emitted ONLY for a
+    # figure-bearing paper, so a figure-less paper stays byte-identical (regression
+    # invariant). The per-figure sans scoping is applied in figures.render_figure.
+    if has_native or has_image:
+        lines.append(r"\usepackage{amsmath}")
+        lines.append(r"\usepackage{newtxmath}")
+        lines.append(r"\usepackage[scaled]{helvet}")
     if has_native:
         lines.append(r"\usepackage{pgfplots}")
         lines.append(r"\pgfplotsset{compat=1.18}")
