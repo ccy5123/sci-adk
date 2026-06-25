@@ -56,6 +56,41 @@ prior entry. The verb is the ONLY way to write Evidence; do not hand-edit
 `runs/<id>/` Evidence files. The Evidence schema mirrors abstractions.md §Evidence
 (`evidence_id`, `spec_id`, `result`, `provenance`, `bears_on[]`).
 
+## The G3 Negative Control
+
+When the FROZEN Spec has a `formal` + deterministic `threshold` hypothesis heading
+to a binding SUPPORTS, a strict run requires a falsifiability control — the science
+guard G3 (`core/validity.check_falsifiability_adequacy`; AUTHORITATIVE in
+`design/science-guards.md`) HALTS an apparatus that was never shown able to report
+FAIL. Mutation testing for science: you must produce a NEGATIVE_CONTROL — a MUTANT
+of the method that SHOULD fail, RUN for real, confirming the apparatus reports FAIL
+on the hard cases.
+
+Mechanics (you append it like any other Evidence, via `sci-adk append-evidence`):
+
+- `EvidenceItem.kind = "negative_control"` (`EvidenceKind.NEGATIVE_CONTROL`), with
+  `bears_on = []`. It is a record ABOUT the apparatus, NOT about the hypothesis, so
+  it NEVER enters the DecisionEngine — a mutant's refutation cannot contaminate the
+  hypothesis verdict (mirroring how a NOVELTY_DECISION stays out of the engine).
+- A `negative_control` payload: `{hypothesis_id, mutant, outcome="not_supported",
+  discriminating_cases_covered, statistic?, observed_value?}`. The
+  `discriminating_cases_covered` MUST cover the Spec's declared
+  `discriminating_cases` — the mutant has to fail ON those hard cases (the
+  G2<->G3 coupling). A mutant that fails only an easy case proves nothing.
+- REAL execution provenance: a non-empty `provenance.code_ref` or
+  `provenance.environment` on the item — the mutant was actually RUN, not asserted.
+- Append-only and digest-covered: because it lives in the Evidence log,
+  `verify --strict-science` re-derives it and `record_digest` covers it. A deleted
+  control makes a recorded strict SUPPORTED DIVERGE.
+
+Honest limit: you produce the control HONESTLY — the gate enforces that the
+declaration is PRESENT, not that your mutant is genuinely violating (that the
+mutant truly breaks the method is your recorded judgment). Per the Domain
+Generality note below, the mutant uses whatever domain tool the experiment uses;
+the kernel carries no domain code. The MethodPlan should pre-register this control
+step; if it does not, that is a blocker (or an amendment via manager-prereg), not a
+control you invent on your own initiative.
+
 ## Frozen-Spec Reference
 
 Your prompt carries a `[FROZEN SPEC REFERENCE]` block (spec_id, spec_digest). The
@@ -99,5 +134,11 @@ substitute a different method or skip a step to "make progress".
 - Every result the run produced — including nulls and negatives — has a typed
   Evidence entry appended via `sci-adk append-evidence`.
 - Every `bears_on[]` matches the Spec's pre-registered mapping (no post-hoc bearing).
+- For a `formal` + deterministic `threshold` hypothesis heading to a binding
+  SUPPORTS: a `NEGATIVE_CONTROL` Evidence item (`kind="negative_control"`,
+  `bears_on=[]`, `outcome="not_supported"`) was appended, RUN for real (non-empty
+  `provenance.code_ref` or `provenance.environment`), with
+  `discriminating_cases_covered` covering the Spec's declared
+  `discriminating_cases` — so the strict G3 gate has its falsifiability control.
 - Provenance is captured for each entry; no hand-edited Evidence files.
 - No silent deviation from the frozen MethodPlan.

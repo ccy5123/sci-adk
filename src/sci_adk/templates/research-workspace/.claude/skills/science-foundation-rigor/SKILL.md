@@ -55,6 +55,10 @@ per-hypothesis `DecisionRule` and its halts. No self-certification.
 — a headless, read-only audit that exits 0 iff every recorded claim reproduces from
 the record.
 
+**Strength, not just validity.** Beyond "can this data ground this belief?", the
+claim-strength guards G1–G5 gate a `formal` + `threshold` SUPPORTED under
+`strict_science` (analyticity, test-power, falsifiability).
+
 ## Implementation Guide (5 minutes)
 
 ### The three core types
@@ -138,6 +142,58 @@ The engine surfaces decision points and HALTS — resolve them, never route arou
 A halt is the engine doing its referee job. It is resolved by recording the missing
 thing (a search, an empirical Evidence entry, an amendment) — never by bypassing it.
 
+### The science guards (claim-strength: G1–G5)
+
+Two layers gate a Claim. The evidence-validity halts ask: *can this DATA ground this
+belief?* The science guards ask a different question: *is the experimental DESIGN
+strong?* They catch three claim-strength failures the evidence-validity gate passes
+untouched — (1) **analyticity** (a known theorem unit-tested as if it were a
+discovery), (2) **non-discriminating tests** (a test set too easy to separate a
+correct method from a broken one), (3) **unfalsifiable apparatus** (nothing shows the
+test CAN report FAIL). The data may be genuinely valid; the *claim* is still weak.
+
+Enforced at two points plus a declared strictness:
+
+- **Spec gate** — `core/spec_science::audit_spec_science` (called by `stage_init_spec`):
+  ALWAYS on, NEVER halts. Surfaces G1/G2/G4/G5 as recording-type checkpoints (like
+  prior-work / novelty / contested), resolved by a Spec amendment. A weak Spec is never
+  SILENTLY accepted.
+- **Verdict gate** — `core/validity::check_analyticity` / `check_discriminating_power`
+  / `check_falsifiability_adequacy` (G1/G2/G3, beside `check_evidence_adequacy`): HARD
+  halts, ENFORCED only under `strict_science`.
+- **`strict_science`** — lenient at the primitive (`ClaimUpdater` / `ResearchCompiler`
+  / `verify_run` default `False`; a low-level caller is not blocked), strict at the real
+  entrypoints (`sci-adk run` / `derive-claim` default strict; `--no-strict-science` opts
+  out; `verify --strict-science` opts in). A real research run refuses a weak SUPPORTED;
+  build-harness unit tests on synthetic claims are unaffected.
+
+The five guards (trigger class `formal` + deterministic `threshold` + binding SUPPORTS,
+except the two spec lints noted):
+
+- **G1 Analyticity** — a known result (`novelty_result` and `novelty_method` both False)
+  framed as `epistemic_kind == finding` is refused → reclassify (`unit_test` /
+  `capability_check`) or assert novelty. Verifying an OPEN conjecture by examples is
+  legitimate — the novelty assertion IS the open-question signal, so a novelty-asserting
+  hypothesis is not triggered; only a *known-result* finding is.
+- **G2 Test-power** — a binding pass with no `discriminating_cases` declared → declare
+  hard cases that separate a correct method from a broken one.
+- **G3 Falsifiability (the most important)** — a binding SUPPORTS needs a
+  `NEGATIVE_CONTROL` Evidence item (kind `negative_control`, `bears_on=[]`; mutant
+  `outcome == not_supported`; covers the declared `discriminating_cases`; real execution
+  provenance). It lives in the append-only log (digest-covered; `verify` re-derives) and
+  NEVER enters the DecisionEngine — a mutant's refutation does not contaminate the
+  hypothesis verdict.
+- **G4 Mode-coherence (spec lint)** — a frozen `threshold` belongs to a `confirmatory`
+  hypothesis, not `exploratory`.
+- **G5 Claim-cost (spec lint)** — a practical-property term (`index`, `efficient`,
+  `scalable`, `fast`, `compact`, `succinct`, `lightweight`, `practical`, `optimal`) with
+  no `cost_metrics` declared → declare the cost.
+
+All triggering Spec fields (`epistemic_kind`, `discriminating_cases`, `cost_metrics`)
+are frozen (anti-HARKing). The gate enforces that the DECLARATION is present — NOT that
+a case is genuinely hard or a result genuinely known (those are the author's recorded
+judgment). Authoritative: `design/science-guards.md`.
+
 ### Two-kind novelty
 
 Novelty is a revisable LITERATURE-referent Claim — "no prior published work
@@ -180,10 +236,13 @@ MethodPlan and future `science-domain-*` skills, never via the kernel.
 ## Advanced (10+ minutes)
 
 The full type specification lives in `design/abstractions.md` (schema + invariants
-S1–S5 / E1–E4 / C1–C6). The verify subroutines live in `src/sci_adk/loop/verify.py`
-(the `_audit_*` functions are the canonical source the guard agents reference). The
-constitution (`.claude/rules/sci-adk-constitution.md` in the dev repo; the workspace
-`CLAUDE.md` here) records the discipline's origin and the two-environment scoping.
+S1–S5 / E1–E4 / C1–C6). The science guards are specified in full in
+`design/science-guards.md` (the AUTHORITATIVE source: triggers, the spec-gate vs
+verdict-gate split, `strict_science`, schema additions, and honest limits). The verify
+subroutines live in `src/sci_adk/loop/verify.py` (the `_audit_*` functions are the
+canonical source the guard agents reference). The constitution
+(`.claude/rules/sci-adk-constitution.md` in the dev repo; the workspace `CLAUDE.md`
+here) records the discipline's origin and the two-environment scoping.
 
 ## Works Well With
 
