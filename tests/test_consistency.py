@@ -23,9 +23,19 @@ These pin the behavior before any implementation exists.
 from __future__ import annotations
 
 from sci_adk.render.consistency import (
+    CrossDocRefReport,
     LatexRefReport,
+    check_cross_doc_s_refs,
     check_latex_ref_consistency,
 )
+
+
+# A small SI fixture: two captioned figures (-> Figure S1, S2) and one table (-> Table S1).
+_SI_TWO_FIG_ONE_TAB = "\n".join([
+    r"\begin{table}[htbp]\caption{nums}\label{tab:s1}\end{table}",
+    r"\begin{figure}[htbp]\caption{a}\label{fig:a}\end{figure}",
+    r"\begin{figure}[htbp]\caption{b}\label{fig:b}\end{figure}",
+])
 
 
 # -- a consistent document is ok ---------------------------------------------
@@ -135,3 +145,81 @@ def test_report_is_frozen():
 
     with pytest.raises(Exception):
         report.ok = False  # frozen pydantic -> mutation refused
+
+
+# == cross-document "Figure/Table S<n>" gate (main paper -> SI) ===============
+
+def test_cross_doc_all_s_refs_resolve_is_ok():
+    # SI has 2 figures + 1 table; the main paper cites only floats that exist -> clean.
+    draft = r"As shown in Figure S1 and Figure S2, and the data in Table S1, ..."
+    report = check_cross_doc_s_refs(draft, _SI_TWO_FIG_ONE_TAB)
+    assert isinstance(report, CrossDocRefReport)
+    assert report.unresolved_refs == []
+    assert report.ok is True
+
+
+def test_cross_doc_dangling_figure_is_unresolved():
+    # The SI has 2 figures; "Figure S3" points past them -> a silent dangling cross-ref.
+    draft = r"See Figure S3 for the extended sweep."
+    report = check_cross_doc_s_refs(draft, _SI_TWO_FIG_ONE_TAB)
+    assert report.unresolved_refs == ["Figure S3"]
+    assert report.ok is False
+
+
+def test_cross_doc_dangling_table_is_unresolved():
+    # The SI has exactly 1 table; "Table S2" does not exist.
+    draft = r"The full numbers are in Table S2."
+    report = check_cross_doc_s_refs(draft, _SI_TWO_FIG_ONE_TAB)
+    assert report.unresolved_refs == ["Table S2"]
+    assert report.ok is False
+
+
+def test_cross_doc_no_s_refs_is_ok():
+    # A main paper that cites no SI float cannot dangle.
+    report = check_cross_doc_s_refs(r"A paper body with Figure 1 and Table 1 only.",
+                                    _SI_TWO_FIG_ONE_TAB)
+    assert report.unresolved_refs == []
+    assert report.ok is True
+
+
+def test_cross_doc_abbreviations_and_tilde_are_recognized():
+    # "Fig.~S1" and "Tab. S1" are the same cross-reference forms; both resolve here.
+    draft = r"see Fig.~S1 and Tab. S1"
+    assert check_cross_doc_s_refs(draft, _SI_TWO_FIG_ONE_TAB).ok is True
+    # ... but "Fig. S5" past the 2 SI figures dangles.
+    assert check_cross_doc_s_refs(r"see Fig.~S5", _SI_TWO_FIG_ONE_TAB).unresolved_refs == [
+        "Figure S5"
+    ]
+
+
+def test_cross_doc_citation_in_comment_is_ignored():
+    # A "Figure S9" on a fully-commented line never compiles -> must not gate.
+    draft = "\n".join([
+        r"% Figure S9 -- a note to self, commented out",
+        r"Figure S1 is the headline.",
+    ])
+    report = check_cross_doc_s_refs(draft, _SI_TWO_FIG_ONE_TAB)
+    assert report.unresolved_refs == []
+    assert report.ok is True
+
+
+def test_cross_doc_empty_si_dangles_every_s_ref():
+    # No SI floats at all: any "Figure S1" the paper cites is dangling.
+    report = check_cross_doc_s_refs(r"Figure S1 and Table S1.", "")
+    assert report.unresolved_refs == ["Figure S1", "Table S1"]
+    assert report.ok is False
+
+
+def test_cross_doc_unresolved_sorted_by_kind_then_number_and_deduped():
+    # Determinism: ("Figure", n) before ("Table", n); numeric (not lexical) order; deduped.
+    draft = r"Figure S10, Figure S2, Table S3, Figure S2 again, Table S3 again."
+    report = check_cross_doc_s_refs(draft, "")  # empty SI -> all dangle
+    assert report.unresolved_refs == ["Figure S2", "Figure S10", "Table S3"]
+
+
+def test_cross_doc_report_is_frozen():
+    import pytest
+
+    report = check_cross_doc_s_refs(r"Figure S1", "")
+    with pytest.raises(Exception):
+        report.ok = True  # frozen pydantic -> mutation refused

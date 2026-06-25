@@ -1072,8 +1072,16 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("  tool-vocabulary FAILED (draft.tex names the toolchain, not the "
               "science -- §10): " + ", ".join(report.paper_tool_vocab), file=sys.stderr)
 
+    # Cross-document gate: a main-paper "Figure/Table S<n>" that points past the SI's float
+    # count is a silent dangling cross-reference (a real \ref cannot cross the compile
+    # boundary, so the within-document gate never sees it). It fails the combined gate.
+    if not report.paper_cross_doc_clean:
+        print("  cross-document FAILED (draft.tex cites SI floats that do not exist): "
+              + ", ".join(report.paper_cross_doc_refs), file=sys.stderr)
+
     # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent
-    # AND no residual fact macro AND the paper is tool-agnostic.
+    # AND no residual fact macro AND the paper is tool-agnostic AND every cross-document
+    # "Figure/Table S<n>" resolves.
     if report.passed:
         return 0
     return 1

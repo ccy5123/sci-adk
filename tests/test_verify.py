@@ -434,6 +434,52 @@ def test_verify_duplicate_label_fails_gate(tmp_path):
     assert report.passed is False
 
 
+# -- cross-document "Figure/Table S<n>" gate (main paper -> SI) ----------------
+# A real \ref cannot cross the compile boundary, so a main paper cites SI floats as the
+# plain text "Figure S1"; the within-document gate never sees it. This static gate counts
+# the SI's floats and fails the combined exit gate on a citation past that count.
+
+def test_verify_seeded_skeleton_is_cross_doc_clean(tmp_path):
+    # The compiler-rendered skeleton cites no "Figure S<n>", so the cross-doc gate is
+    # vacuously clean -- it must not false-fail an ordinary run.
+    spec = _numeric_spec("v-xdoc-skeleton", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    report = verify_run(run_dir)
+    assert report.paper_cross_doc_refs == []
+    assert report.paper_cross_doc_clean is True
+    assert report.passed is True
+
+
+def test_verify_resolved_cross_doc_s_ref_passes(tmp_path):
+    # draft cites "Figure S1"; the SI has one captioned figure (-> Figure S1) -> resolves.
+    spec = _numeric_spec("v-xdoc-ok", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"As shown in Figure S1, the property holds.")
+    _write_paper(run_dir, "si.tex",
+                 r"\begin{figure}[htbp]\caption{a}\label{fig:a}\end{figure}")
+    report = verify_run(run_dir)
+    assert report.paper_cross_doc_refs == []
+    assert report.paper_cross_doc_clean is True
+    assert report.passed is True
+
+
+def test_verify_dangling_cross_doc_s_ref_fails_gate_even_if_claims_reproduce(tmp_path):
+    # The headline cross-doc gate: "Figure S2" with only ONE SI figure is a silent dangling
+    # cross-reference. The claim reproduces AND each document is internally consistent, yet
+    # the combined gate fails -- the gap the within-document checker structurally cannot see.
+    spec = _numeric_spec("v-xdoc-ghost", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"See Figure S2 for the extended sweep.")
+    _write_paper(run_dir, "si.tex",
+                 r"\begin{figure}[htbp]\caption{a}\label{fig:a}\end{figure}")
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True             # claim signal unchanged
+    assert report.paper_consistent is True           # each doc internally clean
+    assert report.paper_cross_doc_refs == ["Figure S2"]
+    assert report.paper_cross_doc_clean is False
+    assert report.passed is False                    # combined gate fails
+
+
 def test_verify_residual_factref_macro_fails_gate(tmp_path):
     # The fidelity gate (the "moved line"): a rendered .tex must carry NO \evval/\status
     # macro (the engine substitutes them at render time). A residual one means substitution

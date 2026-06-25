@@ -314,6 +314,36 @@ def test_audit_g5_satisfied_by_declared_cost_metric():
     assert not [f for f in findings if f.guard == "G5"]
 
 
+@pytest.mark.parametrize(
+    "term, statement",
+    [
+        ("tractable", "a tractable canonical form computable for every input"),
+        ("real-time", "a real-time lookup that resolves each query on demand"),
+        ("latency", "a low latency decoder returning the structure per query"),
+        ("concise", "a concise integer code, one per molecule"),
+    ],
+)
+def test_audit_g5_flags_curated_high_precision_terms(term, statement):
+    # The curated reinforcement (tractable/real-time/latency/concise) each commits the
+    # author to a cost measurement -- with none declared, G5 must surface, naming the term.
+    h = _formal_hyp(
+        statement=statement, discriminating_cases=_CASES, epistemic_kind="unit_test",
+    )
+    g5 = [f for f in audit_spec_science(_spec([h])) if f.guard == "G5"]
+    assert len(g5) == 1
+    assert term in g5[0].message
+
+
+def test_audit_g5_curated_term_silenced_by_declared_cost_metric():
+    # The same override path as the original keywords: declaring the metric closes G5.
+    h = _formal_hyp(
+        statement="a tractable canonical form computable for every input",
+        discriminating_cases=_CASES, epistemic_kind="unit_test",
+        cost_metrics=["worst-case time complexity"],
+    )
+    assert not [f for f in audit_spec_science(_spec([h])) if f.guard == "G5"]
+
+
 def test_audit_compliant_hypothesis_is_quiet():
     # A confirmatory, reclassified, discriminating, cost-declared formal hypothesis trips only
     # the forward G3 reminder (a negative control is still required for a strict SUPPORTED).

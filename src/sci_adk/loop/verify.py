@@ -65,6 +65,7 @@ from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
 from sci_adk.render.consistency import (
     LatexRefReport,
+    check_cross_doc_s_refs,
     check_latex_ref_consistency,
 )
 from sci_adk.render.factref import find_unresolved_factrefs
@@ -73,8 +74,10 @@ from sci_adk.render.paper import check_paper_tool_vocabulary
 
 # The rendered paper documents verify re-checks for internal \ref<->\label integrity
 # (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN themselves; the
-# cross-DOCUMENT main<->SI \ref is DEFERRED (it needs the LaTeX xr package + a
-# compile-order dependency). A document absent from paper/ is simply skipped.
+# cross-DOCUMENT main<->SI reference (the plain-text "Figure S<n>" / "Table S<n>" a real
+# \ref cannot carry across the compile boundary) is gated SEPARATELY and statically by
+# _check_cross_doc_refs (it counts SI floats, no xr package, no recompile). A document
+# absent from paper/ is simply skipped.
 _PAPER_DOCS: tuple[str, ...] = ("draft.tex", "si.tex")
 
 # Per-hypothesis audit results. Strings (not an enum) keep the report trivially
@@ -144,9 +147,18 @@ class VerifyReport:
             ``si.tex`` are scanned (no gap where an author sneaks ``\\novelty`` into SI prose).
         paper_novelty_clean: True iff no paper document carries an unsupported novelty
             assertion (and True vacuously with no paper). Part of the HARD gate.
+        paper_cross_doc_refs: every plain-text "Figure S<n>" / "Table S<n>" the MAIN paper
+            (``draft.tex``) cites that points past the SI's float count -- a silent dangling
+            cross-document reference (the SI renumbers its floats ``S1, S2, ...`` and a real
+            ``\\ref`` cannot cross the compile boundary, so these are bare text the within-
+            document gate never sees). EMPTY when clean, or when either ``draft.tex`` or
+            ``si.tex`` is absent (the gate needs both documents).
+        paper_cross_doc_clean: True iff the main paper cites no dangling SI float (and True
+            vacuously when both documents are not present). Part of the HARD gate.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
-            paper_factref_clean and paper_tool_clean and paper_novelty_clean``. This is what
-            the CLI exits on; ``all_reproduced`` alone is the claim signal.
+            paper_factref_clean and paper_tool_clean and paper_novelty_clean and
+            paper_cross_doc_clean``. This is what the CLI exits on; ``all_reproduced`` alone
+            is the claim signal.
     """
 
     spec_id: str
@@ -161,6 +173,8 @@ class VerifyReport:
     paper_tool_clean: bool = field(default=True)
     paper_novelty_problems: Dict[str, List[str]] = field(default_factory=dict)
     paper_novelty_clean: bool = field(default=True)
+    paper_cross_doc_refs: List[str] = field(default_factory=list)
+    paper_cross_doc_clean: bool = field(default=True)
     passed: bool = field(default=False)
 
 
@@ -293,6 +307,13 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     paper_novelty_problems = _check_paper_novelty(run_dir, spec, novelty_decisions)
     paper_novelty_clean = not any(paper_novelty_problems.values())
 
+    # Cross-document gate: the main paper cites SI floats as plain text ("Figure S1") that a
+    # real \ref cannot carry across the compile boundary, so a "Figure S3" with only two SI
+    # figures is a silent dangling reference the within-document check never sees. Static
+    # count of the SI's floats -- READ-ONLY, no recompile, no xr package, no LLM.
+    paper_cross_doc_refs = _check_cross_doc_refs(run_dir)
+    paper_cross_doc_clean = not paper_cross_doc_refs
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -306,12 +327,15 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_tool_clean=paper_tool_clean,
         paper_novelty_problems=paper_novelty_problems,
         paper_novelty_clean=paper_novelty_clean,
+        paper_cross_doc_refs=paper_cross_doc_refs,
+        paper_cross_doc_clean=paper_cross_doc_clean,
         passed=(
             all_reproduced
             and paper_consistent
             and paper_factref_clean
             and paper_tool_clean
             and paper_novelty_clean
+            and paper_cross_doc_clean
         ),
     )
 
@@ -541,6 +565,28 @@ def _check_paper_consistency(run_dir: Path) -> Dict[str, LatexRefReport]:
                 doc.read_text(encoding="utf-8")
             )
     return reports
+
+
+def _check_cross_doc_refs(run_dir: Path) -> List[str]:
+    """Gate the MAIN paper's plain-text "Figure/Table S<n>" citations against the SI.
+
+    READ-ONLY (mirrors :func:`_check_paper_consistency`): reads ``run_dir/paper/draft.tex``
+    and ``run_dir/paper/si.tex`` and runs the pure :func:`check_cross_doc_s_refs`. The
+    cross-document relationship needs BOTH documents, so the gate is vacuous (returns ``[]``)
+    unless both are present -- consistent with the per-document checks skipping an absent
+    file, and avoiding a false dangling on a single-document run (the within-run compiler
+    always emits draft.tex and si.tex together). Returns the dangling "Figure/Table S<n>"
+    citations (empty = clean / a document missing).
+    """
+    paper_dir = run_dir / "paper"
+    draft = paper_dir / "draft.tex"
+    si = paper_dir / "si.tex"
+    if not (draft.is_file() and si.is_file()):
+        return []
+    report = check_cross_doc_s_refs(
+        draft.read_text(encoding="utf-8"), si.read_text(encoding="utf-8")
+    )
+    return report.unresolved_refs
 
 
 def _check_paper_factrefs(run_dir: Path) -> Dict[str, List[str]]:

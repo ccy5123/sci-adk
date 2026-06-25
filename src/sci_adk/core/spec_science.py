@@ -53,6 +53,11 @@ _COST_KEYWORDS: dict[str, str] = {
     "lightweight": "a space and/or time measurement substantiating 'lightweight'",
     "practical": "a concrete cost measurement (time and/or space) substantiating 'practical'",
     "optimal": "the cost measurement + the bound it is optimal against",
+    "tractable": "a time/space-complexity measurement substantiating 'tractable' "
+    "(the bound that makes the problem tractable)",
+    "real-time": "a latency / runtime measurement substantiating 'real-time'",
+    "latency": "a latency / runtime measurement substantiating 'latency'",
+    "concise": "a space/size measurement (bytes or bit-length) substantiating 'concise'",
 }
 
 # Cost-metric statistic NAMES that, when present in cost_metrics or the rule's statistic,
