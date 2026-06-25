@@ -1,0 +1,33 @@
+{
+  "id": "evi-20260616-054027-0750cfe3",
+  "created_at": "2026-06-16T05:40:27.373442Z",
+  "spec_id": "t1-demo",
+  "kind": "experiment_run",
+  "provenance": {
+    "code_ref": "f5dda82512439ac37dba7b3d25d2bf449301f20a",
+    "data_ref": null,
+    "seed": null,
+    "environment": "docker:sci-adk-python-base, image_id:f4b2801533cb",
+    "cost": null
+  },
+  "result": {
+    "type": "quantitative",
+    "point": 3.0,
+    "effect_size": 3.0,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "{\"H2O\": {\"encoding\": 10, \"status\": \"success\"}, \"CO2\": {\"encoding\": 15, \"status\": \"success\"}, \"CH4\": {\"encoding\": 6, \"status\": \"success\"}}",
+    "artifact_ref": null
+  },
+  "bears_on": [
+    {
+      "target_id": "hyp-001",
+      "direction": "supports",
+      "weight": 1.0
+    }
+  ],
+  "supersedes": null
+}

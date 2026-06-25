@@ -1,0 +1,31 @@
+{
+  "id": "claim-hyp-001",
+  "spec_id": "t1-demo",
+  "answers": "hyp-001",
+  "statement": "We propose developing a Gödel-style numbering system for molecular graphs using number-theoretic operations",
+  "status": "proposed",
+  "confidence": {
+    "type": "graded",
+    "value": null,
+    "level": "none",
+    "basis": "qualitative rule inconclusive: no LLM-judge injected; route qualitative criterion to a judge or human (Decision 4)"
+  },
+  "evidence_set": [
+    {
+      "evidence_id": "evi-20260616-054027-0750cfe3",
+      "role": "supporting"
+    }
+  ],
+  "scope_limitations": "",
+  "mode": "exploratory",
+  "renders_to": null,
+  "history": [
+    {
+      "at": "2026-06-16T05:40:27.374102Z",
+      "from_status": "proposed",
+      "to_status": "proposed",
+      "triggered_by": "evi-20260616-054027-0750cfe3",
+      "note": "Initial evaluation via DecisionEngine"
+    }
+  ]
+}

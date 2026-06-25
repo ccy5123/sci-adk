@@ -221,6 +221,13 @@ dist-ssr/
 # Evidence/Spec/Claims/Code are git-tracked for provenance
 runs/*/data/
 
+# Acquired literature PDFs (binary; the .json metadata + references.bib are
+# tracked, and the PDFs are re-acquirable via the paperforge manifest)
+runs/*/artifacts/literature/pdfs/*.pdf
+
+# Resumable-loop checkpoint state (transient; Evidence/Spec/Claims are the record)
+runs/*/checkpoints/
+
 # LaTeX temporary files
 runs/*/paper/*.aux
 runs/*/paper/*.log

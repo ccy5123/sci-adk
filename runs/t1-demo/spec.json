@@ -1,0 +1,48 @@
+{
+  "id": "t1-demo",
+  "created_at": "2026-06-16T05:40:26.621873Z",
+  "version": 1,
+  "raw_proposal": {
+    "background": "Molecular graphs provide a natural representation of chemical structure as vertices (atoms) and edges (bonds). Encoding these graphs as integers could enable systematic computational treatment of molecular properties. However, an injective encoding scheme must balance uniqueness with computational tractability.",
+    "goal": "We propose developing a Gödel-style numbering system for molecular graphs using number-theoretic operations.\n\nHypothesis: Assigning prime numbers to chemical elements and encoding bond structures as exponent products yields a bijective mapping between molecules and natural numbers.",
+    "method": "Our approach uses:\n- Prime factorization-based encoding\n- Element-wise prime assignment (H=2, C=3, O=5, N=7, etc.)\n- Bond structure encoded as exponents in prime factorization",
+    "expected_output": "We will deliver a working encoding algorithm that:\n- Maps simple molecules (H2O, CO2, CH4) to unique integers\n- Demonstrates injectivity for a test set of 10 molecules\n- Provides decoding algorithm to recover molecular structure from encoded number"
+  },
+  "hypotheses": [
+    {
+      "id": "hyp-001",
+      "statement": "We propose developing a Gödel-style numbering system for molecular graphs using number-theoretic operations",
+      "mode": "exploratory",
+      "decision_rule": {
+        "kind": "qualitative",
+        "expression": "Expert judgment based on evidence",
+        "params": null
+      }
+    },
+    {
+      "id": "hyp-002",
+      "statement": "Hypothesis: Assigning prime numbers to chemical elements and encoding bond structures as exponent products yields a bijective mapping between molecules and natural numbers.",
+      "mode": "exploratory",
+      "decision_rule": {
+        "kind": "qualitative",
+        "expression": "Expert judgment based on evidence",
+        "params": null
+      }
+    }
+  ],
+  "method": {
+    "approaches": [
+      "Our approach uses:\n- Prime factorization-based encoding\n- Element-wise prime assignment (H=2, C=3, O=5, N=7, etc.)\n- Bond structure encoded as exponents in prime factorization"
+    ],
+    "tools": []
+  },
+  "target_claims": [
+    {
+      "id": "claim-001",
+      "statement": "We will deliver a working encoding algorithm that:\n- Maps simple molecules (H2O, CO2, CH4) to unique integers\n- Demonstrates injectivity for a test set of 10 molecules\n- Provides decoding algorithm to recover molecular structure from encoded number",
+      "answers": "hyp-001"
+    }
+  ],
+  "amendment_rationale": null,
+  "prior_version_id": null
+}
