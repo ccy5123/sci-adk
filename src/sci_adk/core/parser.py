@@ -18,7 +18,6 @@ from sci_adk.core.spec import (
     DecisionRule,
     MethodPlan,
     TargetClaim,
-    ToolRef,
     HypothesisMode,
     DecisionRuleKind,
 )

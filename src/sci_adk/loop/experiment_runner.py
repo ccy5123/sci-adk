@@ -13,7 +13,6 @@ from typing import Any, Dict, Optional
 
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.spec import Spec
-from sci_adk.runner.docker_executor import DockerExecutor
 
 
 class ExperimentRunner:
