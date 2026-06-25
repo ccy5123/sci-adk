@@ -90,6 +90,40 @@ freeze, edit, or relax `pubreqs.json` — a gate-bearing field only changes by a
 orchestrator re-freeze. If a requirement is infeasible from the record, STOP and return a
 structured blocker (do not pad sections or soften the contract to make the gate pass).
 
+## Workspace Submission — the Merged Manuscript (`/sci package`)
+
+When the orchestrator spawns you under `/sci package` (the WORKSPACE submission, not the
+per-run `/sci publish` render), your job is ONE merged manuscript synthesizing ALL the
+workspace's runs to the near-submission [1] contract — not a per-run `paper/`. Load
+`Skill("science-workflow-package")` for the full procedure. You author ONE `main.tex` (+
+`si.tex`) across every run:
+
+- **Standalone Abstract** — self-contained; ≤ the contract's `abstract_max_words` when set.
+- **Introduction** — motivation → gap → contribution, positioned against the record's
+  prior-work / novelty decisions (do not invent a contribution the record does not back).
+- **Methods** — fully reproducible; state plainly what it PROVES and what it does NOT.
+- **Results** — per logical block: effect size + uncertainty + robustness / domain. Author
+  each so that EVERY quantitative statement traces to a recorded Claim and is emitted behind
+  the value-fidelity markup (`\evval`/`\status`) so the gate can BIND the number to the
+  record. Confirmatory and exploratory results are clearly SEPARATED.
+- **Discussion** — interpretation, limits, honest negatives (null / negative / refuted are
+  first-class, not buried), and future work.
+- Throughout: NAME THE SCIENCE, not the toolchain (the `paper_tool_clean` rule extends to
+  the merged manuscript) — assert no value that is not a reproduced Claim.
+
+[HARD] Drop the merged manuscript at `<ws>/package_src/main.tex` (and the bibliography at
+`<ws>/package_src/references.bib`) — the author-manuscript input path the assembler reads.
+`sci-adk package <ws>` PRESERVES that `main.tex` verbatim into `package/01_manuscript/` and
+flips `main_tex_authored` (it never overwrites a hand-authored manuscript; absent it, the
+assembler emits a deterministic record-derived skeleton). The drop point is OUTSIDE
+`package/` ON PURPOSE so a rebuild of `package/` does not erase your prose. Do NOT write
+into `package/01_manuscript/main.tex` directly — `package` would regenerate around it; write
+to `package_src/`, then let `sci-adk package` assemble. You author TO the frozen
+`<ws>/pkgreqs.json` contract (declared `required_sections` present as real `\section{...}`,
+`reference_style` wired, abstract within `abstract_max_words`); you NEVER freeze or relax
+it. If a required result is missing from the record, STOP and return a structured blocker —
+do not fabricate a number or pad a section to make the gate pass.
+
 ## Input Contract (from the orchestrator)
 
 - `[FROZEN SPEC REFERENCE]` (spec_id, spec_digest) + the run id.
@@ -97,6 +131,8 @@ structured blocker (do not pad sections or soften the contract to make the gate 
   narrate.
 - The frozen `runs/<id>/pubreqs.json` path when publishing requirements were declared
   (absent → no requirements gate; author the paper as before).
+- Under `/sci package`: the workspace root `<ws>`, the frozen `<ws>/pkgreqs.json` path, and
+  the set of runs to synthesize. Drop the merged manuscript at `<ws>/package_src/main.tex`.
 
 ## Return Contract (to the orchestrator)
 

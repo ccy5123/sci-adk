@@ -45,19 +45,21 @@ _KIT_FILES = (
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
-    # the sci orchestration hub + 6 knowledge-library Skills
+    # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
     ".claude/skills/science-workflow-prereg/SKILL.md",
     ".claude/skills/science-workflow-experiment/SKILL.md",
     ".claude/skills/science-workflow-replicate/SKILL.md",
     ".claude/skills/science-workflow-publish/SKILL.md",
+    ".claude/skills/science-workflow-package/SKILL.md",
     ".claude/skills/science-tool-academic-search/SKILL.md",
-    # /sci thin command routers (root + 6 subcommands)
+    # /sci thin command routers (root + 7 subcommands)
     ".claude/commands/sci.md",
     ".claude/commands/sci/plan.md",
     ".claude/commands/sci/experiment.md",
     ".claude/commands/sci/publish.md",
+    ".claude/commands/sci/package.md",
     ".claude/commands/sci/verify.md",
     ".claude/commands/sci/status.md",
     ".claude/commands/sci/replicate.md",

@@ -56,8 +56,8 @@ from pydantic import BaseModel, Field
 # command and ``researcher`` persona were removed in the sci-adk-as-moai pivot; this
 # list now installs the FULL kit -- the two enforcement hooks, the
 # ``science-orchestrator`` output style, the 9 worker/guard agents (8 v1 + the
-# v2-promoted ``expert-replicator``), the 7 ``sci``/``science-*`` knowledge-library
-# Skills, and the 7 ``/sci`` command routers.
+# v2-promoted ``expert-replicator``), the 8 ``sci``/``science-*`` knowledge-library
+# Skills, and the 8 ``/sci`` command routers.
 # Every entry is copied through the same non-clobbering ``_copy_nonclobber`` path
 # (the loop's ``dst.parent.mkdir(parents=True)`` creates ``.claude/agents/``,
 # ``.claude/skills/<name>/`` and ``.claude/commands/sci/`` as needed -- no
@@ -81,19 +81,21 @@ _PLAIN_ASSETS = (
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
-    # the sci orchestration hub + 6 knowledge-library Skills
+    # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
     ".claude/skills/science-workflow-prereg/SKILL.md",
     ".claude/skills/science-workflow-experiment/SKILL.md",
     ".claude/skills/science-workflow-replicate/SKILL.md",
     ".claude/skills/science-workflow-publish/SKILL.md",
+    ".claude/skills/science-workflow-package/SKILL.md",
     ".claude/skills/science-tool-academic-search/SKILL.md",
-    # /sci thin command routers (root + 6 subcommands)
+    # /sci thin command routers (root + 7 subcommands)
     ".claude/commands/sci.md",
     ".claude/commands/sci/plan.md",
     ".claude/commands/sci/experiment.md",
     ".claude/commands/sci/publish.md",
+    ".claude/commands/sci/package.md",
     ".claude/commands/sci/verify.md",
     ".claude/commands/sci/status.md",
     ".claude/commands/sci/replicate.md",
