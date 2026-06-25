@@ -14,9 +14,9 @@ metadata:
   version: "1.0.0"
   category: "workflow"
   status: "active"
-  updated: "2026-06-22"
+  updated: "2026-06-25"
   modularized: "false"
-  tags: "sci-adk, experiment, evidence, claim, decision-rule, bears-on, anti-harking, resolve, verdict"
+  tags: "sci-adk, experiment, evidence, claim, decision-rule, bears-on, anti-harking, resolve, verdict, science-guards, negative-control, falsifiability, strict-science"
 
 # MoAI Extension: Progressive Disclosure
 progressive_disclosure:
@@ -26,7 +26,7 @@ progressive_disclosure:
 
 # MoAI Extension: Triggers
 triggers:
-  keywords: ["execute", "append evidence", "derive claim", "decision rule", "bears on", "null result", "checkpoint", "resolve", "verdict"]
+  keywords: ["execute", "append evidence", "derive claim", "decision rule", "bears on", "null result", "checkpoint", "resolve", "verdict", "science guards", "negative control", "falsifiability", "strict science", "discriminating cases"]
   agents: ["expert-experimentalist", "expert-statistician"]
   phases: ["experiment"]
 ---
@@ -85,6 +85,34 @@ to report, not an edit, and not a reason to estimate.
   verdict.
 - Make CONTESTED / REFUTED outcomes explicit — they are results, not failures. Claims
   are non-monotone: a status can move as new Evidence arrives.
+
+### Science guards in the experiment stage (G1/G2/G3)
+
+prereg already SET the G3 target and DECLARED the G1/G2/G4/G5 fields at freeze (see
+`science-workflow-prereg`); the experiment stage REALIZES the target and HONORS the
+verdict gate. For what each guard MEANS and WHY, load
+`Skill("science-foundation-rigor")` §"The science guards" — here is only the procedure.
+
+**3a — produce the G3 negative control (expert-experimentalist).** Realize the
+falsifiability target the frozen MethodPlan pre-registered: run a deliberately broken
+variant of the method, then `sci-adk append-evidence` it as a `NEGATIVE_CONTROL` Evidence
+item — `outcome == not_supported`, covering the declared `discriminating_cases`, with REAL
+execution provenance (it was actually RUN, not asserted), and `bears_on=[]` so it NEVER
+enters the DecisionEngine (a mutant's refutation must not contaminate the hypothesis
+verdict). It lives in the append-only log (digest-covered; `verify` re-derives). Without
+it, a binding SUPPORTS cannot pass G3 under `strict_science`.
+
+**3b — honor the strict verdict gate (expert-statistician).** `sci-adk derive-claim` (and
+`sci-adk run`) default to `strict_science`: a binding `formal` + `threshold` SUPPORTS is
+HARD-halted if G1 (a known result framed as `finding`), G2 (no `discriminating_cases`), or
+G3 (no qualifying `NEGATIVE_CONTROL`) fails. A halt is the referee working — resolve it by
+recording the missing thing (add the negative control via `append-evidence`, or
+`sci-adk amend-spec` to declare `discriminating_cases` / reclassify `epistemic_kind` /
+assert novelty) then re-derive. Never route around it with `--no-strict-science` on a real
+research run — that opt-out exists for low-level / build-harness callers, not to silence a
+genuinely weak claim. `sci-adk verify --strict-science` re-checks G1/G2/G3 read-only: a
+deleted negative control or stripped `discriminating_cases` makes a recorded strict
+SUPPORTED DIVERGE (tamper-evidence).
 
 ### Proof / qualitative checkpoints
 

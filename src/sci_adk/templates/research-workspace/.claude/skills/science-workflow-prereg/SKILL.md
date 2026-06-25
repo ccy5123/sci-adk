@@ -14,9 +14,9 @@ metadata:
   version: "1.0.0"
   category: "workflow"
   status: "active"
-  updated: "2026-06-22"
+  updated: "2026-06-25"
   modularized: "false"
-  tags: "sci-adk, prereg, spec, freeze, novelty, decision-rule, anti-harking, amendment"
+  tags: "sci-adk, prereg, spec, freeze, novelty, decision-rule, anti-harking, amendment, science-guards, falsifiability"
 
 # MoAI Extension: Progressive Disclosure
 progressive_disclosure:
@@ -26,7 +26,7 @@ progressive_disclosure:
 
 # MoAI Extension: Triggers
 triggers:
-  keywords: ["pre-registration", "spec freeze", "novelty search", "prior art", "decision rule", "four panes", "amendment", "init-spec"]
+  keywords: ["pre-registration", "spec freeze", "novelty search", "prior art", "decision rule", "four panes", "amendment", "init-spec", "science guards", "negative control", "discriminating cases", "epistemic kind", "falsifiability"]
   agents: ["manager-prereg", "expert-literature"]
   phases: ["plan"]
 ---
@@ -97,6 +97,40 @@ on record (never auto-carry one kind's result to the other). Each flag gets a
 one-line recorded basis. Then freeze via `sci-adk init-spec`, which emits
 `spec_id` + `spec_digest` + a checkpoint receipt (S1–S5 enforced). From here the Spec
 is immutable except by explicit amendment.
+
+### Science guards at freeze (G1–G5)
+
+At draft/freeze, declare the claim-strength guard fields per hypothesis so the Spec is
+not silently weak. (For what each guard MEANS and WHY, load
+`Skill("science-foundation-rigor")` §"The science guards" — here is only WHEN, which
+field, via which verb.) Set these in the draft (Pass 1), or add later by amendment:
+
+- **G1 analyticity** — declare `epistemic_kind` (`finding` / `capability_check` /
+  `unit_test`). A known result framed as `finding` is refused later under
+  `strict_science`: reclassify it, or assert novelty (`novelty_result` /
+  `novelty_method` with a `found_nothing` search) — verifying an OPEN conjecture by
+  examples is legitimate, and the novelty assertion is the open-question signal.
+- **G2 test-power** — declare `discriminating_cases[]`: hard cases that SEPARATE a
+  correct method from a plausibly-broken one (each with its reason).
+- **G4 mode-coherence** — a frozen pass/fail `threshold` rule belongs to a
+  `confirmatory` hypothesis; set `mode = confirmatory` (an exploratory hypothesis's
+  rule should be a guide, not a binding gate).
+- **G5 claim-cost** — if the hypothesis or its target claims use a practical-property
+  term (index / efficient / scalable / fast / compact / succinct / lightweight /
+  practical / optimal), declare `cost_metrics` (the size/time measurement that makes
+  the cost claim checkable).
+- **G3 falsifiability target** — in the MethodPlan, pre-register that the experiment
+  stage MUST produce a `NEGATIVE_CONTROL` Evidence item: a deliberately broken variant
+  whose `outcome == not_supported`, covering the declared `discriminating_cases`.
+  prereg SETS the target; the experiment stage PRODUCES the Evidence (it never enters
+  the DecisionEngine).
+
+These triggering fields are frozen with the Spec (anti-HARKing). The **spec gate**
+(`audit_spec_science`, run by `init-spec`) is ALWAYS-on and NEVER halts — it surfaces
+G1/G2/G4/G5 as recording-type checkpoints (like prior-work / novelty), resolved by an
+amendment, so a weak Spec is never silently accepted. The HARD verdict-gate halts
+(G1/G2/G3 under `strict_science`) fire LATER, in the experiment stage — see
+`science-workflow-experiment`.
 
 ### 2-kind novelty (the rule)
 
