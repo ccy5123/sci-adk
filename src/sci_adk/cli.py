@@ -332,6 +332,71 @@ def _add_verb_parsers(sub) -> None:
              "T-1 Spec",
     )
 
+    # pubreqs: freeze the F1 publishing-requirements contract into runs/<id>/pubreqs.json.
+    pubreqs = sub.add_parser(
+        "pubreqs",
+        help="freeze the publishing-requirements contract (F1) into "
+             "runs/<id>/pubreqs.json with its tamper-evidence digest. The umbrella "
+             "`verify` gate (paper_requirements_clean) checks the rendered paper against it",
+    )
+    pubreqs_sub = pubreqs.add_subparsers(dest="pubreqs_command", required=True)
+    pubreqs_freeze = pubreqs_sub.add_parser(
+        "freeze",
+        help="freeze pubreqs.json for an existing run dir (mirrors init-spec): write the "
+             "FROZEN publishing contract + its digest beside spec.json (NOT inside paper/, "
+             "so render never clobbers it)",
+    )
+    pubreqs_freeze.add_argument(
+        "run_dir", help="path to an existing runs/<spec.id>/ dir (must hold spec.json)"
+    )
+    pubreqs_freeze.add_argument(
+        "--defaults", action="store_true",
+        help="use the proposed defaults (IMRaD sections, font policy on, image_min_dpi 300, "
+             "reproduction bundle on); the elicitation fast-path",
+    )
+    pubreqs_freeze.add_argument(
+        "--venue", default=None, help="free-text venue label (arXiv/JOSS/journal)"
+    )
+    pubreqs_freeze.add_argument(
+        "--required-section", action="append", default=None, metavar="NAME",
+        dest="required_sections",
+        help="a section that MUST be present in draft.tex (repeatable). With --defaults, "
+             "appends to the IMRaD set; without, replaces it (default: none)",
+    )
+    pubreqs_freeze.add_argument(
+        "--no-font-policy", dest="figure_font_policy", action="store_false",
+        default=True, help="disable the F2 figure font policy gate (default on)",
+    )
+    pubreqs_freeze.add_argument(
+        "--image-min-dpi", type=int, default=None, metavar="DPI",
+        help="raster figure minimum effective DPI (default 300 with --defaults; omit to "
+             "disable the DPI gate)",
+    )
+    pubreqs_freeze.add_argument(
+        "--no-image-dpi", dest="no_image_dpi", action="store_true",
+        help="explicitly disable the image DPI gate even under --defaults",
+    )
+    pubreqs_freeze.add_argument(
+        "--reference-style", default=None, metavar="STYLE",
+        help="declared bib style checked wired in draft.tex (e.g. plainnat / natbib)",
+    )
+    pubreqs_freeze.add_argument(
+        "--max-pages", type=int, default=None, metavar="N",
+        help="ADVISORY page limit (surfaced, never gated -- no page count without a compile)",
+    )
+    pubreqs_freeze.add_argument(
+        "--max-words", type=int, default=None, metavar="N",
+        help="deterministic word-count ceiling over the rendered prose (omit to disable)",
+    )
+    pubreqs_freeze.add_argument(
+        "--no-repro-bundle", dest="reproduction_bundle", action="store_false",
+        default=True, help="disable the F3 reproduction-bundle gate (default on)",
+    )
+    pubreqs_freeze.add_argument(
+        "--advisory", action="append", default=None, metavar="TEXT",
+        help="a free-form advisory condition surfaced in verify but NEVER gated (repeatable)",
+    )
+
     # amend-spec: apply Spec.amend(rationale) + write the checkpoint receipt.
     amend_spec = sub.add_parser(
         "amend-spec",
@@ -722,6 +787,97 @@ def _cmd_init_spec(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pubreqs_freeze(args: argparse.Namespace) -> int:
+    """Freeze the F1 publishing-requirements contract into runs/<id>/pubreqs.json.
+
+    Mirrors ``init-spec``: reads the run's recorded ``spec.json`` for the ``spec_id``, builds
+    a :class:`PubReqs` from the CLI options (a ``--defaults`` fast-path supplies the IMRaD
+    sections + font policy on + image_min_dpi 300 + reproduction bundle on), computes the
+    tamper-evidence digest, and writes the FROZEN contract to ``runs/<id>/pubreqs.json`` at the
+    RUN ROOT (beside spec.json, NOT inside paper/ so ``render`` never clobbers it). The verify
+    umbrella gate (``paper_requirements_clean``) then checks the rendered paper against it.
+    """
+    from sci_adk.core.pubreqs import (
+        DEFAULT_IMAGE_MIN_DPI,
+        DEFAULT_REQUIRED_SECTIONS,
+        PubReqs,
+    )
+    from sci_adk.provenance import pubreqs_digest
+
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+    try:
+        spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+    except ValueError as e:
+        print(f"error: malformed spec.json in {run_dir}: {e}", file=sys.stderr)
+        return 1
+
+    # Required sections: --defaults seeds the IMRaD set; explicit --required-section entries
+    # APPEND under --defaults, or REPLACE (start empty) without it.
+    sections: list[str] = list(DEFAULT_REQUIRED_SECTIONS) if args.defaults else []
+    if args.required_sections:
+        sections.extend(args.required_sections)
+
+    # image_min_dpi: --defaults -> 300 unless --no-image-dpi; an explicit --image-min-dpi
+    # always wins; without --defaults and without an explicit value -> None (gate off).
+    if args.no_image_dpi:
+        image_min_dpi = None
+    elif args.image_min_dpi is not None:
+        image_min_dpi = args.image_min_dpi
+    elif args.defaults:
+        image_min_dpi = DEFAULT_IMAGE_MIN_DPI
+    else:
+        image_min_dpi = None
+
+    pubreqs = PubReqs(
+        spec_id=spec.id,
+        venue=args.venue,
+        required_sections=sections,
+        figure_font_policy=args.figure_font_policy,
+        image_min_dpi=image_min_dpi,
+        reference_style=args.reference_style,
+        max_pages=args.max_pages,
+        max_words=args.max_words,
+        reproduction_bundle=args.reproduction_bundle,
+        advisory=list(args.advisory) if args.advisory else [],
+    )
+    # The digest is computed over the gate-bearing contract and STORED in the artifact
+    # (design §1.1), unlike the Spec's on-demand digest. model_copy re-freezes with it set.
+    digest = pubreqs_digest(pubreqs)
+    frozen = pubreqs.model_copy(update={"digest": digest})
+
+    pubreqs_path = run_dir / "pubreqs.json"
+    pubreqs_path.write_text(
+        frozen.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"pubreqs freeze: froze publishing requirements for '{spec.id}' -> {pubreqs_path}")
+    print(f"  digest (sha256): {digest}")
+    print(
+        f"  required_sections: {', '.join(sections) if sections else '(none)'}"
+    )
+    print(f"  figure_font_policy: {'on' if frozen.figure_font_policy else 'off'}")
+    print(
+        f"  image_min_dpi: {image_min_dpi if image_min_dpi is not None else 'off'}"
+    )
+    print(
+        "  reference_style: "
+        f"{frozen.reference_style if frozen.reference_style else '(none)'}"
+    )
+    print(f"  max_words: {frozen.max_words if frozen.max_words is not None else '(none)'}")
+    print(
+        f"  reproduction_bundle: {'on' if frozen.reproduction_bundle else 'off'}"
+    )
+    if frozen.max_pages is not None:
+        print(f"  max_pages (advisory): {frozen.max_pages}")
+    if frozen.advisory:
+        print(f"  advisory ({len(frozen.advisory)}): surfaced in verify, never gated")
+    print(f"  next: sci-adk verify {run_dir}")
+    return 0
+
+
 def _cmd_amend_spec(args: argparse.Namespace) -> int:
     """Amend the run's recorded Spec + record the checkpoint receipt (S5).
 
@@ -1079,9 +1235,38 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("  cross-document FAILED (draft.tex cites SI floats that do not exist): "
               + ", ".join(report.paper_cross_doc_refs), file=sys.stderr)
 
+    # Publishing-requirements gate (F1, design §1.3): the umbrella that consumes F2 (font/DPI)
+    # + F3 (reproduction bundle) + section/reference/word-count checks the frozen pubreqs.json
+    # declared. Absent pubreqs.json -> vacuously clean (no line). advisory/max_pages are
+    # surfaced but NEVER gated, so a clean run with a contract is reported OK.
+    pubreqs_path = run_dir / "pubreqs.json"
+    if pubreqs_path.is_file():
+        if report.paper_requirements_clean:
+            print("  publishing requirements: OK (declared requirements met)")
+        else:
+            print("  publishing requirements FAILED (declared requirements not met):",
+                  file=sys.stderr)
+            for problem in report.paper_requirements_problems:
+                print(f"    - {problem}", file=sys.stderr)
+        # ADVISORY surfacing (never gated): the contract's free-form advisory + max_pages.
+        from sci_adk.core.pubreqs import PubReqs
+
+        try:
+            pr = PubReqs.model_validate(
+                json.loads(pubreqs_path.read_text(encoding="utf-8"))
+            )
+        except ValueError:
+            pr = None
+        if pr is not None:
+            if pr.max_pages is not None:
+                print(f"  publishing advisory: max_pages {pr.max_pages} "
+                      "(advisory only -- no page count without a compile)")
+            for note in pr.advisory:
+                print(f"  publishing advisory: {note} (advisory only -- not gated)")
+
     # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent
     # AND no residual fact macro AND the paper is tool-agnostic AND every cross-document
-    # "Figure/Table S<n>" resolves.
+    # "Figure/Table S<n>" resolves AND every declared publishing requirement is met.
     if report.passed:
         return 0
     return 1
@@ -1328,6 +1513,8 @@ def main(argv=None) -> int:
         return _cmd_run(args)
     if args.command == "init-spec":
         return _cmd_init_spec(args)
+    if args.command == "pubreqs":
+        return _cmd_pubreqs_freeze(args)
     if args.command == "amend-spec":
         return _cmd_amend_spec(args)
     if args.command == "execute":

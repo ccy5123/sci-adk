@@ -50,6 +50,7 @@ from typing import Dict, List, Literal, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
+from sci_adk.core.pubreqs import PubReqs
 from sci_adk.core.spec import Hypothesis, Spec
 from sci_adk.core.validity import (
     ValidityHalt,
@@ -71,6 +72,13 @@ from sci_adk.render.consistency import (
 from sci_adk.render.factref import find_unresolved_factrefs
 from sci_adk.render.novelty import find_unsupported_novelty
 from sci_adk.render.paper import check_paper_tool_vocabulary
+from sci_adk.render.pubreqs_checks import (
+    figure_font_policy_problems,
+    image_dpi_problems,
+    max_words_problems,
+    reference_style_problems,
+    required_sections_problems,
+)
 
 # The rendered paper documents verify re-checks for internal \ref<->\label integrity
 # (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN themselves; the
@@ -155,10 +163,19 @@ class VerifyReport:
             ``si.tex`` is absent (the gate needs both documents).
         paper_cross_doc_clean: True iff the main paper cites no dangling SI float (and True
             vacuously when both documents are not present). Part of the HARD gate.
+        paper_requirements_problems: the F1 publishing-requirements failures (design §1.3) the
+            frozen ``pubreqs.json`` declared and the rendered paper does NOT meet -- missing
+            required sections, a stripped F2 font preamble, a below-threshold raster DPI, an
+            unwired reference style, an over-limit word count, or a missing reproduction
+            bundle. EMPTY when the contract is met OR when there is NO ``pubreqs.json`` (a run
+            with no declared requirements is vacuously clean -- backward compatible). ADVISORY
+            items and ``max_pages`` are NEVER in this list (they are surfaced, never gated).
+        paper_requirements_clean: True iff no declared publishing requirement failed (and True
+            vacuously when ``pubreqs.json`` is absent). Part of the HARD gate.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
-            paper_cross_doc_clean``. This is what the CLI exits on; ``all_reproduced`` alone
-            is the claim signal.
+            paper_cross_doc_clean and paper_requirements_clean``. This is what the CLI exits
+            on; ``all_reproduced`` alone is the claim signal.
     """
 
     spec_id: str
@@ -175,6 +192,8 @@ class VerifyReport:
     paper_novelty_clean: bool = field(default=True)
     paper_cross_doc_refs: List[str] = field(default_factory=list)
     paper_cross_doc_clean: bool = field(default=True)
+    paper_requirements_problems: List[str] = field(default_factory=list)
+    paper_requirements_clean: bool = field(default=True)
     passed: bool = field(default=False)
 
 
@@ -314,6 +333,14 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     paper_cross_doc_refs = _check_cross_doc_refs(run_dir)
     paper_cross_doc_clean = not paper_cross_doc_refs
 
+    # Publishing-requirements gate (F1, design/paper-publishing-requirements.md §1.3): the
+    # umbrella gate that consumes F2 (font/DPI) + F3 (reproduction bundle) + the section/
+    # reference/word-count checks the FROZEN pubreqs.json declares. READ-ONLY, no recompile,
+    # no LLM. When pubreqs.json is ABSENT -> vacuously clean (every existing run is unchanged
+    # -- backward compatible). advisory + max_pages are surfaced (CLI) but NEVER gated.
+    paper_requirements_problems = _check_paper_requirements(run_dir, evidence)
+    paper_requirements_clean = not paper_requirements_problems
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -329,6 +356,8 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_novelty_clean=paper_novelty_clean,
         paper_cross_doc_refs=paper_cross_doc_refs,
         paper_cross_doc_clean=paper_cross_doc_clean,
+        paper_requirements_problems=paper_requirements_problems,
+        paper_requirements_clean=paper_requirements_clean,
         passed=(
             all_reproduced
             and paper_consistent
@@ -336,6 +365,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             and paper_tool_clean
             and paper_novelty_clean
             and paper_cross_doc_clean
+            and paper_requirements_clean
         ),
     )
 
@@ -655,6 +685,150 @@ def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
     if not draft.is_file():
         return []
     return check_paper_tool_vocabulary(draft.read_text(encoding="utf-8"))
+
+
+# -- F1 publishing-requirements gate (design §1.3) ---------------------------
+
+def _check_paper_requirements(
+    run_dir: Path, evidence: List[EvidenceItem]
+) -> List[str]:
+    """Run the deterministic checks the FROZEN ``pubreqs.json`` declares (F1, design §1.3).
+
+    READ-ONLY (mirrors the other ``_check_paper_*`` helpers): reads ``run_dir/pubreqs.json``
+    (the frozen publishing contract), ``run_dir/paper/draft.tex``, the co-located rasters, and
+    ``run_dir/paper/reproduce.py`` -- never recompiles, never writes, never calls an LLM. Runs
+    ONLY the requirements the contract turns on, and returns the failure lines (empty = clean).
+
+    Backward compatibility: when ``pubreqs.json`` is ABSENT the run declared no requirements,
+    so this returns ``[]`` (vacuously clean) and the umbrella gate is a no-op -- every existing
+    run keeps passing exactly as before. ADVISORY items and ``max_pages`` are NEVER gated here
+    (no deterministic page count exists without a compile); the CLI surfaces them separately.
+
+    The checks (design §1.3 table), each guarded by its contract field:
+      - required_sections -> each named ``\\section{...}`` present in draft.tex;
+      - figure_font_policy -> the F2 font preamble present for a figure-bearing draft;
+      - image_min_dpi      -> every raster ``\\includegraphics`` >= the threshold DPI;
+      - reference_style    -> the declared bib style wired in draft.tex;
+      - max_words          -> the prose word count within the limit;
+      - reproduction_bundle -> ``paper/reproduce.py`` present + referencing recorded
+        ``code_ref``s (FAIL-OPEN for a pointer-only bundle, design §6 OF-4 -- see
+        :func:`_reproduction_bundle_problems`).
+    """
+    pubreqs_path = run_dir / "pubreqs.json"
+    if not pubreqs_path.is_file():
+        return []  # no declared requirements -> vacuously clean (backward compatible)
+
+    pubreqs = PubReqs.model_validate(
+        json.loads(pubreqs_path.read_text(encoding="utf-8"))
+    )
+
+    draft = run_dir / "paper" / "draft.tex"
+    draft_tex = draft.read_text(encoding="utf-8") if draft.is_file() else ""
+
+    problems: List[str] = []
+
+    if pubreqs.required_sections:
+        problems.extend(
+            f"missing required section: {name}"
+            for name in required_sections_problems(draft_tex, pubreqs.required_sections)
+        )
+
+    if pubreqs.figure_font_policy:
+        problems.extend(figure_font_policy_problems(draft_tex))
+
+    if pubreqs.image_min_dpi is not None:
+        figures_dir = run_dir / "paper" / "figures"
+        problems.extend(
+            image_dpi_problems(draft_tex, figures_dir, pubreqs.image_min_dpi)
+        )
+
+    if pubreqs.reference_style:
+        problems.extend(
+            reference_style_problems(draft_tex, pubreqs.reference_style)
+        )
+
+    problems.extend(max_words_problems(draft_tex, pubreqs.max_words))
+
+    if pubreqs.reproduction_bundle:
+        problems.extend(_reproduction_bundle_problems(run_dir, evidence))
+
+    return problems
+
+
+def _reproduction_bundle_problems(
+    run_dir: Path, evidence: List[EvidenceItem]
+) -> List[str]:
+    """The F3 reproduction-bundle gate (design §3.3 reconciled with §6 OF-4), READ-ONLY.
+
+    Reconciling §3.3 ("``paper/reproduce.py`` + ``paper/code/`` exist, are non-empty, and
+    reference real recorded ``code_ref``s") with §6 OF-4 (a pointer-only bundle is FAIL-OPEN --
+    a bare-commit ``code_ref`` with no co-located script does NOT block the gate), the EXACT
+    semantics this gate implements -- grounded in what the compiler actually emits
+    (loop/compiler.py ``_emit_reproduction_bundle``) -- are:
+
+      1. ``paper/reproduce.py`` MUST EXIST and be non-empty. The compiler writes it whenever
+         ANY Evidence item carries a ``code_ref`` (scripts OR pure pointers). A contract that
+         declares ``reproduction_bundle`` but whose run has at least one ``code_ref`` yet no
+         ``reproduce.py`` is a real failure (the bundle was declared but not produced / was
+         hand-deleted).
+
+      2. ``reproduce.py`` MUST reference the REAL recorded ``code_ref``s. The driver embeds
+         every ``code_ref`` it was built from (in its ``SCRIPTS`` / ``POINTERS`` lists -- see
+         render/reproduction.render_reproduce_driver), so the gate confirms each ``code_ref``
+         recorded in the Evidence appears in the driver text. A ``reproduce.py`` that omits a
+         recorded ``code_ref`` references a bundle out of sync with the record (fail).
+
+      3. ``paper/code/`` is required NON-EMPTY ONLY when the run has RESOLVABLE SCRIPTS. The
+         compiler writes ``paper/code/`` only when at least one ``code_ref`` resolved to a
+         co-located script; a POINTER-ONLY run (the real t1-godel: bare git hashes, no
+         co-located scripts) honestly writes NO ``paper/code/`` dir. OF-4 (fail-open) wins over
+         §3.3's literal "non-empty": we CANNOT require ``paper/code/`` for an all-pointer
+         bundle -- the gate must PASS for an honest pointer-only ``reproduce.py``. We therefore
+         do NOT inspect ``paper/code/`` directly: requirement (2) already proves the driver
+         references the real refs, and whether a ref resolved to a script vs a pointer is the
+         compiler's fail-open decision, not a gate condition. (We never re-resolve paths or
+         execute code -- running recorded code inside the read-only verify gate is out of
+         scope and unsafe, design §3.3.)
+
+    The set of recorded ``code_ref``s is read from the Evidence log (the same list verify
+    already loaded). A run with NO ``code_ref`` at all (the compiler writes no bundle) but a
+    contract that declares ``reproduction_bundle`` is a real failure: the contract asked for a
+    bundle the record cannot back -- the absent ``reproduce.py`` is reported.
+
+    Returns the failure lines (empty = the bundle satisfies the contract).
+    """
+    recorded_refs = sorted(
+        {
+            ref
+            for ev in evidence
+            if (ref := (ev.provenance.code_ref or "").strip())
+        }
+    )
+
+    reproduce = run_dir / "paper" / "reproduce.py"
+    if not reproduce.is_file():
+        if recorded_refs:
+            return [
+                "reproduction bundle: paper/reproduce.py is missing, but the record holds "
+                f"{len(recorded_refs)} code_ref(s) to reproduce from"
+            ]
+        return [
+            "reproduction bundle: declared, but paper/reproduce.py is missing and the "
+            "record holds no code_ref to build it from"
+        ]
+
+    driver = reproduce.read_text(encoding="utf-8")
+    if not driver.strip():
+        return ["reproduction bundle: paper/reproduce.py is present but empty"]
+
+    # The driver must reference each recorded code_ref (it embeds them in SCRIPTS/POINTERS).
+    missing_refs = [ref for ref in recorded_refs if ref not in driver]
+    if missing_refs:
+        return [
+            "reproduction bundle: paper/reproduce.py does not reference recorded "
+            f"code_ref(s): {', '.join(missing_refs)}"
+        ]
+    return []
 
 
 # -- read-only loaders -------------------------------------------------------

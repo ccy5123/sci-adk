@@ -568,3 +568,265 @@ def test_verify_all_reproduced_unchanged_when_no_paper(tmp_path):
     assert report.all_reproduced is True   # the claim reproduces (refuted==refuted)
     assert report.paper_consistent is True
     assert report.passed is True
+
+
+# -- F1 publishing-requirements umbrella gate (design §1.3) -------------------
+# verify gains paper_requirements_clean: the umbrella that consumes F2 (font/DPI) + F3
+# (reproduction bundle) + section/reference/word-count checks the FROZEN pubreqs.json
+# declares. When pubreqs.json is ABSENT the gate is vacuously clean (backward compatible);
+# advisory + max_pages are surfaced but NEVER gated.
+
+import struct as _struct  # noqa: E402
+import zlib as _zlib  # noqa: E402
+
+from sci_adk.core.pubreqs import DEFAULT_REQUIRED_SECTIONS, PubReqs  # noqa: E402
+from sci_adk.provenance import pubreqs_digest  # noqa: E402
+
+
+def _write_pubreqs(run_dir: Path, **kwargs) -> PubReqs:
+    """Freeze a pubreqs.json at the RUN ROOT (with its digest), like `pubreqs freeze`."""
+    kwargs.setdefault("spec_id", run_dir.name)
+    pr = PubReqs(**kwargs)
+    pr = pr.model_copy(update={"digest": pubreqs_digest(pr)})
+    (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+    return pr
+
+
+def _png_bytes(width: int, height: int = 10) -> bytes:
+    """A minimal valid PNG with a chosen IHDR width (header-only -- stdlib, no Pillow)."""
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = _struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+
+    def _chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return _struct.pack(">I", len(data)) + body + _struct.pack(
+            ">I", _zlib.crc32(body) & 0xFFFFFFFF
+        )
+
+    return sig + _chunk(b"IHDR", ihdr) + _chunk(b"IEND", b"")
+
+
+def test_verify_no_pubreqs_is_vacuously_clean(tmp_path):
+    # BACKWARD COMPAT: a run with NO pubreqs.json declares no requirements -> the umbrella
+    # gate is vacuously clean and the full exit gate is UNCHANGED (every existing run still
+    # passes). This is the invariant the whole existing verify suite relies on.
+    spec = _numeric_spec("v-noreqs", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    assert not (run_dir / "pubreqs.json").exists()
+    report = verify_run(run_dir)
+    assert report.paper_requirements_problems == []
+    assert report.paper_requirements_clean is True
+    assert report.passed is True
+
+
+def test_verify_required_sections_present_passes(tmp_path):
+    spec = _numeric_spec("v-reqsec-ok", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\begin{abstract}x\end{abstract}"
+                 r"\section{Introduction}a\section{Methods}b"
+                 r"\section{Results}c\section{Discussion}d")
+    _write_pubreqs(run_dir, required_sections=list(DEFAULT_REQUIRED_SECTIONS),
+                   figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True
+    assert report.passed is True
+
+
+def test_verify_missing_required_section_fails_gate(tmp_path):
+    # A missing \section makes paper_requirements_clean False and the combined gate fail,
+    # EVEN THOUGH the claim reproduces.
+    spec = _numeric_spec("v-reqsec-miss", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\begin{abstract}x\end{abstract}"
+                 r"\section{Introduction}a\section{Results}c\section{Discussion}d")  # no Methods
+    _write_pubreqs(run_dir, required_sections=list(DEFAULT_REQUIRED_SECTIONS),
+                   figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True              # claim signal unchanged
+    assert report.paper_requirements_clean is False
+    assert any("Methods" in p for p in report.paper_requirements_problems)
+    assert report.passed is False
+
+
+def test_verify_figure_font_policy_present_passes(tmp_path):
+    # A figure-bearing draft.tex WITH the F2 preamble passes the font policy gate.
+    spec = _numeric_spec("v-font-ok", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\usepackage{newtxmath}" "\n" r"\usepackage[scaled]{helvet}" "\n"
+                 r"\begin{figure}\begin{tikzpicture}\end{tikzpicture}\end{figure}")
+    _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=None,
+                   reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True
+    assert report.passed is True
+
+
+def test_verify_figure_font_policy_stripped_fails_gate(tmp_path):
+    # A figure-bearing draft.tex with the F2 packages STRIPPED (hand-edited) fails the gate.
+    spec = _numeric_spec("v-font-strip", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\begin{figure}\begin{tikzpicture}\end{tikzpicture}\end{figure}")
+    _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=None,
+                   reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is False
+    assert any("newtxmath" in p for p in report.paper_requirements_problems)
+    assert report.passed is False
+
+
+def test_verify_figureless_doc_font_policy_is_na(tmp_path):
+    # A figure-LESS draft.tex makes the font policy N/A -> clean (the F2 regression invariant).
+    spec = _numeric_spec("v-font-na", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\section{Introduction}prose only, no figure.")
+    _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=None,
+                   reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True
+    assert report.passed is True
+
+
+def test_verify_image_dpi_high_passes_low_fails(tmp_path):
+    # A high-DPI raster passes; a low-DPI raster fails; a vector figure is skipped.
+    spec = _numeric_spec("v-dpi", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    figs = run_dir / "paper" / "figures"
+    figs.mkdir(parents=True, exist_ok=True)
+    (figs / "fig1.png").write_bytes(_png_bytes(2000))   # 2000/6.5 ~= 307 DPI -> clean
+    # font preamble present so the font gate is not the thing failing.
+    _write_paper(run_dir, "draft.tex",
+                 r"\usepackage{newtxmath}\usepackage[scaled]{helvet}"
+                 r"\includegraphics{figures/fig1.png}")
+    _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=300,
+                   reproduction_bundle=False)
+    assert verify_run(run_dir).paper_requirements_clean is True
+
+    # Now a low-DPI raster fails.
+    (figs / "fig1.png").write_bytes(_png_bytes(500))    # 500/6.5 ~= 77 DPI -> fail
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is False
+    assert any("DPI" in p for p in report.paper_requirements_problems)
+    assert report.passed is False
+
+
+def test_verify_image_dpi_vector_is_skipped(tmp_path):
+    spec = _numeric_spec("v-dpi-vec", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\usepackage{newtxmath}\usepackage[scaled]{helvet}"
+                 r"\includegraphics[width=\textwidth]{figures/fig1.pdf}")  # vector -> skipped
+    _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=300,
+                   reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True
+    assert report.passed is True
+
+
+def test_verify_reproduction_bundle_all_pointer_passes_fail_open(tmp_path):
+    # OF-4 FAIL-OPEN: a seeded run records code_ref="fixture" (no co-located script) -> the
+    # compiler writes reproduce.py documenting it but NO paper/code/. An honest pointer-only
+    # bundle MUST PASS the gate (we never require paper/code/ to be non-empty).
+    spec = _numeric_spec("v-repro-pointer", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    assert (run_dir / "paper" / "reproduce.py").is_file()
+    assert not (run_dir / "paper" / "code").exists()    # pointer-only: no co-located scripts
+    _write_pubreqs(run_dir, figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=True)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True       # fail-open on the honest pointer
+    assert report.passed is True
+
+
+def test_verify_reproduction_bundle_resolvable_script_passes(tmp_path):
+    # A resolvable-script bundle: reproduce.py references the recorded code_ref AND a non-empty
+    # paper/code/ holds the co-located script. The gate passes (it references the real ref).
+    spec = _numeric_spec("v-repro-script", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    code_dir = run_dir / "paper" / "code"
+    code_dir.mkdir(parents=True, exist_ok=True)
+    (code_dir / "gen.py").write_text("print('regenerate')\n", encoding="utf-8")
+    # Rewrite reproduce.py to a script-shaped driver that still references the recorded
+    # code_ref ('fixture' -- the seeded evidence's provenance.code_ref).
+    (run_dir / "paper" / "reproduce.py").write_text(
+        'SCRIPTS = [("ev", "fixture", "gen.py")]\nPOINTERS = []\n', encoding="utf-8"
+    )
+    _write_pubreqs(run_dir, figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=True)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True
+    assert report.passed is True
+
+
+def test_verify_reproduction_bundle_missing_reproduce_py_fails(tmp_path):
+    # reproduction_bundle declared, the record holds a code_ref, but reproduce.py was deleted
+    # -> fail (a declared bundle the paper does not carry).
+    spec = _numeric_spec("v-repro-missing", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    (run_dir / "paper" / "reproduce.py").unlink()
+    _write_pubreqs(run_dir, figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=True)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is False
+    assert any("reproduce.py is missing" in p for p in report.paper_requirements_problems)
+    assert report.passed is False
+
+
+def test_verify_reproduction_bundle_driver_omits_recorded_ref_fails(tmp_path):
+    # reproduce.py exists but references NONE of the recorded code_refs (out of sync with the
+    # record) -> fail (it does not reference the real recorded code_ref).
+    spec = _numeric_spec("v-repro-stale", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    (run_dir / "paper" / "reproduce.py").write_text(
+        "SCRIPTS = []\nPOINTERS = []\n# no recorded refs\n", encoding="utf-8"
+    )
+    _write_pubreqs(run_dir, figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=True)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is False
+    assert any("does not reference recorded" in p
+               for p in report.paper_requirements_problems)
+    assert report.passed is False
+
+
+def test_verify_advisory_and_max_pages_are_never_gated(tmp_path):
+    # advisory + max_pages are surfaced but NEVER fail the gate: a run that satisfies every
+    # GATED requirement passes even with an advisory note and a max_pages set.
+    spec = _numeric_spec("v-advisory", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\section{Introduction}short prose.")
+    _write_pubreqs(run_dir, figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=False, max_pages=1,
+                   advisory=["double-blind review", "data availability statement required"])
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is True    # max_pages/advisory never gate
+    assert report.passed is True
+
+
+def test_verify_requirements_gate_is_read_only(tmp_path):
+    # The new gate must not break the read-only invariant: it reads pubreqs.json + draft.tex
+    # + figures + reproduce.py, never writes/recompiles.
+    spec = _numeric_spec("v-reqs-ro", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\begin{figure}\begin{tikzpicture}\end{tikzpicture}\end{figure}")  # font fail
+    _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=300,
+                   reproduction_bundle=True)
+
+    def _snapshot(d: Path) -> dict:
+        return {
+            p.relative_to(d).as_posix(): p.read_bytes()
+            for p in sorted(d.rglob("*")) if p.is_file()
+        }
+
+    before = _snapshot(run_dir)
+    verify_run(run_dir)
+    after = _snapshot(run_dir)
+    assert before.keys() == after.keys(), "verify created or deleted a file"
+    for k in before:
+        assert before[k] == after[k], f"verify modified file contents: {k}"
