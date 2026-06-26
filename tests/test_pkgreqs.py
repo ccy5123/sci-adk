@@ -374,6 +374,15 @@ def test_citation_key_shape_problems_clean_when_all_conform():
     assert citation_key_shape_problems(tex, bib) == []
 
 
+def test_citation_key_shape_validates_an_uncited_defined_key():
+    # EC-5: a defined-but-UNCITED .bib entry stays benign for cite-resolution, yet its key shape
+    # is still validated by P3 -- the shape checker scans defined .bib keys, not only cited ones.
+    tex = r"As shown \cite{McKay2013}."          # ref1 is defined below but never cited
+    bib = "@article{McKay2013, title={x}}\n@article{ref1, title={y}}\n"
+    assert any("ref1" in p for p in citation_key_shape_problems(tex, bib))  # shape flagged
+    assert cite_resolution_problems(tex, bib) == []                        # benign for resolution
+
+
 # -- P3 disambiguation (REQ-PG-303) ------------------------------------------
 
 def test_disambiguation_flags_bare_plus_suffixed():

@@ -135,9 +135,12 @@ encoded as a test.
 - **EC-3 — Ignored numeric tokens.** Section/figure/table/equation/reference numbers, dates,
   page numbers, and math-mode structural literals are NOT audited (OD-3 ignore-list); a test
   confirms they do not produce false failures.
-- **EC-4 — Pre-existing run migration.** A run created before this SPEC with no frozen contract
-  produces a WARNING (not a hard block) during the grace period, while a new artifact produces
-  a REFUSAL (OD-8). A test confirms both posture branches.
+- **EC-4 — Pre-existing run migration.** OD-8 was CONFIRMED as IMMEDIATE REFUSAL for all (no
+  grace period): a conclusion-bearing artifact with no frozen contract is refused regardless of
+  whether it predates this SPEC. There is no separate WARNING branch -- the migration consequence
+  is that pre-existing in-repo demos were brought into compliance in M1, not exempted. Covered by
+  `test_per_run_draft_without_frozen_pubreqs_refuses` + `test_package_without_frozen_pkgreqs_refuses`
+  (refusal independent of artifact age).
 - **EC-5 — Uncited defined .bib entry.** A defined-but-uncited entry remains benign for
   cite-resolution (existing behavior) but its key shape is still validated by P3.
 - **EC-6 — Abstract as environment vs section.** The section/order checker accepts
@@ -161,19 +164,34 @@ encoded as a test.
 
 ## Definition of Done
 
-- [ ] All resolved Open Decisions (OD-1..OD-8) recorded in
-      `design/paper-writing-enforcement.md` with the three leaks' file:line evidence and
-      migration notes.
-- [ ] M1 (P1+P2): MP-1, MP-4, MP-5, AC-1, AC-2, AC-5, AC-6 pass.
-- [ ] M2 (P3+P4): MP-2, MP-3, AC-3, AC-4 pass.
+- [x] All resolved Open Decisions (OD-1..OD-8) recorded: OD-1/2/3/8 in spec.md "Decisions
+      Confirmed (M1 keystone)", OD-4/5/6/7 in "Decisions Confirmed (M2 + M3)"; the three leaks'
+      file:line evidence and migration notes in `design/paper-writing-enforcement.md`.
+- [x] M1 (P1+P2): MP-1, MP-4, MP-5, AC-1, AC-2, AC-5, AC-6 pass (`10356c1`→`c3ca867`; suite green).
+- [x] M2 (P3+P4): MP-2, MP-3, AC-3, AC-4 pass (`c0388e1`; suite green).
 - [x] M3 (P5): AC-7 passes. Cross-run merge render extracts recorded point statistic +
       threshold from `02_data/claims_all.csv` into `main.tex` as PLAIN literals (OD-7: clean
       source, no macro); deterministic P2 audit is the verdict. Tests:
       `test_package_merge_render_extracts_record_numbers_across_runs` (REQ-PG-501/502),
       `_hand_typed_value_fails_p2` (REQ-PG-503), `_prose_is_free` (OD-7 boundary).
-- [ ] All edge-case tests (EC-1..EC-6) pass.
-- [ ] Existing claim-reproduction / record-green gate verified unchanged (AC-6).
-- [ ] Existing ~1281-test suite green; new gates covered; Docker tests marked `integration`.
-- [ ] Domain-neutrality audit: no domain/venue/study leak in any general surface.
-- [ ] `/sci publish` and `/sci package` require a frozen contract as a completion step;
-      the Stop hook runs `verify <workspace>`.
+- [x] All edge-case tests (EC-1..EC-6) pass. EC-1 `test_per_run_no_draft_is_not_conclusion_bearing`
+      / `test_no_package_is_not_conclusion_bearing`; EC-2 `test_audit_accepts_a_derived_ratio/difference`
+      (per-run) + `test_audit_exact_mode_rejects_a_derived_only_value` (package); EC-3
+      `test_tokenizer_ignores_*` incl. new `test_tokenizer_ignores_page_numbers`; EC-4 immediate
+      refusal `test_per_run_draft_without_frozen_pubreqs_refuses` (OD-8, no grace branch); EC-5
+      `test_cite_resolution_uncited_bib_entry_is_benign` + new
+      `test_citation_key_shape_validates_an_uncited_defined_key`; EC-6
+      `test_required_sections_abstract_accepts_environment_or_section` +
+      `test_ordered_section_sequence_records_abstract_first`.
+- [x] Existing claim-reproduction / record-green gate verified unchanged (AC-6):
+      `test_per_run_refusal_does_not_weaken_claim_reproduction` + the record-vs-belief tests pass;
+      `verify_run`'s claim reproduction is untouched (all new gates additive).
+- [x] Existing suite green (1360 passed, up from ~1281 at SPEC start); new gates covered;
+      Docker-dependent end-to-end tests marked `integration` (skipped in the default run).
+- [x] Domain-neutrality audit: no domain/venue/study leak in any general surface. P5's
+      `render/package.py` is record-driven (reads `02_data/claims_all.csv`), names no domain;
+      grep for molecule/IEAM/godel/rice is clean.
+- [x] `/sci publish` and `/sci package` require a frozen contract as a completion step
+      (`science-workflow-publish` / `science-workflow-package` SKILL.md freeze steps; the P1
+      non-vacuous gate REFUSES an unfrozen conclusion-bearing artifact); the Stop hook runs
+      `verify <workspace>` (MP-5, `stop-verify-gate.sh`).

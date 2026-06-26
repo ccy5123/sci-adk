@@ -101,6 +101,17 @@ def test_tokenizer_ignores_dates_and_version_strings():
     assert 2023 not in tokens  # no spurious date components
 
 
+def test_tokenizer_ignores_page_numbers():
+    # EC-3 (OD-3 ignore-list): bibliographic page numbers ("page 12" / "pp. 12-15" / "p. 7") are
+    # not measured data and must not produce a false audit failure.
+    tex = r"See page 12 and pp. 12-15 (p. 7). The reported value is 0.42."
+    tokens = {t.value for t in tokenize_quantitative(tex)}
+    assert 0.42 in tokens          # the genuine data literal survives
+    assert 12 not in tokens
+    assert 15 not in tokens
+    assert 7 not in tokens
+
+
 def test_tokenizer_extracts_table_data_cells():
     tex = (
         r"\begin{tabular}{lr}"
