@@ -138,7 +138,7 @@ class Provenance(BaseModel):
       - ``measured``        -- real empirical data (the only kind that satisfies an
                                empirical claim).
       - ``generated``       -- an in-silico/computed GENUINE instance of a formal
-                               referent (T-1's molecule set).
+                               referent (the experiment's input set).
       - ``synthetic_proxy`` -- a FABRICATED stand-in for an external referent the data
                                does not contain (the rice numbers).
       - ``None``            -- unstated; the gate treats it as "not measured"

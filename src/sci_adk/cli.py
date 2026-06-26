@@ -434,7 +434,7 @@ def _add_verb_parsers(sub) -> None:
     )
     pkgreqs_freeze.add_argument(
         "--abstract-max-words", type=int, default=None, metavar="N",
-        help="venue abstract word limit (e.g. 300 for IEAM); omit to disable the abstract gate",
+        help="venue abstract word limit (e.g. 300); omit to disable the abstract gate",
     )
     pkgreqs_freeze.add_argument(
         "--body-word-min", type=int, default=None, metavar="N",

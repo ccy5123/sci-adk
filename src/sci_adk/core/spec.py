@@ -225,7 +225,7 @@ class Hypothesis(BaseModel):
 
     Attributes:
         id: Unique identifier for this hypothesis
-        statement: The hypothesis statement (e.g., "molecule graphs admit encoding")
+        statement: The hypothesis statement (e.g., "the encoding is injective over the tested set")
         mode: confirmatory or exploratory - honest pre-declaration
         decision_rule: Rule for evaluating evidence against this hypothesis
         referent: ``formal`` | ``empirical`` -- the claim's referent class (default

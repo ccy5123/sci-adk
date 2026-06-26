@@ -13,7 +13,7 @@ Discovery vs acquisition (design/literature-acquisition.md):
     (design/tool-policy.md), used on-demand the way a researcher checks prior
     work, not a code module. This stage is the *acquisition* half: DOIs in,
     PDFs + Evidence out. DOIs are passed in explicitly, exactly as
-    ``ExperimentRunner`` takes its molecules explicitly (experiment_runner.py).
+    ``ExperimentRunner`` takes its experiment inputs explicitly (experiment_runner.py).
 
 Halt gates (design/literature-acquisition.md):
     Acquisition can halt the loop and hand control back to the human (a

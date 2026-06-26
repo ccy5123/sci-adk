@@ -71,7 +71,7 @@ class PackageReqs(BaseModel):
             default is :data:`DEFAULT_REQUIRED_SECTIONS`.
         reference_style: the declared bib style (e.g. "natbib"/"plainnat") checked present in
             ``main.tex`` (a ``\\bibliographystyle`` wiring), or None to skip.
-        abstract_max_words: the venue abstract word limit (e.g. IEAM 300); None disables the
+        abstract_max_words: the venue abstract word limit (e.g. 300); None disables the
             abstract word-count gate.
         body_word_range: an ADVISORY ``(min, max)`` body word range (e.g. (4000, 7000));
             SURFACED in the verify report, NEVER gated (design §3) -- a thin or long draft is
@@ -106,7 +106,7 @@ class PackageReqs(BaseModel):
     )
     abstract_max_words: Optional[int] = Field(
         default=None,
-        description="Abstract word-count ceiling (venue limit, e.g. IEAM 300); None disables",
+        description="Abstract word-count ceiling (venue limit, e.g. 300); None disables",
     )
     body_word_range: Optional[Tuple[int, int]] = Field(
         default=None,

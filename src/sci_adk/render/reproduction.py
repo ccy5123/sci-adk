@@ -161,7 +161,7 @@ def render_reproduce_driver(
     never fabricated and never executed.
 
     Generated content references ONLY real recorded refs (the given ``code_ref`` values).
-    An all-pointer run (no resolvable script -- e.g. the t1-godel run, whose ``code_ref``s
+    An all-pointer run (no resolvable script -- e.g. a run whose ``code_ref``s
     are bare git hashes) produces a driver that can only DOCUMENT the commits; it cannot
     re-execute, and says so plainly. PURE + deterministic.
     """

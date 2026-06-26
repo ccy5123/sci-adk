@@ -19,7 +19,7 @@ class ExperimentRunner:
     """
     Run experiments and generate EvidenceItems.
 
-    Milestone 1: T-1 molecular encoding experiments.
+    Milestone 1: capability experiments.
     Full loop controller deferred to milestone 2+.
     """
 

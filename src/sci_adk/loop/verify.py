@@ -894,7 +894,7 @@ def _reproduction_bundle_problems(
 
       3. ``paper/code/`` is required NON-EMPTY ONLY when the run has RESOLVABLE SCRIPTS. The
          compiler writes ``paper/code/`` only when at least one ``code_ref`` resolved to a
-         co-located script; a POINTER-ONLY run (the real t1-godel: bare git hashes, no
+         co-located script; a POINTER-ONLY run (an all-pointer run: bare git hashes, no
          co-located scripts) honestly writes NO ``paper/code/`` dir. OF-4 (fail-open) wins over
          §3.3's literal "non-empty": we CANNOT require ``paper/code/`` for an all-pointer
          bundle -- the gate must PASS for an honest pointer-only ``reproduce.py``. We therefore

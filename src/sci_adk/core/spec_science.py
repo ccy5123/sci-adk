@@ -35,13 +35,13 @@ _THRESHOLD = DecisionRuleKind.THRESHOLD
 
 # G5 keyword -> required cost metric. A practical-property TERM in a claim commits the
 # author to MEASURING that property; the lint demands the corresponding statistic so the
-# cost is on the record (e.g. a Gödel "index" whose integers blow up super-polynomially must
+# cost is on the record (e.g. an "index" whose integers blow up super-polynomially must
 # report its bit-length). Manual override: declaring the metric in ``Hypothesis.cost_metrics``
 # (or already naming a size/time statistic) satisfies the lint. Lower-cased word-boundary
 # matching; kept deliberately SMALL and explicit (no NLP) -- the same spirit as the
 # deterministic ``\novelty`` markup, not a keyword classifier.
 _COST_KEYWORDS: dict[str, str] = {
-    "index": "the integer SIZE (bit-length) of the index -- a Gödel/prime-power index can "
+    "index": "the integer SIZE (bit-length) of the index -- an index whose integers can "
     "grow super-polynomially, so its bit-length must be reported",
     "efficient": "a runtime / time-complexity measurement substantiating 'efficient'",
     "efficiency": "a runtime / time-complexity measurement substantiating 'efficiency'",
@@ -119,7 +119,7 @@ def _has_cost_metric(hypothesis: Hypothesis) -> bool:
 
 def _word_in(text: str, word: str) -> bool:
     """Whole-word, lower-cased containment (so 'indexing' does not match 'index' spuriously,
-    but 'molecular index' does). Pure-stdlib word-boundary check without a regex import."""
+    but 'integer index' does). Pure-stdlib word-boundary check without a regex import."""
     i = text.find(word)
     while i != -1:
         before = text[i - 1] if i > 0 else " "

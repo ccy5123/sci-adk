@@ -594,7 +594,7 @@ class ResearchCompiler:
 
         # Land the runnable bundle (paper/code/ + paper/reproduce.py) ONLY when at least
         # one code_ref resolved to a co-located script. A pointer-only set (every code_ref
-        # a bare commit, as in t1-godel) still documents the commits in reproduce.py, but
+        # a bare commit, as in an all-pointer run) still documents the commits in reproduce.py, but
         # only when there is something to drive: an entirely code_ref-free run writes
         # nothing (byte-identical paper/). See _emit_reproduction_bundle.
         self._emit_reproduction_bundle(repro_listings, paper_dir, spec.id)
@@ -683,7 +683,7 @@ class ResearchCompiler:
         Two sources (a cited DOI is cited regardless of whether its PDF downloaded):
           (a) ``LITERATURE`` EvidenceItems -- their ``result.finding`` is the JSON
               summary the acquirer writes (``acquired[].doi`` + ``failed[].doi``);
-          (b) the run's ``artifacts/literature/manifest.csv`` (the t1-godel shape,
+          (b) the run's ``artifacts/literature/manifest.csv`` (the literature-manifest shape,
               where literature was acquired ad-hoc with no LITERATURE EvidenceItem).
 
         Pure parsing of recorded artifacts -- no acquisition, no network.
@@ -817,7 +817,7 @@ class ResearchCompiler:
             ``paper/code/`` basename is recorded; the script is co-located + driven by
             ``reproduce.py``.
           - ``pointer`` -- everything else: a bare commit/ref (e.g. a 40-hex git hash, the
-            t1-godel shape), a missing path, an unreadable file, OR a body that cannot be
+            all-pointer shape), a missing path, an unreadable file, OR a body that cannot be
             safely inlined. Recorded as a POINTER -- NEVER an error (fail-open), honest
             about holding only the reference.
 

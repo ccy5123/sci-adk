@@ -51,7 +51,7 @@ class StatusReport(BaseModel):
 
     Attributes:
         spec_id: the recorded Spec id ("" when nothing is recorded yet).
-        run_name: the run directory's own name (e.g. ``t1-godel``).
+        run_name: the run directory's own name (e.g. ``run-001``).
         n_hypotheses: number of hypotheses in the recorded Spec (0 when no spec).
         claim_counts: counts by ``ClaimStatus`` value (only non-zero statuses appear).
         unresolved_claim_ids: PROPOSED *experiment* claim ids (``claim-<hyp>``) needing

@@ -4,7 +4,7 @@ Docker executor for isolated experiment execution.
 Runs experiments in isolated Docker containers with provenance capture.
 Reference: design/directory-structure.md (runner/)
 
-Milestone 1: Basic container execution for T-1 molecular encoding.
+Milestone 1: Basic container execution for capability experiments.
 """
 
 import subprocess
