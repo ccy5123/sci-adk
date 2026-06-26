@@ -5,11 +5,19 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sci-adk"
 version = "0.1.0"
-description = "Research Compiler: 4-pane proposal to paper + code + evidence trail"
+description = "Agentic Discovery Kit (ADK): a domain-general rigor / verification system -- 4-pane proposal to paper + code + an evidence trail; agents propose, the engine judges by frozen criteria"
 readme = "README.md"
 license = { text = "MIT" }
+authors = [
+    { name = "Chan Young Joe", email = "ccy5123ccy@gmail.com" },
+]
 classifiers = [
     "License :: OSI Approved :: MIT License",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
 ]
 requires-python = ">=3.11"
 dependencies = [
@@ -24,6 +32,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Test/dev tooling for the engineering layer. Per design/tool-policy.md the
+# research runtime excludes coverage thresholds and LSP gates, but the tests/
+# suite is ordinary pytest and CI runs it.
+dev = [
+    "pytest>=8.0.0",
+]
 # Acquisition tooling invoked as a subprocess, not imported (see
 # src/sci_adk/search/paperforge_adapter.py). Pinned to a git SHA for
 # reproducibility; recorded in design/tool-policy.md (addendum 2026-06-16).
@@ -35,6 +49,11 @@ tools = [
 
 [project.scripts]
 sci-adk = "sci_adk.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ccy5123/sci-adk"
+Repository = "https://github.com/ccy5123/sci-adk"
+Issues = "https://github.com/ccy5123/sci-adk/issues"
 
 [tool.setuptools]
 # Ship non-.py files declared in MANIFEST.in (the research-workspace kit) inside

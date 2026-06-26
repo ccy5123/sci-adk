@@ -64,7 +64,7 @@ publication-plan memory; Phase 0 / MIT license already done.)
 | B2 | T-1 case study writeup | `[OPEN]` | `runs/t1-godel/paper/` has a draft; needs paper-grade writeup |
 | B3 | T-2 case study writeup | `[OPEN]` | == G-A A1/A4 (research-gated) |
 | B4 | Render + publishing pipeline exists | `[DONE]` | render reframe + publishing F1/F2/F3 + package layer on master |
-| B5 | CITATION.cff present and consistent with the paper | `[OPEN]` | missing (see G-C) |
+| B5 | CITATION.cff present and consistent with the paper | `[OPEN]` | software `CITATION.cff` added (G-C/C7); paper-citation consistency still pending the paper itself |
 
 ## 5. G-C — OSS release hygiene
 
@@ -72,13 +72,13 @@ publication-plan memory; Phase 0 / MIT license already done.)
 |---|-------------|--------|-------|
 | C1 | `LICENSE` (MIT) | `[DONE]` | `LICENSE` present; `pyproject.toml` `license = { text = "MIT" }` |
 | C2 | `README.md` current | `[DONE]` | refreshed 2026-06-25 (commit `43408b5`) |
-| C3 | `CONTRIBUTING.md` | `[OPEN]` | missing |
-| C4 | `CODE_OF_CONDUCT.md` | `[OPEN]` | missing |
-| C5 | `CHANGELOG.md` | `[OPEN]` | missing |
-| C6 | `SECURITY.md` | `[OPEN]` | missing |
-| C7 | `CITATION.cff` | `[OPEN]` | missing (needed for a methods-paper release) |
-| C8 | CI (`.github/workflows/`) running the suite on push/PR | `[OPEN]` | no `.github/workflows`; suite is 1281 tests (manual run only) |
-| C9 | `pyproject` metadata: `[project.urls]`, description aligned to ADK framing | `[OPEN]` | description still reads "Research Compiler: ..." (pre-ADK reframing); no `urls` table |
+| C3 | `CONTRIBUTING.md` | `[DONE]` | added; grounded in the rigor discipline + F4 kernel/adapter seam + tool policy |
+| C4 | `CODE_OF_CONDUCT.md` | `[DONE]` | Contributor Covenant 2.1; contact ccy5123ccy@gmail.com |
+| C5 | `CHANGELOG.md` | `[DONE]` | Keep a Changelog; accumulated history under `[Unreleased]` |
+| C6 | `SECURITY.md` | `[DONE]` | private reporting + Docker code-execution scope note |
+| C7 | `CITATION.cff` | `[DONE]` | CFF 1.2.0; Chan Young Joe, ORCID 0009-0007-5822-6714 |
+| C8 | CI (`.github/workflows/`) running the suite on push/PR | `[DONE]` | `.github/workflows/ci.yml`; py3.11 + 3.12; verified locally (1278 passed, 3 integration deselected) |
+| C9 | `pyproject` metadata: `[project.urls]`, description aligned to ADK framing | `[DONE]` | ADK-framed description + `authors` + classifiers + `[project.urls]` + `[dev]` extra (pytest) |
 
 ## 6. G-D — Versioning & API stability
 

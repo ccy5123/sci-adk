@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use sci-adk in your research, please cite it as below."
+title: "sci-adk: Agentic Discovery Kit (ADK)"
+abstract: >-
+  A domain-general rigor / verification ADK that keeps an append-only record
+  (Evidence) separate from revisable belief (Claims): agents propose, a
+  deterministic engine judges by frozen, per-hypothesis criteria, and a headless
+  verify pass re-derives every claim from the record. It compiles a four-pane
+  research proposal into a paper draft, working code, and an evidence trail.
+type: software
+authors:
+  - family-names: "Joe"
+    given-names: "Chan Young"
+    orcid: "https://orcid.org/0009-0007-5822-6714"
+version: "0.1.0"
+license: MIT
+repository-code: "https://github.com/ccy5123/sci-adk"
+url: "https://github.com/ccy5123/sci-adk"
+keywords:
+  - "research compiler"
+  - "reproducibility"
+  - "rigor"
+  - "verification"
+  - "record versus belief"
+  - "pre-registration"
