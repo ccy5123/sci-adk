@@ -96,6 +96,38 @@ publication-plan memory; Phase 0 / MIT license already done.)
 | E1 | README/paper claims do not exceed validated evidence | `[OPEN]` | README/title assert "domain-general"; G-A not yet validated — either validate (G-A) or scope the claim down to "general seam, validated on T-1; 2nd domain in progress" |
 | E2 | "record vs belief" applied to the release narrative | `[OPEN]` | the release is a Claim about sci-adk; it must cite its Evidence (validated domains) and not over-state |
 
+### G-E audit (2026-06-26) — findings + prepared wording, apply DEFERRED to post-G-A
+
+Audit of every public surface for "domain-general" asserted as a *validated*
+property (it is validated on N=1, T-1). Apply is **deferred until G-A resolves**
+(user decision 2026-06-26: revisit after G-A). Parked here so the post-G-A edit
+is one step.
+
+Over-claim sites (assert generality as fact):
+- `README.md:9` (identity line) — "a **domain-general** rigor / verification system"
+- `pyproject.toml:8` (description) — "a **domain-general** rigor / verification system"
+- `CITATION.cff:5` (abstract) — "A **domain-general** rigor / verification ADK"
+
+Tension: `README.md:238` (Remaining) already states generality is "validated only
+once a second domain plugs in without a kernel edit" (G-A). So line 9 (fact) vs
+line 238 (not-yet-validated) is an internal contradiction. NOT an over-claim:
+`README.md:230` figure "domain-general" = the structural fact that the kernel
+carries zero domain code — keep.
+
+Prepared honest wording (correct under either G-A outcome — design is general now;
+cross-domain *validation* is what G-A supplies):
+- README:9 → "a rigor / verification system built on a **domain-general kernel**
+  (zero domain code) and a capability-adapter seam ... validated end-to-end on
+  T-1; cross-domain generalization is the open gate (see Remaining)."
+- pyproject:8 → "...a rigor / verification system with a **domain-general kernel +
+  capability-adapter seam** -- 4-pane proposal to paper + code + an evidence trail..."
+- CITATION:5 → "A rigor / verification ADK, **built on a domain-general kernel and
+  a capability-adapter seam**, that keeps an append-only record ..."
+
+If G-A validates a 2nd domain, the bare "domain-general" claim becomes evidence-
+backed and the qualifier can be relaxed accordingly; if not, the qualified wording
+is the honest end state.
+
 ## 8. Release sequence (gated by triggers, not dates)
 
 1. **Resolve G-A (keystone).** Either confirm IEAM-P8 discharges the gate (A3),
