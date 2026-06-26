@@ -95,10 +95,11 @@ and the publishing layer is additionally gated by the SPEC-PAPER-GATE-001
 
 ## 4. Python API surface — gap + the curated 1.0 export
 
-**Measured gap:** `src/sci_adk/__init__.py` is **empty** — no `__all__`, no curated
-exports. Consumers currently reach into submodules directly. A semver-1.0 promise
-that includes a Python API therefore needs an explicit, curated export surface
-declared *before* 1.0 (an empty package root cannot be "the stable API").
+**Measured gap (RESOLVED 2026-06-26):** `src/sci_adk/__init__.py` was **empty** — no
+`__all__`, no curated exports. Consumers reached into submodules directly. A
+semver-1.0 promise that includes a Python API needs an explicit, curated export
+surface declared *before* 1.0. This is now implemented (§7 step 1): the root
+re-exports the 29 symbols below, guarded by `tests/test_public_api.py`.
 
 The curated surface is the record/belief core + the sole verdict path — the
 symbols a Python embedder legitimately needs, and exactly the ones the public
@@ -147,9 +148,10 @@ would require 2.0.
 
 ## 7. Remaining execution steps (NOT done here — these are G-D D1/D2/D3)
 
-1. **D1 close** — make the curated Python API real: add `__all__` + imports to
-   `src/sci_adk/__init__.py` per §4 (code change + test). Without this, the
-   "curated Python API" promise has nothing behind it.
+1. **D1 close — DONE (2026-06-26):** the curated Python API is real —
+   `src/sci_adk/__init__.py` re-exports the 29-symbol §4 surface, guarded by
+   `tests/test_public_api.py` (pins `__all__`, asserts the adapter is not exposed,
+   asserts `import sci_adk` does not pull in the adapter). Suite 1369 passed.
 2. **D2** — `pyproject.toml` `version = "0.1.0"` → `"1.0.0"`.
 3. **D3** — `v1.0.0` git tag + GitHub release notes.
 4. **D4** — PyPI publish decision (`[TBD]`, `release-readiness.md` §6).
