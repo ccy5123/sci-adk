@@ -296,3 +296,59 @@ def test_package_gate_body_word_range_within_range_passes(tmp_path):
     ws = _assembled(tmp_path, body_word_range=(0, 100000))
     report = verify_package(ws)
     assert not any("body word count" in p for p in report.package_requirements_problems)
+
+
+# -- (4) P5 cross-run merge render (M3 / AC-7) -------------------------------
+
+def test_package_merge_render_extracts_record_numbers_across_runs(tmp_path):
+    # SPEC-PAPER-GATE-001 P5 / AC-7 (REQ-PG-501/502): the merged main.tex EXTRACTS each run's
+    # recorded point statistic + pre-registered threshold from the record and writes them as
+    # PLAIN literals (no macro). A 2-run workspace -> both runs' recorded values appear, and
+    # the package gate is green because every literal traces to the record by construction.
+    ws = _assembled(tmp_path, venue="IEAM", abstract_max_words=300, reference_style="plainnat")
+    main = _main_tex(ws).read_text(encoding="utf-8")
+    # run-alpha recorded point 0.95 / threshold 0.9; run-beta recorded point 0.85 / threshold 0.8.
+    assert "0.95" in main and "0.9" in main      # run-alpha extracted into the manuscript
+    assert "0.85" in main and "0.8" in main      # run-beta extracted into the manuscript
+    # no reviewer-visible fact macro -- the numbers are plain literals (the user's clean-source
+    # constraint + REQ-PG-502); the merge render owns the numbers, not a \evval-style command.
+    assert "\\evval" not in main
+    report = verify_package(ws)
+    assert report.package_requirements_clean is True
+    assert report.passed is True
+
+
+def test_package_merge_render_hand_typed_value_fails_p2(tmp_path):
+    # SPEC-PAPER-GATE-001 P5 / AC-7 (REQ-PG-503): a record-typed quantity hand-edited to a value
+    # the record does not hold FAILS the deterministic package number-audit (no LLM verdict).
+    ws = _assembled(tmp_path, venue="IEAM", abstract_max_words=300, reference_style="plainnat")
+    main_path = _main_tex(ws)
+    # 0.97 is not in the package pool {0.95, 0.9, 0.85, 0.8, ...}; the audit is exact-only here.
+    main_path.write_text(
+        main_path.read_text(encoding="utf-8").replace("0.95", "0.97"), encoding="utf-8"
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is False
+    assert any("0.97" in p for p in report.package_requirements_problems)
+
+
+def test_package_merge_render_prose_is_free(tmp_path):
+    # SPEC-PAPER-GATE-001 P5 / AC-7 (OD-7 boundary): agent-authored PROSE (no record-typed
+    # number) is free -- authoring an Introduction prose slot leaves the gate green.
+    ws = _assembled(tmp_path, venue="IEAM", abstract_max_words=300, reference_style="plainnat")
+    main_path = _main_tex(ws)
+    prose = (
+        "The injectivity of the encoding is the property this synthesis examines, and the "
+        "recorded results below bear on it directly."
+    )
+    main_path.write_text(
+        main_path.read_text(encoding="utf-8").replace(
+            "% (skeleton) author the Introduction section to the package spec; the manuscript "
+            "names the science, not the toolchain.",
+            prose,
+        ),
+        encoding="utf-8",
+    )
+    report = verify_package(ws)
+    assert report.package_requirements_clean is True
+    assert report.passed is True

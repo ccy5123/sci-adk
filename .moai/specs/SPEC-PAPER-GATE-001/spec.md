@@ -282,8 +282,8 @@ merge render). Keyword conventions: **shall** (ubiquitous), **When** (event-driv
 
 ## Decisions Confirmed (M1 keystone — 2026-06-26, orchestrator + user)
 
-The M1-blocking open decisions are resolved as follows; OD-4/5/6/7 (M2/M3) remain
-open and are confirmed when those milestones begin.
+The M1-blocking open decisions are resolved as follows. OD-4/5/6 were confirmed when M2
+began and OD-7 when M3 began (see "Decisions Confirmed (M2 + M3)" below).
 
 - **OD-2 → STAGED.** P2 record-backing = stage (iii) first (audit every quantitative
   token against a broad recorded-value pool: Claim point statistics + Evidence Result
@@ -309,6 +309,29 @@ they verify-green will FAIL once the gate ships. M1 MUST therefore bring the in-
 demo artifacts into compliance (freeze a compliant `pubreqs.json` and ensure their
 numbers audit clean) and update the affected tests — the flagship demo must exemplify
 the discipline, not be exempt from it.
+
+---
+
+## Decisions Confirmed (M2 + M3 — 2026-06-26, orchestrator + user)
+
+- **OD-4 → FAIL (no re-key).** A non-conforming `\cite`/`.bib` key FAILS with the offending
+  key named; the engine never rewrites author files (re-keying stays in the acquisition path,
+  `search/citation_keys.py`).
+- **OD-5 → WARN.** A load-bearing unpublished/DOI-less citation is a non-blocking advisory
+  warning, not a gate failure.
+- **OD-6 → declared-order FAIL / undeclared WARN.** Section order FAILS against a *declared*
+  `required_sections` order; with no order declared, deviation from default IMRaD is a WARN.
+- **OD-7 → record-extracted numbers/tables/figures, free prose; CLEAN LITERALS, no macro.**
+  The merge render (P5) extracts each run's recorded point statistic + pre-registered
+  threshold from the package record table (`02_data/claims_all.csv`) and writes them into the
+  merged `main.tex` as PLAIN numeric literals — NOT `\evval`-style macros — so the
+  reviewer-facing source carries no opaque shorthand (user constraint, 2026-06-26). Section
+  prose, framing, and interpretation are the agent's free slots. The verdict stays the
+  DETERMINISTIC package number-audit (no LLM judge): every emitted literal is a member of the
+  audit pool built from that same CSV, so the manuscript passes P2 by construction (REQ-PG-504)
+  and any later hand-edit to a non-record value FAILS P2 (REQ-PG-503). Figures are extracted by
+  co-location into `03_figures/` and referenced from the record dump (`si.tex`); inline figure
+  includes in `main.tex` are a follow-on.
 
 ---
 

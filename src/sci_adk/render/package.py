@@ -37,8 +37,10 @@ stage_render whose outputs are reused), src/sci_adk/templates/research-workspace
 
 from __future__ import annotations
 
+import csv
 import importlib.resources
 import json
+import math
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -417,21 +419,30 @@ def _ensure_manuscript(
         return True
 
     main_dest.write_text(
-        _skeleton_main_tex(workspace_dir, runs, pkgreqs), encoding="utf-8"
+        _skeleton_main_tex(workspace_dir, manuscript_dir.parent, runs, pkgreqs),
+        encoding="utf-8",
     )
     return False
 
 
 def _skeleton_main_tex(
-    workspace_dir: Path, runs: List[str], pkgreqs: Optional[PackageReqs]
+    workspace_dir: Path,
+    package_dir: Path,
+    runs: List[str],
+    pkgreqs: Optional[PackageReqs],
 ) -> str:
-    """A DETERMINISTIC, tool-agnostic skeleton ``main.tex`` derived from the record.
+    """A DETERMINISTIC, tool-agnostic merged ``main.tex`` derived from the record.
 
-    No LLM, no new belief: the section scaffold is the declared/IMRaD required sections, and
-    the Results section lists each run's recorded hypothesis STATEMENTS (the science, verbatim
-    from the frozen Spec) -- it asserts no value and names no toolchain. The Wave-2 writer
-    replaces this with the authored manuscript; until then the package is structurally
-    complete and gate-checkable.
+    No LLM, no new belief: the section scaffold is the declared/IMRaD required sections. The
+    Results section is the P5 cross-run merge render (SPEC-PAPER-GATE-001 REQ-PG-501/502): it
+    EXTRACTS each run's recorded quantities -- the per-Claim point statistic + pre-registered
+    threshold -- from the package's own record table (``02_data/claims_all.csv``) and writes
+    them as PLAIN numeric literals beside the verbatim recorded hypothesis statement, naming
+    the science and no toolchain. Every other section is a prose slot the agent authors (the
+    OD-7 boundary: numbers are record-extracted/gated, prose is free). The numbers it emits are
+    record-backed BY CONSTRUCTION (the audit pool is built from that same CSV), so the
+    manuscript passes P2 and a later hand-edit to any non-record value FAILS P2 (REQ-PG-503).
+    The Wave-2 writer authors the prose slots; the package is gate-checkable throughout.
     """
     sections = (
         list(pkgreqs.required_sections)
@@ -466,7 +477,7 @@ def _skeleton_main_tex(
             continue
         lines.append(r"\section{" + _tex_escape(name) + r"}")
         if key == "results":
-            lines.append(_results_skeleton(workspace_dir, runs))
+            lines.append(_results_merge_render(workspace_dir, package_dir, runs))
         else:
             lines.append(
                 "% (skeleton) author the " + _tex_escape(name) + " section to the package "
@@ -478,22 +489,120 @@ def _skeleton_main_tex(
     return "\n".join(lines) + "\n"
 
 
-def _results_skeleton(workspace_dir: Path, runs: List[str]) -> str:
-    """List each run's recorded hypothesis STATEMENTS (verbatim science, no values asserted)."""
+# A recorded comparison operator -> a neutral English phrase, so the merged manuscript renders
+# the pre-registered criterion as the SCIENCE (a relation) without a math-mode literal (which
+# the number-audit strips) and without a bare ``>``/``<`` that mis-renders in LaTeX text mode.
+_OP_PHRASE: Dict[str, str] = {
+    ">=": "at least",
+    ">": "above",
+    "<=": "at most",
+    "<": "below",
+    "==": "equal to",
+    "=": "equal to",
+    "!=": "not equal to",
+}
+
+
+def _results_merge_render(
+    workspace_dir: Path, package_dir: Path, runs: List[str]
+) -> str:
+    """P5 cross-run merge render of the Results section (SPEC-PAPER-GATE-001 REQ-PG-501/502).
+
+    EXTRACTS each recorded Claim's quantities -- the point statistic + the pre-registered
+    threshold -- from the package's record table (``02_data/claims_all.csv``, the builder's
+    deterministic dump) and writes them as PLAIN numeric literals beside the verbatim recorded
+    hypothesis statement and outcome. Because the package number-audit pool
+    (``RecordedValuePool.from_package``) is built from that SAME CSV, every literal emitted here
+    is record-backed by construction: it passes P2 (REQ-PG-504), while a later hand-edit to any
+    value the record does not hold FAILS P2 (REQ-PG-503). No value the record does not hold is
+    introduced; the interpretation around the numbers is the agent's prose slot (OD-7 boundary).
+
+    Falls back to the recorded hypothesis STATEMENTS alone (no value asserted) when the record
+    table is absent -- the manuscript stays gate-checkable either way.
+    """
+    rows = _read_claims_rows(package_dir)
     out: List[str] = []
-    for rid in runs:
-        spec = _load_spec(workspace_dir / "runs" / rid)
-        for hyp in spec.hypotheses:
-            out.append(
-                "% " + _tex_escape(rid) + " / " + _tex_escape(hyp.id) + ": "
-                + _tex_escape(hyp.statement)
-            )
+    if rows:
+        for row in rows:
+            out.append(_results_sentence(row))
+    else:
+        # Defensive fallback (record table not yet built): name the science, assert no value.
+        for rid in runs:
+            spec = _load_spec(workspace_dir / "runs" / rid)
+            for hyp in spec.hypotheses:
+                out.append(
+                    "% " + _tex_escape(rid) + " / " + _tex_escape(hyp.id) + ": "
+                    + _tex_escape(hyp.statement)
+                )
     out.append(
         "Each recorded result above is established in the Supporting Information with its "
         "deterministic statistic and pre-registered acceptance criterion; the reproduction "
         "trail is in the provenance index."
     )
     return "\n".join(out)
+
+
+def _read_claims_rows(package_dir: Path) -> List[Dict[str, str]]:
+    """Every recorded-Claim row of ``02_data/claims_all.csv`` (the builder's record dump).
+
+    READ-ONLY. Keys are the CSV header columns (``run_id``, ``hyp_id``, ``status``,
+    ``point_statistic``, ``op``, ``threshold``, ``statement``, ...). A missing/unreadable table
+    -> empty list (never raises), so the merge render falls back to the statement-only skeleton.
+    """
+    path = package_dir / "02_data" / "claims_all.csv"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return list(csv.DictReader(text.splitlines()))
+
+
+def _results_sentence(row: Dict[str, str]) -> str:
+    """One record-faithful Results sentence for a recorded Claim row (P5 extraction unit).
+
+    The recorded point statistic + threshold are emitted as PLAIN numeric literals (audited
+    against the package pool); the hypothesis statement + recorded outcome are verbatim science.
+    A non-numeric cell simply contributes no literal -- never a fabricated value (REQ-PG-502).
+    """
+    rid = (row.get("run_id") or "").strip()
+    hyp = (row.get("hyp_id") or "").strip()
+    statement = (row.get("statement") or "").strip()
+    status = (row.get("status") or "").strip()
+    point = _csv_number(row.get("point_statistic"))
+    threshold = _csv_number(row.get("threshold"))
+    op_phrase = _OP_PHRASE.get((row.get("op") or "").strip())
+
+    head = "For " + _tex_escape(rid) if rid else "The run"
+    if hyp:
+        head += " (" + _tex_escape(hyp) + ")"
+    sentence = head + ", the pre-registered hypothesis"
+    if statement:
+        sentence += "---" + _tex_escape(statement) + "---"
+    sentence += " was evaluated against its recorded statistic."
+    if point is not None:
+        sentence += " The recorded point statistic was " + point + "."
+    if threshold is not None:
+        crit = " The pre-registered threshold was " + threshold
+        if op_phrase:
+            crit += " (criterion: " + op_phrase + ")"
+        sentence += crit + "."
+    if status:
+        sentence += " The recorded outcome was " + _tex_escape(status) + "."
+    return sentence
+
+
+def _csv_number(cell: Optional[str]) -> Optional[str]:
+    """The cell's text iff it parses as a finite number (emittable as an audited literal), else
+    None. The emitted text is the recorded cell VERBATIM -- the audit re-parses it to the same
+    float the pool holds, so the literal is record-backed by construction."""
+    text = (cell or "").strip()
+    if not text:
+        return None
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return text if math.isfinite(value) else None
 
 
 def _load_spec(run_dir: Path) -> Spec:

@@ -166,7 +166,11 @@ encoded as a test.
       migration notes.
 - [ ] M1 (P1+P2): MP-1, MP-4, MP-5, AC-1, AC-2, AC-5, AC-6 pass.
 - [ ] M2 (P3+P4): MP-2, MP-3, AC-3, AC-4 pass.
-- [ ] M3 (P5): AC-7 passes.
+- [x] M3 (P5): AC-7 passes. Cross-run merge render extracts recorded point statistic +
+      threshold from `02_data/claims_all.csv` into `main.tex` as PLAIN literals (OD-7: clean
+      source, no macro); deterministic P2 audit is the verdict. Tests:
+      `test_package_merge_render_extracts_record_numbers_across_runs` (REQ-PG-501/502),
+      `_hand_typed_value_fails_p2` (REQ-PG-503), `_prose_is_free` (OD-7 boundary).
 - [ ] All edge-case tests (EC-1..EC-6) pass.
 - [ ] Existing claim-reproduction / record-green gate verified unchanged (AC-6).
 - [ ] Existing ~1281-test suite green; new gates covered; Docker tests marked `integration`.

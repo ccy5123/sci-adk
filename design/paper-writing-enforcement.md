@@ -254,10 +254,12 @@ M1 stays minimal.
 
 ## 6. Clean seams for the next increment (deferred, NOT built)
 
-> Status update: the P1/F2/IMRaD seams below were built in M1, and P3 + P4 in M2 (see §3 / §3b).
-> The only genuinely-deferred pillar now is **P5 — cross-run merge render (M3)**; OD-7 (the
-> record/prose boundary) is the one remaining open decision. The seam notes below are retained as
-> the original design rationale.
+> Status update: the P1/F2/IMRaD seams below were built in M1, P3 + P4 in M2, and **P5 — the
+> cross-run merge render (M3)** in M3 (see §3 / §3b / §6a). OD-7 is resolved: numbers/tables/
+> figures are record-extracted (deterministically gated), prose is the agent's free slot, and
+> the extracted numbers land in `main.tex` as PLAIN literals (no `\evval` macro) so the
+> reviewer-facing source carries no opaque shorthand. All five pillars are now built; the seam
+> notes below are retained as the original design rationale.
 
 - **P1 Stop-hook wiring (MP-5).** `templates/research-workspace/.claude/hooks/sci-adk/stop-verify-gate.sh`
   runs `sci-adk verify <run>` per-run today; it must ALSO run `sci-adk verify <workspace>` so
@@ -278,3 +280,45 @@ M1 stays minimal.
 - **P5 cross-run merge render (M3).** A programmatic merge that extracts numbers/tables/figures
   from all listed runs' records, leaving only prose for the agent — making a hand-typed
   record-typed quantity structurally impossible (P2 remains the gate for author-supplied slots).
+
+---
+
+## 6a. P5 build (M3) — what shipped
+
+OD-7 was resolved with a user constraint: the reviewer-facing `main.tex` must carry **no opaque
+shorthand** (no `\evval`-style fact macro a reviewer would not recognize). That constraint and
+the record-vs-belief invariant are NOT in tension — the macro was only ever ONE way to bind a
+number to the record. The package number-audit already gates every numeric *literal* in
+`main.tex` against the record pool, so a clean literal is gated just as tightly as a macro.
+
+What shipped (`src/sci_adk/render/package.py`):
+
+- `_results_merge_render(workspace, package_dir, runs)` upgrades the Results section from the
+  old "name the hypotheses, assert no value" skeleton to a **record extraction**. It reads the
+  package's own record table `02_data/claims_all.csv` (the builder's deterministic dump,
+  produced one step earlier in `assemble_package`) and, per recorded Claim, emits a
+  record-faithful sentence carrying the recorded **point statistic** and **pre-registered
+  threshold** as PLAIN numeric literals beside the verbatim hypothesis statement and outcome.
+  Every other section is a prose slot the agent authors (OD-7 boundary).
+- Helpers `_read_claims_rows` (read-only CSV → rows), `_results_sentence` (one extraction unit,
+  tool-agnostic + domain-neutral, op rendered as a neutral phrase to avoid math-mode/`>`
+  glyphs), `_csv_number` (emit a cell verbatim iff it parses finite, else nothing — never a
+  fabricated value).
+
+Why this satisfies REQ-PG-501..504 without a macro or an LLM:
+
+- **By construction (REQ-PG-502/504).** The audit pool is `RecordedValuePool.from_package` =
+  `02_data/*.csv` ∪ `06_provenance/run_index.csv`. The merge render emits values pulled from
+  that same `02_data/claims_all.csv`, so each literal is a pool member — the manuscript passes
+  P2 with no special-casing (P2 subsumed for the merged case).
+- **Tamper-evident (REQ-PG-503).** A hand-edit of any emitted literal to a value the record
+  does not hold leaves the exact-only package audit (`allow_derived=False`) with an unbacked
+  token → deterministic FAIL naming the number. No LLM verdict, consistent with the
+  Exclusions ("No LLM in the verdict path").
+- **Figures** are extracted by co-location into `03_figures/` and referenced from the record
+  dump `si.tex`; inline figure includes in `main.tex` are a follow-on (kept out of M3 to avoid
+  a figure-presence regression when a run ships no figure).
+
+Coverage: `tests/test_package_gate.py` §(4) — `test_package_merge_render_extracts_record_numbers_across_runs`
+(REQ-PG-501/502, 2-run extraction + clean source), `test_package_merge_render_hand_typed_value_fails_p2`
+(REQ-PG-503), `test_package_merge_render_prose_is_free` (OD-7 free-prose boundary).
