@@ -212,3 +212,74 @@ def test_pool_from_data_csvs_collects_numeric_cells(tmp_path):
     assert pool.contains(0.5)
     assert pool.contains(1.2)
     assert pool.contains(3.4)
+
+
+def test_pool_from_package_unions_data_and_run_index(tmp_path):
+    # The package pool is the UNION of the record CSVs the manuscript dumps from: the 02_data
+    # data tables AND the 06_provenance/run_index.csv run-index counts. A record-dumped count
+    # (n_hypotheses) lives ONLY in the run index, so the exact-only audit needs it in the pool.
+    pkg = tmp_path / "package"
+    (pkg / "02_data").mkdir(parents=True)
+    (pkg / "02_data" / "claims_all.csv").write_text(
+        "run_id,status,point_statistic\nr1,supported,0.95\n", encoding="utf-8"
+    )
+    (pkg / "06_provenance").mkdir(parents=True)
+    (pkg / "06_provenance" / "run_index.csv").write_text(
+        "run_id,n_hypotheses,verdicts,record_digest_sha256_12\nr1,1,1S,6f083397bbaf\n",
+        encoding="utf-8",
+    )
+    pool = RecordedValuePool.from_package(pkg)
+    assert pool.contains(0.95)  # the 02_data statistic
+    assert pool.contains(1)     # the run-index count -- the SI record dump reports it
+    # the hex digest cell ("6f083397bbaf") does not parse as a number, so it never enters the
+    # pool -- only genuine numeric cells are recorded values.
+    assert pool.values == (0.95, 1.0)
+
+
+def test_pool_from_package_tolerates_a_missing_run_index(tmp_path):
+    # A package with only 02_data (no run index yet) still builds a pool -- no error.
+    pkg = tmp_path / "package"
+    (pkg / "02_data").mkdir(parents=True)
+    (pkg / "02_data" / "claims_all.csv").write_text("a\n0.61\n", encoding="utf-8")
+    pool = RecordedValuePool.from_package(pkg)
+    assert pool.contains(0.61)
+
+
+# -- P2 stage-ii: exact-only mode for the broad pool (closes the derived leniency) -----------
+
+def test_audit_exact_mode_rejects_a_derived_only_value():
+    # 1.8 == 0.6 + 1.2 is a DERIVED transform of two recorded operands, but is NOT itself an
+    # exact pool member. The broad-pool danger (O(N^2) combos over hundreds of CSV cells) is a
+    # coincidental match admitting a wrong number; stage-ii's exact-only mode refuses it while
+    # the default (per-run small pool) keeps the derived policy.
+    pool = RecordedValuePool.from_values([0.6, 1.2])
+    tex = r"The operands 0.6 and 1.2 are recorded, but the sum 1.8 is only derivable."
+    # default (allow_derived=True): the derived sum 1.8 is accepted (per-run stage iii).
+    assert number_audit_problems(tex, pool, source="main.tex") == []
+    # exact-only (allow_derived=False, the package stage ii): 1.8 is refused and named.
+    problems = number_audit_problems(tex, pool, source="main.tex", allow_derived=False)
+    joined = " ".join(problems)
+    assert "1.8" in joined
+    assert "main.tex" in joined
+    # the exact operands themselves are still backed -- no false positive on recorded values.
+    assert "0.6" not in joined
+    assert "1.2" not in joined
+
+
+def test_audit_exact_mode_accepts_exact_recorded_values():
+    # No false positive: a manuscript whose every token is an EXACT pool member passes the
+    # exact-only audit (stage-ii does not over-tighten genuinely recorded numbers).
+    pool = RecordedValuePool.from_values([0.61, 0.5])
+    tex = r"The recorded value 0.61 over threshold 0.5."
+    assert number_audit_problems(tex, pool, source="main.tex", allow_derived=False) == []
+
+
+def test_audit_exact_mode_message_names_the_record_macro_remedy():
+    # The exact-only failure message is actionable: it tells the author a derived quantity must
+    # have a recorded home pulled via a record macro, not a hand-typed literal (REQ-PG-108 spirit).
+    pool = RecordedValuePool.from_values([0.6, 1.2])
+    tex = r"The derived sum 1.8 has no recorded home."
+    problems = number_audit_problems(tex, pool, source="main.tex", allow_derived=False)
+    joined = " ".join(problems).lower()
+    assert "recorded home" in joined
+    assert "macro" in joined

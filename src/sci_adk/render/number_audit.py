@@ -18,12 +18,20 @@ spot-check does NOT substitute for the gate. The recorded-value pool (OD-2 stage
     predictive_error / ci bounds) AND scalar fields of the Evidence ``finding`` JSON (the same
     values ``\\evval`` can already resolve -- so a paper whose numbers come from the record
     audits clean), and
-  - the per-figure CSV values the figures were rendered from (the package's ``02_data/*.csv``).
+  - for a package, the numeric cells of every record CSV the manuscript dumps from: the
+    ``02_data/*.csv`` data tables (claim statistics + per-figure CSVs) AND the
+    ``06_provenance/run_index.csv`` run index (per-run verdict counts the SI record dump
+    reports). The pool is the union -- a record-dumped count must trace to the run index.
 
-Derived-number policy (OD-2): a value that is recomputable from TWO recorded operands by a
-ratio / difference / sum / product, within tolerance, is accepted (a reported ratio of two
-recorded means is not "unbacked"). This bounds the false-positive risk R1 without admitting
-arbitrary fabricated numbers (an unbacked literal with no recorded operand pair still fails).
+Derived-number policy (OD-2, two staged strictness levels via ``number_audit_problems``'s
+``allow_derived``): stage iii (``allow_derived=True``, default) accepts a value recomputable
+from TWO recorded operands by a ratio / difference / sum / product within tolerance (a reported
+ratio of two recorded means is not "unbacked") -- correct for the SMALL per-run pool, bounding
+the false-positive risk R1 without admitting arbitrary numbers. Stage ii (``allow_derived=False``)
+turns the derived policy OFF and requires EXACT pool membership -- correct for the BROAD package
+pool (every ``02_data/*.csv`` cell, often hundreds), where the ``O(N^2)`` operand combinations
+are dense enough that a coincidentally-matching WRONG number could pass; a genuinely derived
+quantity must then have a recorded home (a finding scalar / data cell) pulled via ``\\evval``.
 
 Tokenizer scope (OD-3): audited = prose decimals / percentages / ratios and table data cells;
 IGNORED = section / figure / table / equation / reference numbers (the arguments of
@@ -141,25 +149,38 @@ class RecordedValuePool:
 
     @staticmethod
     def from_data_csvs(data_dir: Path) -> "RecordedValuePool":
-        """The package pool: every numeric cell of every ``02_data/*.csv`` (record-derived).
+        """The data-table pool: every numeric cell of every ``02_data/*.csv`` (record-derived).
 
         PURE-ish (reads the shipped CSVs only). Collects every parseable numeric cell from
         every ``*.csv`` under ``data_dir`` -- ``claims_all.csv`` (point_statistic, threshold)
         plus any per-figure CSVs the figures were rendered from. A missing dir -> empty pool.
         """
-        values: List[float] = []
         if not data_dir.is_dir():
             return RecordedValuePool(values=())
+        values: List[float] = []
         for path in sorted(data_dir.glob("*.csv")):
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            for row in csv.reader(text.splitlines()):
-                for cell in row:
-                    num = _parse_number(cell)
-                    if num is not None:
-                        values.append(num)
+            values.extend(_numeric_cells_of_csv(path))
+        return RecordedValuePool.from_values(values)
+
+    @staticmethod
+    def from_package(package_dir: Path) -> "RecordedValuePool":
+        """The full package pool: every numeric cell of the record CSVs the manuscript dumps.
+
+        The package's ``si.tex`` is the RECORD dump, and it renders from BOTH the data tables
+        under ``02_data/*.csv`` (the per-Claim statistics + any per-figure CSVs) AND the run
+        index ``06_provenance/run_index.csv`` (per-run verdict counts + digests). So the audit
+        pool -- the record every reported number must trace to -- is the UNION of both. Without
+        the run index, a record-dumped count (e.g. ``n_hypotheses = 1``) would be unbacked under
+        the exact-only package audit even though the record holds it. A digest cell (hex with
+        letters) does not parse as a number, so it never enters the pool. A missing file is
+        skipped (an empty contribution), never an error.
+        """
+        values: List[float] = list(
+            RecordedValuePool.from_data_csvs(package_dir / "02_data").values
+        )
+        run_index = package_dir / "06_provenance" / "run_index.csv"
+        if run_index.is_file():
+            values.extend(_numeric_cells_of_csv(run_index))
         return RecordedValuePool.from_values(values)
 
 
@@ -316,26 +337,67 @@ def _parse_number(cell: str) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _numeric_cells_of_csv(path: Path) -> List[float]:
+    """Every parseable finite numeric cell of one CSV file (non-numeric cells skipped).
+
+    PURE-ish (reads ``path`` only). A missing/unreadable file -> empty list (never raises), so
+    a record CSV the manuscript dumps from but that is absent contributes nothing to the pool.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out: List[float] = []
+    for row in csv.reader(text.splitlines()):
+        for cell in row:
+            num = _parse_number(cell)
+            if num is not None:
+                out.append(num)
+    return out
+
+
 # -- the audit (REQ-PG-201/202/203/204) --------------------------------------
 
 def number_audit_problems(
-    tex: str, pool: RecordedValuePool, source: str
+    tex: str, pool: RecordedValuePool, source: str, *, allow_derived: bool = True
 ) -> List[str]:
     """Every quantitative token in ``tex`` NOT backed by the recorded-value pool (REQ-PG-202).
 
     PURE + deterministic + third-party re-runnable (REQ-PG-204). Tokenizes ``tex`` (OD-3
-    scope), and for each token that is neither a recorded value nor a derived transform of two
-    recorded operands (the derived-number policy), emits a problem line naming the unbacked
+    scope), and for each token not backed by the pool emits a problem line naming the unbacked
     token and its source document. Compares ONLY against the recorded pool -- never fabricates a
     value, never accepts a "seems-right" number (record vs belief, REQ-PG-203). De-duplicated +
     sorted for a stable report.
+
+    ``allow_derived`` selects the backing strictness (OD-2 staging):
+
+      - ``True`` (default, OD-2 stage iii) -- a token is backed iff it is a recorded value OR a
+        derived transform of two recorded operands (``pool.backs``). Correct for the SMALL,
+        curated per-run pool (Claim stats + Evidence scalars + Spec thresholds), where the
+        derived combinations are sparse and the operands are genuinely the run's record.
+      - ``False`` (OD-2 stage ii) -- a token is backed iff it EQUALS a recorded value
+        (``pool.contains``); the derived policy is OFF. Correct for the BROAD package pool
+        (every ``02_data/*.csv`` cell, often hundreds), where the ``O(N^2)`` operand
+        combinations are dense enough that a coincidentally-matching WRONG number could pass.
+        A genuinely derived quantity must then have a recorded home (an Evidence ``finding``
+        scalar or a data cell) pulled via a record macro (``\\evval``), not a hand-typed literal.
     """
+    if allow_derived:
+        backed = pool.backs
+        reason = "no Claim/Evidence/figure-data value backs it"
+    else:
+        backed = pool.contains
+        reason = (
+            "no recorded value equals it; a derived quantity must have a recorded home "
+            "(an Evidence finding scalar or a data cell) pulled via a record macro, not a "
+            "hand-typed literal"
+        )
     unbacked: set[str] = set()
     for token in tokenize_quantitative(tex):
-        if not pool.backs(token.value):
+        if not backed(token.value):
             unbacked.add(
                 f"number audit: {source} states {token.raw}, which is absent from the "
-                f"recorded-value pool (no Claim/Evidence/figure-data value backs it)"
+                f"recorded-value pool ({reason})"
             )
     return sorted(unbacked)
 

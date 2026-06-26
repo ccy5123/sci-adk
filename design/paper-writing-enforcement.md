@@ -104,6 +104,43 @@ MP-1 ⇒ `test_*_number_audit_fails_on_unbacked_token` + `test_*_passes_on_backe
 MP-4 ⇒ `test_per_run_draft_without_frozen_pubreqs_refuses` +
 `test_package_without_frozen_pkgreqs_refuses`.
 
+### P2 stage ii — exact-only audit for the broad package pool (OD-2 follow-on)
+
+OD-2 staged stage (iii) first (the derived-number policy) and named stage (ii) — "require
+record-pulled macros; refuse bare literals" — as a follow-on within P2. Stage (ii) is now built
+for the package audit, closing the residual leniency that the broad pool made dangerous:
+
+- **The leniency.** `RecordedValuePool.backs` accepts a token that is a ratio / difference / sum /
+  product of TWO recorded operands within ~1% tolerance. Over the SMALL, curated per-run pool
+  (Claim stats + Evidence scalars + Spec thresholds) the operand combinations are sparse and the
+  policy is safe. Over the BROAD package pool (every numeric cell of the record CSVs — often
+  hundreds) the `O(N^2)` operand space is dense enough that a coincidentally-matching WRONG number
+  can pass. (Concretely: `1` and `0` were UNIVERSALLY "derivable" from any non-empty pool via the
+  self-operations `a / a = 1` and `a - a = 0`.)
+- **The resolution.** `number_audit_problems` takes `allow_derived` (default `True`). The per-run
+  audit keeps it `True` (stage iii — small pool, derived policy on). The package audit passes
+  `allow_derived=False` (stage ii — exact-only: a token is backed iff it EQUALS a recorded value,
+  `pool.contains`). A genuinely derived quantity must then have a recorded home (an Evidence
+  `finding` scalar or a data cell) pulled via `\evval`, not a hand-typed literal blind-matched by
+  the operand search; the exact-only failure message says exactly this (REQ-PG-108 spirit).
+- **Pool-coverage companion (necessary to avoid false positives).** Exact-only exposed a
+  pre-existing gap the `a / a = 1` loophole had masked: the package pool was built from
+  `02_data/*.csv` only, but the SI record dump (`make_si.py`) also reports the run-index counts
+  from `06_provenance/run_index.csv` (e.g. `n_hypotheses = 1`). `RecordedValuePool.from_package`
+  now unions BOTH record CSVs the manuscript dumps from, so a record-dumped count is backed by the
+  record that holds it (a hex digest cell does not parse as a number, so it never enters the pool).
+- **Honest bound (the maximal stage ii is deferred).** This does NOT yet require EVERY number to
+  be a macro at the SOURCE prose. The package `main.tex` is copied verbatim (L3), so there is no
+  agent-prose-slot structure on which to enforce macro-only authoring; the structural elimination
+  of the hand-typing surface for the merged manuscript is P5 / M3 (the cross-run merge render).
+  Stage ii here closes the specific documented derived-policy leniency on the broad pool — the leak
+  that let a coincidentally-matching wrong number pass.
+
+Tests: `tests/test_number_audit.py` (exact-mode rejects a derived-only value / accepts exact
+recorded values / actionable message; `from_package` unions data + run-index and tolerates a
+missing run-index) + `tests/test_paper_gate_enforcement.py::test_package_number_audit_refuses_a_derived_only_value`
+(the verify-side wiring). The full suite stays green.
+
 ---
 
 ## 4. Migration posture (OD-8 consequence)

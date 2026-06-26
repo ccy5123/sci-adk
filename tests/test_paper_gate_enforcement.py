@@ -278,6 +278,32 @@ def test_package_number_audit_passes_on_backed_manuscript(tmp_path):
     assert audit == []
 
 
+def test_package_number_audit_refuses_a_derived_only_value(tmp_path):
+    """P2 stage-ii: the package gate is exact-only -- a number that is merely DERIVABLE from
+    two recorded cells (the O(N^2) leniency over the broad pool) but is not itself a recorded
+    cell FAILS verify_package and names it. The operands themselves stay backed (no false +)."""
+    ws = tmp_path
+    pkg = ws / "package"
+    (pkg / "01_manuscript").mkdir(parents=True)
+    # 0.6 and 1.2 are recorded cells; 1.8 == 0.6 + 1.2 is only derivable, not a cell.
+    (pkg / "01_manuscript" / "main.tex").write_text(
+        r"\section{Results}Operands 0.6 and 1.2 are recorded; the sum 1.8 is not.",
+        encoding="utf-8",
+    )
+    data = pkg / "02_data"
+    data.mkdir()
+    (data / "fig1.csv").write_text("a,b\n0.6,1.2\n", encoding="utf-8")
+    pkgreqs = PackageReqs(digest="fixture-digest")
+    (ws / "pkgreqs.json").write_text(pkgreqs.model_dump_json(), encoding="utf-8")
+    report = verify_package(ws)
+    audit = [p for p in report.package_requirements_problems if "number audit" in p]
+    joined = " ".join(audit)
+    assert "1.8" in joined
+    assert "main.tex" in joined
+    assert "0.6" not in joined and "1.2" not in joined  # exact operands stay backed
+    assert not report.package_requirements_clean
+
+
 # -- PNG fixture helper (stdlib only -- NO Pillow); the DPI checker reads only the IHDR width.
 
 def _make_png(width: int, height: int = 10) -> bytes:

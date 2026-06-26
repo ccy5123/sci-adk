@@ -1094,14 +1094,22 @@ def _check_package_requirements(
         )
 
     # SPEC-PAPER-GATE-001 P2 (REQ-PG-201/202/204): every quantitative token in main.tex + si.tex
-    # must trace to the package's recorded-value pool (the 02_data/*.csv record dump: the
-    # claims_all.csv statistics + any per-figure CSVs). Compares ONLY against recorded values
-    # (record vs belief, REQ-PG-203). Runs whenever a package/ exists -- the merged manuscript
-    # is the central leak (L2/L3: hand-typed prose) this gate closes.
-    pool = RecordedValuePool.from_data_csvs(package_dir / "02_data")
+    # must trace to the package's recorded-value pool -- the union of the record CSVs the
+    # manuscript dumps from (02_data/*.csv data tables + 06_provenance/run_index.csv run-index
+    # counts, via from_package). Compares ONLY against recorded values (record vs belief,
+    # REQ-PG-203). Runs whenever a package/ exists -- the merged manuscript is the central leak
+    # (L2/L3: hand-typed prose) this gate closes.
+    # stage ii (OD-2): exact-only here (allow_derived=False). The package pool is the BROAD
+    # record dump (often hundreds of cells), where the per-run derived policy's O(N^2) operand
+    # combinations are dense enough to admit a coincidentally-matching wrong number; a derived
+    # quantity must instead have a recorded home (pulled via a record macro). The per-run audit
+    # keeps the derived policy (its pool is small + curated -- see _check_paper_requirements).
+    pool = RecordedValuePool.from_package(package_dir)
     for name, tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
         if tex:
-            problems.extend(number_audit_problems(tex, pool, source=name))
+            problems.extend(
+                number_audit_problems(tex, pool, source=name, allow_derived=False)
+            )
 
     # 1. Layout: the 6 folders + MANIFEST.md + README.md present.
     problems.extend(layout_problems(package_dir))
