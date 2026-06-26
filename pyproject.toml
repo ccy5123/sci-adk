@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sci-adk"
 version = "0.1.0"
-description = "Agentic Discovery Kit (ADK): a domain-general rigor / verification system -- 4-pane proposal to paper + code + an evidence trail; agents propose, the engine judges by frozen criteria"
+description = "Agentic Discovery Kit (ADK): a rigor / verification system with a domain-general kernel + capability-adapter seam -- 4-pane proposal to paper + code + an evidence trail; agents propose, the engine judges by frozen criteria"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [

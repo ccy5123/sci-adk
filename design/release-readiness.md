@@ -37,21 +37,26 @@ to its own release**: the release may not advertise more than is validated.
 | G-D | Versioning & API stability | semver 1.0 = stability commitment |
 | G-E | Honesty / claims boundary | the release must not over-claim |
 
-## 3. G-A — Generalization validated (KEYSTONE)
+## 3. G-A — Generalization validated (KEYSTONE — substantively validated)
 
-The central design claim is a **domain-general** rigor kernel. That claim is
-validated only when a 2nd domain plugs in **without a kernel edit**.
+The central design claim is a **domain-general** rigor/verification kernel. A3 was
+resolved on 2026-06-26 (`design/g-a-a3-decision.md`): A1 conflated two separable
+claims and is **split**. The verification half (A1a) is **validated on a 2nd domain**
+(IEAM-P8, ecotoxicology/DEB-TK); the autonomous experiment-seam half (A1b) is **scoped
+out** of the 1.0 claim (the de-emphasized "player" half, T-1 only).
 
 | # | Criterion | Status | Basis |
 |---|-----------|--------|-------|
-| A1 | A 2nd domain plugs into the kernel via the adapter seam with no kernel edit | `[OPEN]` | only T-1 adapter exists: `src/sci_adk/adapter/` = `t1_capability.py` + `t1_encoding.py`; the general contract is "validated only once a 2nd domain plugs in without a kernel edit" — `design/adoption-roadmap.md:134` |
-| A2 | All in-repo runs are not a single domain family | `[OPEN]` | `runs/` = `t-1`, `t1-demo`, `t1-godel` — all T-1 (molecular) |
-| A3 | Decide whether IEAM-P8 (ecotoxicology) satisfies A1 | `[TBD]` | IEAM-P8 used the operational/borrow path (in-session agent-authored experiments) in a separate workspace, not the in-repo capability-adapter seam; whether that counts as the formal gate is undecided. Resolve before claiming generalization |
-| A4 | If A3 is "no", define what an in-repo T-2 adapter requires | `[OPEN]` | T-2 (p-adic similarity, empirical) is planned but research-gated — `design/session-5-handoff.md:85` ("사용자가 연구") |
+| A1a | A 2nd domain plugs into the kernel's **Verifier** interface (`DecisionEngine`/`sci-adk verify`) + typed Spec/Evidence/Claim store with no kernel edit | `[DONE]` | IEAM-P8 (`~/research/ieam-followup-p8`): 27 typed-store runs, `package/06_provenance/verify_all.txt` = "27/27 runs reproduce all recorded claims", 100 Claims (81/17/2), zero kernel edits — `design/g-a-a3-decision.md` §2.2 |
+| A1b | A 2nd domain plugs into the **Experiment** adapter-registry (`ExperimentFn`/`--capability`) with no kernel edit | `[SCOPED OUT]` | only the T-1 capability is registered (`src/sci_adk/adapter/registry.py` + `t1_capability.py`); IEAM-P8 used the sanctioned operational/borrow path (A5), not the registry. De-emphasized player half — not advertised in the 1.0 claim, not a blocker — `design/g-a-a3-decision.md` §3 |
+| A2 | All in-repo runs are not a single domain family | `[OPEN]` (cosmetic) | in-repo `runs/` = `t-1`, `t1-demo`, `t1-godel` — all T-1; the 2nd-domain validation is **external** (IEAM-P8). An in-repo T-2 run would close this cosmetically but adds no new validation beyond A1a |
+| A3 | Decide whether IEAM-P8 (ecotoxicology) satisfies A1 | `[DONE]` | Resolved: discharges A1a (verification generality), not A1b (experiment seam) — full record in `design/g-a-a3-decision.md` |
+| A4 | If A1b is pursued, define what an in-repo T-2 adapter requires (`t2_*` provider + registry entry + `checkpoint_loop` path) | `[OPEN]` (optional) | needed only to validate A1b; under the A3 verdict A1b is scoped out, so A4 is future/optional, not a 1.0 blocker — T-2 (p-adic similarity) is research-gated, `design/session-5-handoff.md:85` |
 
-Note: A1 and the paper's 2nd case study (T-2) are the **same work item** — one
-2nd-domain pass discharges both. This is research-gated (the user supplies the
-research).
+Note: the paper's 2nd case study (G-B B3) is a **separate question** from A1b. IEAM-P8
+serves as the cross-domain **verification** evidence (A1a); the methods paper's primary
+case study remains T-1. Producing a paper-grade T-2 writeup is G-B work, not required to
+discharge the G-A keystone.
 
 ## 4. G-B — Methods paper
 
@@ -93,15 +98,20 @@ publication-plan memory; Phase 0 / MIT license already done.)
 
 | # | Criterion | Status | Basis |
 |---|-----------|--------|-------|
-| E1 | README/paper claims do not exceed validated evidence | `[OPEN]` | README/title assert "domain-general"; G-A not yet validated — either validate (G-A) or scope the claim down to "general seam, validated on T-1; 2nd domain in progress" |
-| E2 | "record vs belief" applied to the release narrative | `[OPEN]` | the release is a Claim about sci-adk; it must cite its Evidence (validated domains) and not over-state |
+| E1 | README/paper claims do not exceed validated evidence | `[DONE]` | applied 2026-06-26: headline surfaces (README:9, pyproject:8, CITATION:5) now claim a domain-general **kernel** (structural, always true) + capability-adapter seam — not a cross-domain-validated "system". 2nd-domain *verification* validation stated honestly in README Remaining as separate research (paper in preparation); the autonomous experiment seam (A1b) is not advertised |
+| E2 | "record vs belief" applied to the release narrative | `[DONE]` | the release Claim cites its Evidence: in-repo T-1 (visible) + the verification kernel run on a 2nd domain (IEAM-P8, external/paper-pending), stated as such; nothing claimed beyond `design/g-a-a3-decision.md` |
 
-### G-E audit (2026-06-26) — findings + prepared wording, apply DEFERRED to post-G-A
+### G-E audit (2026-06-26) — findings + wording, **APPLIED 2026-06-26 (post-G-A)**
 
 Audit of every public surface for "domain-general" asserted as a *validated*
-property (it is validated on N=1, T-1). Apply is **deferred until G-A resolves**
-(user decision 2026-06-26: revisit after G-A). Parked here so the post-G-A edit
-is one step.
+property. **Applied** after the A3 verdict (`design/g-a-a3-decision.md`): the
+headline surfaces were scoped to a domain-general **kernel** (structural fact);
+the 2nd-domain *verification* validation is stated in README Remaining as separate
+research (paper in preparation), and the autonomous experiment seam (A1b) is not
+advertised. The chosen honesty level was **structural/conservative** (user decision
+2026-06-26): private IEAM-P8 evidence is not put forward as a headline claim, per
+sci-adk's own "a Claim must cite its Evidence" principle. Original findings retained
+below for the record.
 
 Over-claim sites (assert generality as fact):
 - `README.md:9` (identity line) — "a **domain-general** rigor / verification system"
@@ -130,10 +140,13 @@ is the honest end state.
 
 ## 8. Release sequence (gated by triggers, not dates)
 
-1. **Resolve G-A (keystone).** Either confirm IEAM-P8 discharges the gate (A3),
-   or run an in-repo T-2 adapter (A4). This single step validates the central
-   claim *and* supplies the paper's 2nd case study.
-2. **G-B** — write the methods paper on T-1 + T-2.
+1. **G-A (keystone) — RESOLVED 2026-06-26.** A3 verdict (`design/g-a-a3-decision.md`):
+   A1a (verification-kernel generality) is validated on a 2nd domain (IEAM-P8); A1b
+   (autonomous experiment seam) is scoped out of the 1.0 claim. The central
+   *verification* claim is validated. Next step is the **G-E apply** (relax the
+   "domain-general" wording to the evidence-backed verification framing).
+2. **G-B** — write the methods paper (primary case study T-1; IEAM-P8 as cross-domain
+   verification evidence; a paper-grade T-2 writeup is optional, not gating).
 3. **G-C / G-D** — mechanical OSS hygiene + version bump + tag (parallelizable;
    safe to start once G-A has a plan).
 4. **G-E** — final claims audit: every public assertion traces to validated
@@ -146,8 +159,12 @@ down to exactly what is validated (an honest "validated on T-1; general seam
 enforced; 2nd domain in progress" framing is a legitimate 1.0 — over-claiming
 domain-generality on N=1 is not).
 
-Until G-A is resolved, an external 1.0 that advertises domain-generality would
-violate G-E and is **not** recommended.
+G-A is **resolved** (2026-06-26, `design/g-a-a3-decision.md`): the domain-general
+*verification* claim is validated on a 2nd domain (IEAM-P8, ecotox), so an external
+1.0 advertising **domain-general rigor/verification** no longer over-claims — provided
+the wording is the verification framing (G-E apply step) and does not advertise the
+autonomous experiment seam as cross-domain (A1b, scoped out). The remaining gates are
+G-B (paper), G-C/G-D (hygiene/version, mechanical), and the G-E wording apply.
 
 ---
 

@@ -132,7 +132,11 @@ isolated to one adapter), deterministically where possible (no LLM in the verdic
   lint is a test (`tests/test_kernel_adapter_seam.py`).
 - **(d) Stage/status:** Stage 0 — **DONE** for the minimal seam + enforced invariant
   (`59578d8`). The **general** contract is *validated* only once a 2nd domain plugs in
-  without a kernel edit (§6 — the generalization gate).
+  without a kernel edit (§6 — the generalization gate). **Generalization gate RESOLVED
+  2026-06-26** (`design/g-a-a3-decision.md`): the gate splits by interface — the
+  **Verifier** half is validated on a 2nd domain (IEAM-P8, ecotox/DEB-TK: 27/27 reproduce,
+  100 Claims, zero kernel edits); the **Experiment** adapter-registry half remains T-1
+  only and is **scoped out** of the 1.0 claim (the de-emphasized player half, A5 substrate).
 
 ### A4 — Persistent typed store
 - **(a) Bring:** typed Spec / Evidence / Claim persisted as JSON under `runs/<id>/`
@@ -265,6 +269,12 @@ external systems not yet listed here.
 - **Generalization gate:** the general seam (A3) is only *proven* when a **2nd, different
   domain** plugs in with **no kernel edit** (plan §5 "≥2 different problems"). This gate
   precedes any claim of domain-generality and is the natural next milestone after Stage 0.
+  **RESOLVED 2026-06-26** (`design/g-a-a3-decision.md`): the gate is per-interface. The
+  **Verifier** interface is proven on a 2nd domain (IEAM-P8, ecotox/DEB-TK — 27/27 reproduce,
+  100 Claims, zero kernel edits), which discharges the *domain-general verification* claim;
+  the **Experiment** adapter-registry interface remains T-1 only and is scoped out of the 1.0
+  claim. So a domain-general *verification* claim is now evidence-backed; a domain-general
+  *autonomous-experiment* claim is not made.
 - **B ordering** follows the stages: B1 (experiment scale) → B2/B3 (domain, if triggered) →
   B4 (multi-cycle) → B5 (paper assist, last).
 

@@ -6,7 +6,7 @@
 
 ## What is sci-adk?
 
-**sci-adk** is an **Agentic Discovery Kit (ADK)** — a domain-general rigor / verification system; a *referee/scorekeeper, not a player* — for the user's own research.
+**sci-adk** is an **Agentic Discovery Kit (ADK)** — a rigor / verification system built on a **domain-general kernel** (zero domain code) and a capability-adapter seam; a *referee/scorekeeper, not a player* — for the user's own research.
 
 It **builds** the rigor kernel (record vs belief, frozen criteria, verification, provenance, deterministic replay) and **borrows** capabilities (experiment authoring, literature, prose) via the in-session Claude agent and subagents. External release is a deferred, not foreclosed, future option. The operating rule is: **agents propose; the engine judges by frozen criteria. No self-certification. The verdict path is deterministic and rule-based.**
 
@@ -235,7 +235,7 @@ kernel** — it adds delegation and early checks, never a new verdict path. See
 ### Remaining
 
 - Paper render: IMRaD `draft.tex` exists (Overleaf-compilable); **PDF compilation (LaTeX docker)** remains deferred; cross-document main↔SI `\ref` via `xr` (4c) deferred (Overleaf compile-order wrinkle outweighs value — authoring convention: refer to SI figures as plain text "Figure S1")
-- 2nd-domain generalization: the plug-seam is built and enforced; validated only once a second domain plugs in without a kernel edit (adoption-roadmap Stage 0 generalization gate)
+- 2nd-domain generalization (RESOLVED 2026-06-26, `design/g-a-a3-decision.md`): the **verification** kernel is validated on a second domain (ecotoxicology), run unmodified with zero kernel edits — the domain-general *verification* claim is evidence-backed (the cross-domain record lives in separate research, paper in preparation); the **autonomous experiment** adapter-seam remains validated on T-1 only (scoped out of the 1.0 claim)
 - Multi-capability auto-attempt orchestration: deferred (no consumer yet; append-only record + capability-in-provenance block method-shopping structurally)
 - Literature scale: `loop/literature_acquirer.py` exists; PaperQA2 and similar heavy literature plugins are Stage 2 (triggered by first-problem domain selection)
 
