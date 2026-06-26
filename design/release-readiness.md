@@ -89,7 +89,7 @@ publication-plan memory; Phase 0 / MIT license already done.)
 
 | # | Criterion | Status | Basis |
 |---|-----------|--------|-------|
-| D1 | CLI/API surface frozen (semver 1.0 = stability promise) | `[OPEN]` | surface still growing — `package` / `pkgreqs` added recently |
+| D1 | CLI/API surface frozen (semver 1.0 = stability promise) | `[OPEN]` (contract decided) | surface measured + fixed as a contract in `design/surface-freeze-analysis.md` (17 verbs / 83 flags; stopped growing at HEAD-1, `6e96103`; scope = CLI + curated Python API; publishing layer `package`/`pkgreqs`/`pubreqs` included). Closes on the D1 execution step: curated `__all__` in `src/sci_adk/__init__.py` + version bump |
 | D2 | Version bump `0.1.0 -> 1.0.0` | `[OPEN]` | `pyproject.toml` = `0.1.0` |
 | D3 | Git tag `v1.0.0` + GitHub release notes | `[OPEN]` | — |
 | D4 | PyPI publish decision (publish vs source-only) | `[TBD]` | packaging metadata partial; decide scope |
