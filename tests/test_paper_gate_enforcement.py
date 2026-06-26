@@ -230,6 +230,41 @@ def test_per_run_number_audit_passes_on_fully_backed_manuscript(tmp_path):
     assert report.passed
 
 
+# -- R1: per-run advisory channel (SPEC-PAPER-GATE-001 OD-5 / OD-6) -----------
+
+def test_per_run_unpublished_citation_is_advisory_not_gated(tmp_path):
+    """OD-5 (R1): a DOI-less load-bearing citation surfaces as a per-run advisory
+    (paper_advisory), NEVER a FAIL -- verify still passes."""
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir, point=0.61)
+    _draft(run_dir, r"\section{Results}As shown \cite{McKay2013}, the value is 0.61.")
+    (run_dir / "paper" / "references.bib").write_text(
+        "@article{McKay2013, title={x}}\n", encoding="utf-8"  # no doi field -> unpublished
+    )
+    _freeze_pubreqs(run_dir, required_sections=[], figure_font_policy=False,
+                    image_min_dpi=None, reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean                       # WARN does not fail the gate
+    assert report.passed
+    assert any("McKay2013" in w for w in report.paper_advisory)  # surfaced as advisory
+    assert all("McKay2013" not in p for p in report.paper_requirements_problems)
+
+
+def test_per_run_undeclared_section_order_is_advisory(tmp_path):
+    """OD-6 (R1): with NO declared order, a section sequence deviating from the default IMRaD
+    order is a per-run advisory, never a FAIL."""
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir, point=0.61)
+    # Methods before Introduction deviates from default IMRaD; no numbers, no cites to gate.
+    _draft(run_dir, r"\section{Methods}m \section{Introduction}i")
+    _freeze_pubreqs(run_dir, required_sections=[], figure_font_policy=False,
+                    image_min_dpi=None, reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean      # undeclared order -> WARN, not FAIL
+    assert report.passed
+    assert report.paper_advisory                # the order advisory is surfaced
+
+
 def test_package_number_audit_fails_on_unbacked_token(tmp_path):
     """MP-1: a package main.tex with an unbacked number FAILS verify_package and names it."""
     ws = tmp_path

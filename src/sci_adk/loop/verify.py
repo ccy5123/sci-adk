@@ -54,6 +54,9 @@ from sci_adk.core.pkgreqs import (
     DEFAULT_REQUIRED_SECTIONS as PKG_DEFAULT_REQUIRED_SECTIONS,
 )
 from sci_adk.core.pkgreqs import PackageReqs
+from sci_adk.core.pubreqs import (
+    DEFAULT_REQUIRED_SECTIONS as PUB_DEFAULT_REQUIRED_SECTIONS,
+)
 from sci_adk.core.pubreqs import PubReqs
 from sci_adk.core.spec import Hypothesis, Spec
 from sci_adk.core.validity import (
@@ -200,6 +203,12 @@ class VerifyReport:
             items and ``max_pages`` are NEVER in this list (they are surfaced, never gated).
         paper_requirements_clean: True iff no declared publishing requirement failed (and True
             vacuously when ``pubreqs.json`` is absent). Part of the HARD gate.
+        paper_advisory: per-run NON-BLOCKING advisory lines (SPEC-PAPER-GATE-001 OD-5/OD-6) --
+            an unpublished/DOI-less load-bearing citation, or a section order that deviates from
+            the default IMRaD order when NO order was declared. SURFACED in the CLI, NEVER gated
+            (not in ``passed``). The per-run companion to ``PackageVerifyReport.advisory``. EMPTY
+            when clean / no paper / no contract. Closing the per-run advisory-channel gap the
+            package gate already had.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
             paper_cross_doc_clean and paper_requirements_clean``. This is what the CLI exits
@@ -222,6 +231,7 @@ class VerifyReport:
     paper_cross_doc_clean: bool = field(default=True)
     paper_requirements_problems: List[str] = field(default_factory=list)
     paper_requirements_clean: bool = field(default=True)
+    paper_advisory: List[str] = field(default_factory=list)
     passed: bool = field(default=False)
 
 
@@ -412,7 +422,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # REFUSAL (OD-8 immediate), and every quantitative token in draft.tex+si.tex must trace to
     # the recorded-value pool (P2 number-audit). A run with NO draft.tex stays vacuously clean.
     # advisory + max_pages are surfaced (CLI) but NEVER gated.
-    paper_requirements_problems = _check_paper_requirements(
+    paper_requirements_problems, paper_advisory = _check_paper_requirements(
         run_dir, evidence, list(recorded_claims.values()), spec
     )
     paper_requirements_clean = not paper_requirements_problems
@@ -434,6 +444,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_cross_doc_clean=paper_cross_doc_clean,
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
+        paper_advisory=paper_advisory,
         passed=(
             all_reproduced
             and paper_consistent
@@ -832,13 +843,17 @@ def _check_paper_requirements(
     evidence: List[EvidenceItem],
     claims: Optional[List[Claim]] = None,
     spec: Optional[Spec] = None,
-) -> List[str]:
+) -> tuple[List[str], List[str]]:
     """Run the deterministic checks the FROZEN ``pubreqs.json`` declares (F1, design §1.3).
 
     READ-ONLY (mirrors the other ``_check_paper_*`` helpers): reads ``run_dir/pubreqs.json``
     (the frozen publishing contract), ``run_dir/paper/draft.tex``, the co-located rasters, and
     ``run_dir/paper/reproduce.py`` -- never recompiles, never writes, never calls an LLM. Runs
-    ONLY the requirements the contract turns on, and returns the failure lines (empty = clean).
+    ONLY the requirements the contract turns on, and returns ``(problems, warnings)`` -- the FAIL
+    lines (empty = clean, gated via ``paper_requirements_clean``) and the NON-BLOCKING advisory
+    lines (SPEC-PAPER-GATE-001 OD-5 unpublished/DOI-less citation + OD-6 undeclared-order;
+    surfaced via ``paper_advisory``, NEVER gated -- the per-run companion to the package gate's
+    advisory channel).
 
     SPEC-PAPER-GATE-001 P1+P2 (the non-vacuous posture, OD-1 strict + OD-8 immediate):
       - A run with NO ``paper/draft.tex`` is NOT a conclusion-bearing artifact -> this stays
@@ -870,7 +885,7 @@ def _check_paper_requirements(
     # OD-1 strict conclusion-bearing trigger (per-run): ANY paper/draft.tex. A run with no
     # draft.tex declared no paper -> vacuously clean (backward compatible, EC-1 spirit).
     if not draft.is_file():
-        return []
+        return [], []
 
     pubreqs_path = run_dir / "pubreqs.json"
     if not pubreqs_path.is_file():
@@ -880,13 +895,14 @@ def _check_paper_requirements(
             "publishing contract: paper/draft.tex is conclusion-bearing but no frozen "
             "pubreqs.json exists -- run `sci-adk pubreqs freeze <run>` to freeze the "
             "publishing contract before verify can pass (SPEC-PAPER-GATE-001 P1)"
-        ]
+        ], []
 
     pubreqs = PubReqs.model_validate(
         json.loads(pubreqs_path.read_text(encoding="utf-8"))
     )
 
     problems: List[str] = []
+    warnings: List[str] = []
 
     # P2 number-audit (REQ-PG-201/202/204): every quantitative token in draft.tex + si.tex
     # traces to the recorded-value pool (Claim statistics + Evidence scalars). Compares ONLY
@@ -906,10 +922,14 @@ def _check_paper_requirements(
         )
         # P4 (REQ-PG-401/402): section ORDER against the DECLARED order (the required_sections
         # list order is the declared order) -> FAIL on deviation (OD-6: declared order = FAIL).
-        # When required_sections is empty (undeclared) the per-run report has no non-gating
-        # advisory channel for the WARN, so the per-run order check is skipped there (the package
-        # path surfaces the undeclared-order WARN via its advisory channel).
         problems.extend(section_order_problems(draft_tex, pubreqs.required_sections))
+    else:
+        # OD-6: no order declared -> WARN against the default IMRaD order (non-blocking, routed
+        # to the per-run advisory channel) -- never a FAIL when nothing was declared. Mirrors the
+        # package gate's undeclared-order branch.
+        warnings.extend(
+            section_order_problems(draft_tex, list(PUB_DEFAULT_REQUIRED_SECTIONS))
+        )
 
     if pubreqs.figure_font_policy:
         problems.extend(figure_font_policy_problems(draft_tex))
@@ -931,17 +951,19 @@ def _check_paper_requirements(
     # (paper/references.bib). cite-resolution closes the per-run gap (REQ-PG-305 -- the package
     # already had it); the shape + disambiguation gates validate every \cite/.bib key against
     # <Surname><Year>(+a/b) (OD-4: FAIL, never re-key). The unpublished/DOI-less WARNING
-    # (REQ-PG-304, OD-5) is package-scoped: the per-run report has no non-gating advisory channel.
+    # (REQ-PG-304, OD-5) routes to the per-run advisory channel (non-gating) -- it was
+    # package-scoped before R1 added a per-run advisory channel.
     bib_path = run_dir / "paper" / "references.bib"
     bib = bib_path.read_text(encoding="utf-8") if bib_path.is_file() else ""
     problems.extend(cite_resolution_problems(draft_tex, bib))
     problems.extend(citation_key_shape_problems(draft_tex, bib))
     problems.extend(citation_disambiguation_problems(draft_tex, bib))
+    warnings.extend(unpublished_citation_warnings(draft_tex, bib))
 
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
 
-    return problems
+    return problems, warnings
 
 
 def _reproduction_bundle_problems(

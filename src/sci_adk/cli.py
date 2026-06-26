@@ -1553,6 +1553,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                       "(advisory only -- no page count without a compile)")
             for note in pr.advisory:
                 print(f"  publishing advisory: {note} (advisory only -- not gated)")
+        # SPEC-PAPER-GATE-001 OD-5/OD-6 (R1): per-run non-blocking advisories -- an
+        # unpublished/DOI-less citation, or an undeclared section order deviating from default
+        # IMRaD. Surfaced here, NEVER gated (not in report.passed).
+        for note in report.paper_advisory:
+            print(f"  publishing advisory: {note} (advisory only -- not gated)")
 
     # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent
     # AND no residual fact macro AND the paper is tool-agnostic AND every cross-document
