@@ -677,7 +677,7 @@ def test_verify_required_sections_present_passes(tmp_path):
     _write_paper(run_dir, "draft.tex",
                  r"\begin{abstract}x\end{abstract}"
                  r"\section{Introduction}a\section{Methods}b"
-                 r"\section{Results}c\section{Discussion}d")
+                 r"\section{Results}c\section{Discussion}d\section{Conclusion}e")
     _write_pubreqs(run_dir, required_sections=list(DEFAULT_REQUIRED_SECTIONS),
                    figure_font_policy=False, image_min_dpi=None,
                    reproduction_bundle=False)

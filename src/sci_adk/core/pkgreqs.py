@@ -34,17 +34,22 @@ from typing import List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field
 
-# The IMRaD default (mirrors PubReqs.DEFAULT_REQUIRED_SECTIONS): the fixed required-sections
-# set offered by the "use defaults" fast-path. Abstract is accepted as a \begin{abstract}
-# environment OR a \section{Abstract}; the rest are \section{...} (see the gate's
-# required_sections check, which reuses render.pubreqs_checks.required_sections_problems).
+# The IMRaD default (mirrors PubReqs.DEFAULT_REQUIRED_SECTIONS; SPEC-PAPER-GATE-001
+# REQ-PG-105): the fixed required-sections set offered by the "use defaults" fast-path,
+# INCLUDING Conclusion. Abstract is accepted as a \begin{abstract} environment OR a
+# \section{Abstract}; the rest are \section{...} (see the gate's required_sections check,
+# which reuses render.pubreqs_checks.required_sections_problems).
 DEFAULT_REQUIRED_SECTIONS: List[str] = [
     "Abstract",
     "Introduction",
     "Methods",
     "Results",
     "Discussion",
+    "Conclusion",
 ]
+
+# The default raster DPI floor (mirrors PubReqs.DEFAULT_IMAGE_MIN_DPI: 300 = print).
+DEFAULT_IMAGE_MIN_DPI = 300
 
 # The sentinel for "synthesize ALL runs in the workspace" (design §2 ``runs: list | "all"``).
 # The model normalizes a bare ``"all"`` string to this literal so callers can test
@@ -69,6 +74,12 @@ class PackageReqs(BaseModel):
         required_sections: section names that MUST be present in ``main.tex`` (each as a
             ``\\section{...}``; "Abstract" also accepts ``\\begin{abstract}``). The IMRaD
             default is :data:`DEFAULT_REQUIRED_SECTIONS`.
+        figure_font_policy: F2 font policy on/off -- when on, a figure-bearing package
+            ``main.tex`` must carry the F2 font preamble (newtxmath + helvet). Mirrors
+            :class:`sci_adk.core.pubreqs.PubReqs`. Default True.
+        image_min_dpi: the raster (image) figure minimum effective DPI checked over the
+            package ``main.tex`` figures; None disables the DPI gate. Mirrors PubReqs.
+            Default :data:`DEFAULT_IMAGE_MIN_DPI`.
         reference_style: the declared bib style (e.g. "natbib"/"plainnat") checked present in
             ``main.tex`` (a ``\\bibliographystyle`` wiring), or None to skip.
         abstract_max_words: the venue abstract word limit (e.g. 300); None disables the
@@ -101,6 +112,13 @@ class PackageReqs(BaseModel):
         default_factory=list,
         description="Section names that must be present in main.tex",
     )
+    figure_font_policy: bool = Field(
+        default=True, description="F2 font policy on/off (default on); mirrors PubReqs"
+    )
+    image_min_dpi: Optional[int] = Field(
+        default=DEFAULT_IMAGE_MIN_DPI,
+        description="Raster figure min effective DPI (None disables the gate); mirrors PubReqs",
+    )
     reference_style: Optional[str] = Field(
         default=None, description="Declared bib style checked in main.tex, or None"
     )
@@ -130,4 +148,9 @@ class PackageReqs(BaseModel):
     #   abstract limit after a failure would be a silent record edit, mirroring PubReqs/Spec).
 
 
-__all__ = ["PackageReqs", "DEFAULT_REQUIRED_SECTIONS", "ALL_RUNS"]
+__all__ = [
+    "PackageReqs",
+    "DEFAULT_REQUIRED_SECTIONS",
+    "DEFAULT_IMAGE_MIN_DPI",
+    "ALL_RUNS",
+]

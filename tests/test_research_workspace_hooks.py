@@ -256,6 +256,40 @@ def test_stop_gate_exit0_when_no_project_dir_and_no_cwd_runs(tmp_path):
     assert "STUB-VERIFY" not in (res.stdout + res.stderr)
 
 
+# --- Stop gate: the package gate at session close (SPEC-PAPER-GATE-001 MP-5, REQ-PG-104) ----
+
+
+def test_stop_gate_blocks_when_package_gate_fails(tmp_path):
+    """MP-5: a conclusion-bearing package/ that fails `verify <ws>` BLOCKS Stop (exit 2).
+
+    The package/ exists with NO runs/ -- the package gate runs regardless (it does not depend
+    on the per-run claim-reproduction loop), proving the two gates are independent + additive.
+    """
+    (tmp_path / "package").mkdir()           # a conclusion-bearing package to gate
+    stub = _make_stub(tmp_path, verify_exit=5)  # the package gate fails
+    res = _run_hook(STOP_HOOK, tmp_path, str(stub))
+    assert res.returncode == 2, f"package failure must block; got {res.returncode}; stderr={res.stderr!r}"
+    assert "package" in res.stderr.lower()
+    assert "resolve" in res.stderr.lower()
+
+
+def test_stop_gate_allows_when_package_gate_passes(tmp_path):
+    """MP-5: a clean package/ allows Stop (no false block)."""
+    (tmp_path / "package").mkdir()
+    stub = _make_stub(tmp_path, verify_exit=0)
+    res = _run_hook(STOP_HOOK, tmp_path, str(stub))
+    assert res.returncode == 0, f"clean package must pass; got {res.returncode}; stderr={res.stderr!r}"
+
+
+def test_stop_gate_skips_package_gate_without_package_dir(tmp_path):
+    """MP-5 (D2-style strictness): no package/ -> the package gate is NOT run (low noise)."""
+    _make_run(tmp_path, "r1", with_claim=False)   # a claimless run, and NO package/
+    stub = _make_stub(tmp_path, verify_exit=5)    # would fail IF verify were run
+    res = _run_hook(STOP_HOOK, tmp_path, str(stub))
+    assert res.returncode == 0, f"no package/ must skip the gate; got {res.returncode}; stderr={res.stderr!r}"
+    assert "STUB-VERIFY" not in (res.stdout + res.stderr)
+
+
 # --- reanchor: re-anchor (D1) -----------------------------------------------
 
 

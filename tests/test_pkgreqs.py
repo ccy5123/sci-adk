@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from sci_adk.core.pkgreqs import (
     ALL_RUNS,
+    DEFAULT_IMAGE_MIN_DPI,
     DEFAULT_REQUIRED_SECTIONS,
     PackageReqs,
 )
@@ -44,12 +45,15 @@ def test_pkgreqs_defaults_match_design():
     pr = PackageReqs()
     assert pr.venue is None
     assert pr.required_sections == []          # the model default is empty (CLI seeds IMRaD)
+    assert pr.figure_font_policy is True       # F2 font policy on by default (mirrors PubReqs)
+    assert pr.image_min_dpi == DEFAULT_IMAGE_MIN_DPI == 300
     assert pr.reference_style is None
     assert pr.abstract_max_words is None
     assert pr.body_word_range is None
     assert pr.runs == ALL_RUNS == "all"        # synthesize ALL runs by default
     assert pr.advisory == []
     assert DEFAULT_REQUIRED_SECTIONS[0] == "Abstract"
+    assert "Conclusion" in DEFAULT_REQUIRED_SECTIONS   # REQ-PG-105: IMRaD incl Conclusion
 
 
 def test_pkgreqs_is_frozen():
@@ -61,6 +65,10 @@ def test_pkgreqs_is_frozen():
         pr.required_sections = ["X"]
     with pytest.raises(ValidationError):
         pr.reference_style = "natbib"
+    with pytest.raises(ValidationError):
+        pr.figure_font_policy = False          # cannot relax the font policy after a failure
+    with pytest.raises(ValidationError):
+        pr.image_min_dpi = 72                  # cannot relax the DPI floor after a failure
 
 
 def test_pkgreqs_runs_accepts_all_or_explicit_list():
@@ -275,6 +283,44 @@ def test_pkgreqs_freeze_explicit_options_override_defaults(tmp_path):
     assert pr.body_word_range == (4000, 7000)
     assert pr.runs == ["r1", "r2"]
     assert pr.advisory == ["double-blind"]
+    # no DPI flags + no --defaults -> the DPI gate is OFF (mirrors pubreqs freeze)
+    assert pr.image_min_dpi is None
+    assert pr.figure_font_policy is True             # on by default
+
+
+def test_pkgreqs_freeze_defaults_seed_font_and_dpi(tmp_path):
+    """--defaults turns on the F2 font policy + a 300 DPI floor (mirrors pubreqs freeze)."""
+    from sci_adk.cli import main
+
+    ws = _seed_workspace(tmp_path)
+    assert main(["pkgreqs", "freeze", str(ws), "--defaults"]) == 0
+    pr = PackageReqs.model_validate(
+        json.loads((ws / "pkgreqs.json").read_text(encoding="utf-8"))
+    )
+    assert pr.figure_font_policy is True
+    assert pr.image_min_dpi == 300
+
+
+def test_pkgreqs_freeze_font_and_dpi_flags_can_disable(tmp_path):
+    """--no-font-policy turns it off; --no-image-dpi wins even under --defaults; --image-min-dpi sets it."""
+    from sci_adk.cli import main
+
+    ws = _seed_workspace(tmp_path)
+    assert main([
+        "pkgreqs", "freeze", str(ws), "--defaults", "--no-font-policy", "--no-image-dpi",
+    ]) == 0
+    pr = PackageReqs.model_validate(
+        json.loads((ws / "pkgreqs.json").read_text(encoding="utf-8"))
+    )
+    assert pr.figure_font_policy is False
+    assert pr.image_min_dpi is None                  # --no-image-dpi overrides the --defaults 300
+
+    ws2 = _seed_workspace(tmp_path / "w2")
+    assert main(["pkgreqs", "freeze", str(ws2), "--image-min-dpi", "600"]) == 0
+    pr2 = PackageReqs.model_validate(
+        json.loads((ws2 / "pkgreqs.json").read_text(encoding="utf-8"))
+    )
+    assert pr2.image_min_dpi == 600                  # explicit value wins without --defaults
 
 
 def test_pkgreqs_freeze_body_word_range_requires_both_bounds(tmp_path):

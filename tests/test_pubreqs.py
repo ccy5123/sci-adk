@@ -143,7 +143,7 @@ def test_required_sections_present_is_clean():
     tex = (
         r"\begin{abstract}x\end{abstract}"
         r"\section{Introduction}a\section{Methods}b"
-        r"\section{Results}c\section{Discussion}d"
+        r"\section{Results}c\section{Discussion}d\section{Conclusion}e"
     )
     assert required_sections_problems(tex, list(DEFAULT_REQUIRED_SECTIONS)) == []
 
@@ -152,6 +152,7 @@ def test_required_sections_missing_one_fails():
     tex = (
         r"\begin{abstract}x\end{abstract}"
         r"\section{Introduction}a\section{Results}c\section{Discussion}d"
+        r"\section{Conclusion}e"
     )  # no Methods
     missing = required_sections_problems(tex, list(DEFAULT_REQUIRED_SECTIONS))
     assert missing == ["Methods"]

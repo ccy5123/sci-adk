@@ -30,15 +30,17 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-# The IMRaD default (design §6 OF-5): the fixed required-sections set offered by the
-# "use defaults" fast-path. Abstract is accepted as a \begin{abstract} environment OR a
-# \section{Abstract}; the rest are \section{...} (see loop/verify._required_sections_problems).
+# The IMRaD default (design §6 OF-5; SPEC-PAPER-GATE-001 REQ-PG-105): the fixed
+# required-sections set offered by the "use defaults" fast-path, INCLUDING Conclusion.
+# Abstract is accepted as a \begin{abstract} environment OR a \section{Abstract}; the rest
+# are \section{...} (see loop/verify._required_sections_problems).
 DEFAULT_REQUIRED_SECTIONS: List[str] = [
     "Abstract",
     "Introduction",
     "Methods",
     "Results",
     "Discussion",
+    "Conclusion",
 ]
 
 # The default raster DPI floor (design §6 OF-3: 300 = print).

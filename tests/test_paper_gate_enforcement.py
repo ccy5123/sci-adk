@@ -18,6 +18,8 @@ All fixtures use NEUTRAL synthetic data (no domain/venue/study). Pure + determin
 
 from __future__ import annotations
 
+import struct
+import zlib
 from pathlib import Path
 
 from sci_adk.core.claim import (
@@ -274,3 +276,158 @@ def test_package_number_audit_passes_on_backed_manuscript(tmp_path):
     report = verify_package(ws)
     audit = [p for p in report.package_requirements_problems if "number audit" in p]
     assert audit == []
+
+
+# -- PNG fixture helper (stdlib only -- NO Pillow); the DPI checker reads only the IHDR width.
+
+def _make_png(width: int, height: int = 10) -> bytes:
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+
+    def _chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        crc = zlib.crc32(body) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", crc)
+
+    return sig + _chunk(b"IHDR", ihdr) + _chunk(b"IEND", b"")
+
+
+def _package_main(ws: Path, body: str, *, pkgreqs: PackageReqs) -> None:
+    """Lay down a minimal conclusion-bearing package: 01_manuscript/main.tex + pkgreqs.json."""
+    (ws / "package" / "01_manuscript").mkdir(parents=True, exist_ok=True)
+    (ws / "package" / "01_manuscript" / "main.tex").write_text(body, encoding="utf-8")
+    (ws / "pkgreqs.json").write_text(pkgreqs.model_dump_json(), encoding="utf-8")
+
+
+# ===========================================================================
+# AC-1 -- F2 wiring gap closed: the package gate applies font-policy + raster-DPI (REQ-PG-106)
+# ===========================================================================
+
+def test_package_font_policy_fails_on_figure_bearing_main_without_preamble(tmp_path):
+    """AC-1: a figure-bearing package main.tex missing the F2 font preamble FAILS the gate."""
+    pkgreqs = PackageReqs(digest="fixture-digest", figure_font_policy=True, image_min_dpi=None)
+    _package_main(
+        tmp_path,
+        r"\section{Results}" "\n" r"\includegraphics[width=\linewidth]{figures/fig1.pdf}",
+        pkgreqs=pkgreqs,
+    )
+    report = verify_package(tmp_path)
+    joined = " ".join(report.package_requirements_problems).lower()
+    assert "font policy" in joined
+    assert "newtxmath" in joined or "helvet" in joined
+    assert not report.package_requirements_clean
+
+
+def test_package_font_policy_off_skips_the_check(tmp_path):
+    """AC-1 (no false positive): figure_font_policy off -> no font-policy failure surfaced."""
+    pkgreqs = PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None)
+    _package_main(
+        tmp_path,
+        r"\section{Results}" "\n" r"\includegraphics[width=\linewidth]{figures/fig1.pdf}",
+        pkgreqs=pkgreqs,
+    )
+    report = verify_package(tmp_path)
+    font = [p for p in report.package_requirements_problems if "font policy" in p.lower()]
+    assert font == []
+
+
+def test_package_image_dpi_fails_below_floor(tmp_path):
+    """AC-1: a raster figure below the declared image_min_dpi floor FAILS the package gate."""
+    pkgreqs = PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=300)
+    _package_main(
+        tmp_path,
+        r"\section{Results}" "\n" r"\includegraphics[width=\textwidth]{figures/fig1.png}",
+        pkgreqs=pkgreqs,
+    )
+    figs = tmp_path / "package" / "01_manuscript" / "figures"
+    figs.mkdir(parents=True, exist_ok=True)
+    (figs / "fig1.png").write_bytes(_make_png(500))  # ~77 DPI over a 6.5in textwidth
+    report = verify_package(tmp_path)
+    joined = " ".join(report.package_requirements_problems).lower()
+    assert "dpi" in joined
+    assert "fig1.png" in joined
+    assert not report.package_requirements_clean
+
+
+# ===========================================================================
+# AC-2 -- Conclusion in the IMRaD defaults (REQ-PG-105)
+# ===========================================================================
+
+def test_default_required_sections_include_conclusion():
+    """AC-2: the 'use defaults' IMRaD set includes Conclusion (both per-run and package)."""
+    from sci_adk.core.pkgreqs import DEFAULT_REQUIRED_SECTIONS as PKG_DEFAULTS
+    from sci_adk.core.pubreqs import DEFAULT_REQUIRED_SECTIONS as PUB_DEFAULTS
+
+    assert "Conclusion" in PUB_DEFAULTS
+    assert "Conclusion" in PKG_DEFAULTS
+
+
+def test_per_run_defaults_require_conclusion_section(tmp_path):
+    """AC-2: with the IMRaD defaults frozen, a draft lacking Conclusion FAILS and names it."""
+    from sci_adk.core.pubreqs import DEFAULT_REQUIRED_SECTIONS
+
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir)
+    _draft(
+        run_dir,
+        r"\begin{abstract}x\end{abstract}\section{Introduction}a"
+        r"\section{Methods}b\section{Results}c\section{Discussion}d",  # no Conclusion
+    )
+    _freeze_pubreqs(run_dir, required_sections=list(DEFAULT_REQUIRED_SECTIONS),
+                    figure_font_policy=False, image_min_dpi=None, reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert not report.paper_requirements_clean
+    assert any("Conclusion" in p for p in report.paper_requirements_problems)
+
+
+# ===========================================================================
+# AC-5 -- record vs belief: the audit compares ONLY against recorded values (REQ-PG-203)
+# ===========================================================================
+
+def test_number_audit_compares_to_record_not_plausibility(tmp_path):
+    """AC-5: a plausible but UNRECORDED number still FAILS -- the gate is record, not belief."""
+    _package_main(
+        tmp_path,
+        r"\section{Results}The recorded point is 0.61; a reported value 0.99 is unrecorded.",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None),
+    )
+    data = tmp_path / "package" / "02_data"
+    data.mkdir(parents=True)
+    (data / "claims_all.csv").write_text(
+        "run_id,hyp_id,status,point_statistic\nr1,h1,supported,0.61\n", encoding="utf-8"
+    )
+    report = verify_package(tmp_path)
+    joined = " ".join(report.package_requirements_problems)
+    assert "0.99" in joined  # plausible, but absent from the recorded pool -> FAILS
+    assert not report.package_requirements_clean
+
+
+# ===========================================================================
+# AC-6 -- the new gates are ADDITIVE: a passing paper never masks a reproduction failure
+# ===========================================================================
+
+def test_compliant_paper_does_not_mask_reproduction_failure(tmp_path):
+    """AC-6 (REQ-PG-107): a fully paper-compliant run STILL FAILS if its claim does not reproduce."""
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir, point=0.61)
+    # tamper: a REFUTED claim does NOT re-derive (point 0.61 >= 0.5 => supported).
+    claim = Claim(
+        id="claim-hyp-a", spec_id="spec-x", answers="hyp-a",
+        statement="s", status=ClaimStatus.REFUTED,
+        confidence=Confidence(type=ConfidenceType.CREDENCE, value=0.9, basis="b"),
+        mode=HypothesisMode.CONFIRMATORY,
+    )
+    (run_dir / "claims" / "claim-hyp-a.json").write_text(
+        claim.model_dump_json(), encoding="utf-8"
+    )
+    # an otherwise-clean, backed, font-on draft (the paper gate would pass on its own).
+    _draft(
+        run_dir,
+        r"\usepackage{newtxmath}" "\n" r"\usepackage[scaled]{helvet}" "\n"
+        r"\begin{abstract}x\end{abstract}\section{Results}The value is 0.61.",
+    )
+    _freeze_pubreqs(run_dir, required_sections=[], figure_font_policy=True,
+                    image_min_dpi=None, reproduction_bundle=False)
+    report = verify_run(run_dir)
+    assert not report.all_reproduced  # the existing record-green gate still fires
+    assert not report.passed

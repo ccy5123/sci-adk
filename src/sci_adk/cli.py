@@ -429,6 +429,19 @@ def _add_verb_parsers(sub) -> None:
              "appends to the IMRaD set; without, replaces it (default: none)",
     )
     pkgreqs_freeze.add_argument(
+        "--no-font-policy", dest="figure_font_policy", action="store_false",
+        help="disable the F2 figure font-policy check (default on; mirrors pubreqs freeze)",
+    )
+    pkgreqs_freeze.add_argument(
+        "--image-min-dpi", type=int, default=None, metavar="N",
+        help="raster figure minimum effective DPI (default 300 with --defaults; omit to "
+             "leave the DPI gate off without --defaults; mirrors pubreqs freeze)",
+    )
+    pkgreqs_freeze.add_argument(
+        "--no-image-dpi", dest="no_image_dpi", action="store_true",
+        help="explicitly disable the image DPI gate even under --defaults",
+    )
+    pkgreqs_freeze.add_argument(
         "--reference-style", default=None, metavar="STYLE",
         help="declared bib style checked wired in main.tex (e.g. plainnat / natbib)",
     )
@@ -962,6 +975,7 @@ def _cmd_pkgreqs_freeze(args: argparse.Namespace) -> int:
     """
     from sci_adk.core.pkgreqs import (
         ALL_RUNS,
+        DEFAULT_IMAGE_MIN_DPI,
         DEFAULT_REQUIRED_SECTIONS,
         PackageReqs,
     )
@@ -987,11 +1001,25 @@ def _cmd_pkgreqs_freeze(args: argparse.Namespace) -> int:
     if args.body_word_min is not None and args.body_word_max is not None:
         body_word_range = (args.body_word_min, args.body_word_max)
 
+    # image_min_dpi: --defaults -> 300 unless --no-image-dpi; an explicit --image-min-dpi
+    # always wins; without --defaults and without an explicit value -> None (gate off).
+    # Mirrors pubreqs freeze.
+    if args.no_image_dpi:
+        image_min_dpi = None
+    elif args.image_min_dpi is not None:
+        image_min_dpi = args.image_min_dpi
+    elif args.defaults:
+        image_min_dpi = DEFAULT_IMAGE_MIN_DPI
+    else:
+        image_min_dpi = None
+
     runs: object = list(args.runs) if args.runs else ALL_RUNS
 
     pkgreqs = PackageReqs(
         venue=args.venue,
         required_sections=sections,
+        figure_font_policy=args.figure_font_policy,
+        image_min_dpi=image_min_dpi,
         reference_style=args.reference_style,
         abstract_max_words=args.abstract_max_words,
         body_word_range=body_word_range,
@@ -1009,6 +1037,11 @@ def _cmd_pkgreqs_freeze(args: argparse.Namespace) -> int:
     print(f"  digest (sha256): {digest}")
     print(f"  venue: {frozen.venue if frozen.venue else '(unspecified)'}")
     print(f"  required_sections: {', '.join(sections) if sections else '(none)'}")
+    print(f"  figure_font_policy: {'on' if frozen.figure_font_policy else 'off'}")
+    print(
+        "  image_min_dpi: "
+        f"{frozen.image_min_dpi if frozen.image_min_dpi is not None else '(off)'}"
+    )
     print(
         "  reference_style: "
         f"{frozen.reference_style if frozen.reference_style else '(none)'}"

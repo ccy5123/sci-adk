@@ -1147,18 +1147,24 @@ def _check_package_requirements(
                 + ", ".join(residuals)
             )
 
-    # 6. Venue-FORMAT checks (only when the contract declares them).
-    # @MX:TODO: [AUTO] F2 package-gate gap (SPEC-PAPER-GATE-001 REQ-PG-106, deferred to the next
-    #   increment): when PackageReqs gains `figure_font_policy` + `image_min_dpi` (mirroring
-    #   PubReqs), call render.pubreqs_checks.figure_font_policy_problems(main_tex) +
-    #   image_dpi_problems(main_tex, manuscript_dir/"figures", pkgreqs.image_min_dpi) HERE -- the
-    #   per-run checkers are already pure and reusable. Section ORDER (P4) and Conclusion-in-
-    #   defaults (REQ-PG-105/403) also plug in around required_sections_problems in M2.
+    # 6. Venue-FORMAT checks (only when the contract declares them). The F2 font-policy +
+    #    raster-DPI checks (SPEC-PAPER-GATE-001 REQ-PG-106) REUSE the per-run pure checkers so
+    #    the package and per-run gates apply ONE definition of the F2 policy (closing the F2
+    #    wiring gap). The package figures live at 01_manuscript/figures/ (the assembler's
+    #    co-located dir), so the DPI checker resolves rasters there.
     if pkgreqs is not None and main_tex:
         if pkgreqs.required_sections:
             problems.extend(
                 f"missing required section: {sec}"
                 for sec in required_sections_problems(main_tex, pkgreqs.required_sections)
+            )
+        if pkgreqs.figure_font_policy:
+            problems.extend(figure_font_policy_problems(main_tex))
+        if pkgreqs.image_min_dpi is not None:
+            problems.extend(
+                image_dpi_problems(
+                    main_tex, manuscript_dir / "figures", pkgreqs.image_min_dpi
+                )
             )
         if pkgreqs.reference_style:
             problems.extend(

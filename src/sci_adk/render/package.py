@@ -436,7 +436,7 @@ def _skeleton_main_tex(
     sections = (
         list(pkgreqs.required_sections)
         if pkgreqs and pkgreqs.required_sections
-        else ["Abstract", "Introduction", "Methods", "Results", "Discussion"]
+        else ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion"]
     )
     ref_style = (pkgreqs.reference_style if pkgreqs else None) or "plainnat"
 
