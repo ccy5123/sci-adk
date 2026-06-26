@@ -65,8 +65,13 @@ here names or assumes a domain, venue, or study (the domain-neutrality constrain
 | **OD-3** | **prose numbers + table cells, in M1.** Audited = prose decimals/percentages/ratios AND table data cells. Ignore-list = section/figure/table/equation/reference numbers (the args of `\ref`/`\cite`/`\label`/`\section`/`\eqref`…), dates, page numbers, version strings, macro-definition arity/`#N` args, verbatim/code/path/URL spans (`\texttt`/`\verb`/`\path`/`\url`), and math-mode structural literals (`$…$`, `\[…\]`, equation environments). |
 | **OD-8** | **IMMEDIATE REFUSAL for all.** No grace period: `sci-adk verify` exits non-zero for ANY conclusion-bearing artifact (existing or new) lacking a frozen contract or failing the number-audit. |
 
-OD-4 (P3 fail-vs-rekey), OD-5 (P3 unpublished WARN-vs-FAIL), OD-6 (P4 order FAIL-vs-WARN), and
-OD-7 (P5 record/prose boundary) remain open — confirmed when M2/M3 begin.
+**M2 open decisions (confirmed 2026-06-26):** OD-4 (P3 fail-vs-rekey) = **FAIL and name the key**
+(never re-key — author files are not mutated; the acquisition path `search/citation_keys.py`
+owns deterministic re-keying). OD-5 (P3 unpublished/DOI-less) = **WARN** (surfaced via the report
+advisory, never gated). OD-6 (P4 order) = **FAIL against a DECLARED order** (the contract's
+`required_sections` list order), **WARN against the default IMRaD order when undeclared**.
+
+OD-7 (P5 record/prose boundary) remains open — confirmed when M3 begins.
 
 ---
 
@@ -143,6 +148,59 @@ missing run-index) + `tests/test_paper_gate_enforcement.py::test_package_number_
 
 ---
 
+## 3b. What M2 built (P3 + P4)
+
+### P3 — citation gates (REQ-PG-301..305)
+
+New PURE checkers in `render/pkgreqs_checks.py` (beside `cited_keys` / `bib_keys` /
+`cite_resolution_problems` — one cite-logic home), wired into BOTH the per-run paper gate and the
+package gate:
+
+- **Shape (REQ-PG-301/302, OD-4).** `citation_key_shape_problems` validates every `\cite` key AND
+  every `.bib` entry key against the canonical `<Surname><Year>(+a/b)` shape (`_CITEKEY_SHAPE_RE`).
+  FAIL and name the offenders — never re-key (the gate validates; `search/citation_keys.py` owns
+  deterministic re-keying). Casing is NOT forced to a leading capital: the convention
+  `normalize_surname` PRESERVES author casing (`vanderBerg2020a` is legitimate), so a
+  capital-required rule would reject real keys.
+- **Disambiguation (REQ-PG-303).** `citation_disambiguation_problems` groups conforming keys by
+  base; a bare base coexisting with a suffixed sibling, or a non-contiguous `a/b/c…` run (a `…b`
+  with no `…a`, or a gap), FAILS and names the group.
+- **Unpublished WARN (REQ-PG-304, OD-5).** `unpublished_citation_warnings` flags a CITED key whose
+  `.bib` entry has no `doi` field as a NON-BLOCKING warning (preprint/in-prep is legitimate),
+  routed to the report advisory — never the gating problems.
+- **Per-run cite resolution (REQ-PG-305).** The existing `cite_resolution_problems` (package-only)
+  is now ALSO wired into the per-run paper gate, closing the per-run cite-gate gap.
+
+### P4 — section ORDER + word-limit gating (REQ-PG-401..404)
+
+- **Section order (REQ-PG-401/402, OD-6).** New `section_order_problems` (`render/pubreqs_checks.py`)
+  compares the relative order of the sections present in BOTH the manuscript and the reference
+  order (`ordered_section_sequence` records the abstract env + `\section`s in source order, EC-6).
+  Severity routing lives in `loop/verify`: a DECLARED order (`required_sections` non-empty) → FAIL;
+  an UNDECLARED order (empty) → WARN against the default IMRaD order (package advisory).
+- **Word limits gate (REQ-PG-404 / AC-3).** The package `body_word_range` now GATES (it was
+  advisory): `body_word_range_problems` FAILS when the body word count (the prose outside the
+  abstract env, `body_word_count`) is outside the declared `(min, max)`. The per-run `max_words`
+  and package `abstract_max_words` ceilings already gated. `core/pkgreqs.py`'s `body_word_range`
+  doc + `_package_advisory` were updated (no longer an advisory note); the one in-repo test
+  asserting the OLD advisory posture was rewritten to the gating discipline (the M1 pattern).
+
+### WARN routing (scoping decision)
+
+`PackageVerifyReport` has a non-gating `advisory` channel; the per-run `VerifyReport` does NOT. So
+the WARN-type findings (unpublished citation, undeclared-order) route to the package advisory, and
+the per-run path runs only the FAIL-type gates (shape, disambiguation, cite-resolution,
+declared-order). REQ-PG-304 is "Optional/warning" and the motivating unpublished placeholder lived
+in the merged manuscript, so package-scoped WARNs satisfy the SPEC. Adding a per-run advisory
+channel (model + CLI surface) is a clean follow-on if per-run WARNs are wanted.
+
+Tests: `tests/test_pkgreqs.py` (cite shape/disambiguation/unpublished + body-word units),
+`tests/test_pubreqs.py` (section-order units), `tests/test_paper_gate_enforcement.py` (MP-2 order,
+MP-3 cite-key, AC-3 word limits, AC-4 per-run resolution wiring), `tests/test_package_gate.py`
+(body-range now-gates). Full suite green.
+
+---
+
 ## 4. Migration posture (OD-8 consequence)
 
 The flip from "absent contract = vacuously clean" to "loud refusal" is a verdict-path change,
@@ -195,6 +253,11 @@ M1 stays minimal.
 ---
 
 ## 6. Clean seams for the next increment (deferred, NOT built)
+
+> Status update: the P1/F2/IMRaD seams below were built in M1, and P3 + P4 in M2 (see §3 / §3b).
+> The only genuinely-deferred pillar now is **P5 — cross-run merge render (M3)**; OD-7 (the
+> record/prose boundary) is the one remaining open decision. The seam notes below are retained as
+> the original design rationale.
 
 - **P1 Stop-hook wiring (MP-5).** `templates/research-workspace/.claude/hooks/sci-adk/stop-verify-gate.sh`
   runs `sci-adk verify <run>` per-run today; it must ALSO run `sci-adk verify <workspace>` so

@@ -84,9 +84,10 @@ class PackageReqs(BaseModel):
             ``main.tex`` (a ``\\bibliographystyle`` wiring), or None to skip.
         abstract_max_words: the venue abstract word limit (e.g. 300); None disables the
             abstract word-count gate.
-        body_word_range: an ADVISORY ``(min, max)`` body word range (e.g. (4000, 7000));
-            SURFACED in the verify report, NEVER gated (design §3) -- a thin or long draft is
-            an author concern, not a mechanical failure.
+        body_word_range: a GATING ``(min, max)`` body word range (e.g. (4000, 7000)); the body
+            word count (the prose outside the abstract env) MUST fall within it
+            (SPEC-PAPER-GATE-001 P4 / REQ-PG-404 -- a body below ``min`` or above ``max`` FAILS
+            verify). None disables the gate. (Was advisory before P4.)
         runs: which runs the package synthesizes -- the literal ``"all"`` (default) for every
             ``runs/<id>/`` in the workspace, or an explicit list of run ids.
         advisory: free-form conditions surfaced in the verify report but NEVER gated.
@@ -128,7 +129,7 @@ class PackageReqs(BaseModel):
     )
     body_word_range: Optional[Tuple[int, int]] = Field(
         default=None,
-        description="ADVISORY (min, max) body word range -- surfaced, NEVER gated",
+        description="GATING (min, max) body word range -- body outside it FAILS (P4); None off",
     )
     runs: Union[List[str], str] = Field(
         default=ALL_RUNS,

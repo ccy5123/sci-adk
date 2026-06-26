@@ -50,6 +50,9 @@ from typing import Dict, List, Literal, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
+from sci_adk.core.pkgreqs import (
+    DEFAULT_REQUIRED_SECTIONS as PKG_DEFAULT_REQUIRED_SECTIONS,
+)
 from sci_adk.core.pkgreqs import PackageReqs
 from sci_adk.core.pubreqs import PubReqs
 from sci_adk.core.spec import Hypothesis, Spec
@@ -80,10 +83,14 @@ from sci_adk.render.number_audit import (
 from sci_adk.render.paper import check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
+    body_word_range_problems,
+    citation_disambiguation_problems,
+    citation_key_shape_problems,
     cite_resolution_problems,
     figure_presence_problems,
     layout_problems,
     readme_submission_readiness_problems,
+    unpublished_citation_warnings,
 )
 from sci_adk.render.pubreqs_checks import (
     figure_font_policy_problems,
@@ -91,6 +98,7 @@ from sci_adk.render.pubreqs_checks import (
     max_words_problems,
     reference_style_problems,
     required_sections_problems,
+    section_order_problems,
 )
 
 # The rendered paper documents verify re-checks for internal \ref<->\label integrity
@@ -482,10 +490,12 @@ def verify_package(workspace_dir: Path) -> PackageVerifyReport:
         return PackageVerifyReport(workspace_dir=workspace_dir)
 
     pkgreqs = _load_pkgreqs(workspace_dir)
-    problems, runs, runs_reproduced = _check_package_requirements(
+    problems, warnings, runs, runs_reproduced = _check_package_requirements(
         workspace_dir, package_dir, pkgreqs
     )
-    advisory = _package_advisory(pkgreqs)
+    # The advisory channel carries the contract's body-range/free-form notes PLUS the content
+    # WARNINGS (e.g. an unpublished/DOI-less citation, OD-5) -- SURFACED, never gated.
+    advisory = _package_advisory(pkgreqs) + warnings
     clean = not problems
     return PackageVerifyReport(
         workspace_dir=workspace_dir,
@@ -894,6 +904,12 @@ def _check_paper_requirements(
             f"missing required section: {name}"
             for name in required_sections_problems(draft_tex, pubreqs.required_sections)
         )
+        # P4 (REQ-PG-401/402): section ORDER against the DECLARED order (the required_sections
+        # list order is the declared order) -> FAIL on deviation (OD-6: declared order = FAIL).
+        # When required_sections is empty (undeclared) the per-run report has no non-gating
+        # advisory channel for the WARN, so the per-run order check is skipped there (the package
+        # path surfaces the undeclared-order WARN via its advisory channel).
+        problems.extend(section_order_problems(draft_tex, pubreqs.required_sections))
 
     if pubreqs.figure_font_policy:
         problems.extend(figure_font_policy_problems(draft_tex))
@@ -910,6 +926,17 @@ def _check_paper_requirements(
         )
 
     problems.extend(max_words_problems(draft_tex, pubreqs.max_words))
+
+    # P3 (REQ-PG-301/302/303/305): citation gates over the per-run paper. Load the per-run bib
+    # (paper/references.bib). cite-resolution closes the per-run gap (REQ-PG-305 -- the package
+    # already had it); the shape + disambiguation gates validate every \cite/.bib key against
+    # <Surname><Year>(+a/b) (OD-4: FAIL, never re-key). The unpublished/DOI-less WARNING
+    # (REQ-PG-304, OD-5) is package-scoped: the per-run report has no non-gating advisory channel.
+    bib_path = run_dir / "paper" / "references.bib"
+    bib = bib_path.read_text(encoding="utf-8") if bib_path.is_file() else ""
+    problems.extend(cite_resolution_problems(draft_tex, bib))
+    problems.extend(citation_key_shape_problems(draft_tex, bib))
+    problems.extend(citation_disambiguation_problems(draft_tex, bib))
 
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
@@ -1010,20 +1037,15 @@ def _load_pkgreqs(workspace_dir: Path) -> Optional[PackageReqs]:
 
 
 def _package_advisory(pkgreqs: Optional[PackageReqs]) -> List[str]:
-    """The contract's ADVISORY items: the body_word_range + free-form advisory (design §3).
+    """The contract's free-form ADVISORY items (design §3), SURFACED in the report, NEVER gated.
 
-    SURFACED in the report, NEVER gated. Returns the human-readable advisory lines (empty when
-    no contract / nothing advisory). The body_word_range is rendered as a note; the gate never
-    fails on a thin or long body (an author concern, not a mechanical one).
+    Returns the human-readable advisory lines (empty when no contract / nothing advisory).
+    NOTE: ``body_word_range`` is no longer advisory -- SPEC-PAPER-GATE-001 P4 / AC-3 makes it
+    GATE (:func:`body_word_range_problems`), so it is not surfaced here as a note any more.
     """
     if pkgreqs is None:
         return []
-    notes: List[str] = []
-    if pkgreqs.body_word_range is not None:
-        lo, hi = pkgreqs.body_word_range
-        notes.append(f"body word range {lo}-{hi} (advisory only -- never gated)")
-    notes.extend(pkgreqs.advisory)
-    return notes
+    return list(pkgreqs.advisory)
 
 
 def _read_package_doc(package_dir: Path, name: str) -> str:
@@ -1057,7 +1079,7 @@ def _check_package_requirements(
     workspace_dir: Path,
     package_dir: Path,
     pkgreqs: Optional[PackageReqs],
-) -> tuple[List[str], List[str], Dict[str, bool]]:
+) -> tuple[List[str], List[str], List[str], Dict[str, bool]]:
     """Run the deterministic PACKAGE checks (design §3), READ-ONLY, no recompile, no LLM.
 
     REUSES the per-run pure checkers (compile integrity, tool vocabulary, required sections,
@@ -1069,10 +1091,13 @@ def _check_package_requirements(
     for those, design §3); the layout / compile / traceability / fidelity / record-green checks
     run regardless (a ``package/`` exists, so they are meaningful).
 
-    Returns ``(problems, runs, runs_reproduced)`` -- the failure lines (empty = clean), the run
-    ids the run_index lists, and each listed run's REPRODUCED flag.
+    Returns ``(problems, warnings, runs, runs_reproduced)`` -- the failure lines (empty = clean),
+    the NON-BLOCKING warnings (surfaced via the report advisory, never gated -- e.g. an
+    unpublished/DOI-less citation per OD-5), the run ids the run_index lists, and each listed
+    run's REPRODUCED flag.
     """
     problems: List[str] = []
+    warnings: List[str] = []
     manuscript_dir = package_dir / "01_manuscript"
 
     main_tex = _read_package_doc(package_dir, _PACKAGE_MAIN)
@@ -1130,9 +1155,15 @@ def _check_package_requirements(
     if main_tex:
         problems.extend(figure_presence_problems(main_tex, manuscript_dir))
 
-    # 3. Citations wired: every \cite* key in main.tex resolves in references.bib.
+    # 3. Citations wired: every \cite* key in main.tex resolves in references.bib. P3
+    #    (REQ-PG-301/302/303): the shape + disambiguation gates validate every \cite/.bib key
+    #    against <Surname><Year>(+a/b) (OD-4: FAIL, never re-key). The unpublished/DOI-less
+    #    citation is a non-blocking WARNING (REQ-PG-304, OD-5) routed to the advisory channel.
     if main_tex:
         problems.extend(cite_resolution_problems(main_tex, bib))
+        problems.extend(citation_key_shape_problems(main_tex, bib))
+        problems.extend(citation_disambiguation_problems(main_tex, bib))
+        warnings.extend(unpublished_citation_warnings(main_tex, bib))
 
     # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. The package's si.tex is the
     #    record dump, but the design §3 table gates BOTH main.tex AND si.tex tool-agnostic (the
@@ -1166,6 +1197,14 @@ def _check_package_requirements(
                 f"missing required section: {sec}"
                 for sec in required_sections_problems(main_tex, pkgreqs.required_sections)
             )
+            # P4 (REQ-PG-401/402, OD-6): a DECLARED order (required_sections) -> FAIL on deviation.
+            problems.extend(section_order_problems(main_tex, pkgreqs.required_sections))
+        else:
+            # OD-6: no order declared -> WARN against the default IMRaD order (non-blocking,
+            # routed to the advisory channel) -- never a FAIL when nothing was declared.
+            warnings.extend(
+                section_order_problems(main_tex, list(PKG_DEFAULT_REQUIRED_SECTIONS))
+            )
         if pkgreqs.figure_font_policy:
             problems.extend(figure_font_policy_problems(main_tex))
         if pkgreqs.image_min_dpi is not None:
@@ -1180,6 +1219,11 @@ def _check_package_requirements(
             )
         problems.extend(
             abstract_max_words_problems(main_tex, pkgreqs.abstract_max_words)
+        )
+        # P4 (REQ-PG-404 / AC-3): the body word range now GATES (was advisory) -- a body outside
+        # the declared (min, max) FAILS, via P1's non-vacuous posture.
+        problems.extend(
+            body_word_range_problems(main_tex, pkgreqs.body_word_range)
         )
 
     # 7. Traceability + record green: claims_all.csv + run_index.csv present, every listed run
@@ -1197,7 +1241,7 @@ def _check_package_requirements(
         )
     # (a missing README.md is already reported by layout_problems; do not double-report)
 
-    return problems, runs, runs_reproduced
+    return problems, warnings, runs, runs_reproduced
 
 
 def _braces_balanced(tex: str) -> bool:

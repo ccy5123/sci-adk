@@ -43,9 +43,11 @@ from sci_adk.render.pubreqs_checks import (
     image_dpi_problems,
     is_figure_bearing,
     max_words_problems,
+    ordered_section_sequence,
     raster_pixel_width,
     reference_style_problems,
     required_sections_problems,
+    section_order_problems,
     word_count,
 )
 
@@ -383,3 +385,45 @@ def test_pubreqs_freeze_no_spec_errors(tmp_path):
     empty.mkdir(parents=True)
     rc = main(["pubreqs", "freeze", str(empty), "--defaults"])
     assert rc == 2     # no spec.json
+
+
+# -- P4 section ORDER (REQ-PG-401/402) ---------------------------------------
+
+def test_ordered_section_sequence_records_abstract_first():
+    tex = (r"\begin{abstract}x\end{abstract}"
+           r"\section{Introduction}a\section{Methods}b\section{Results}c")
+    assert ordered_section_sequence(tex) == ["abstract", "introduction", "methods", "results"]
+
+
+def test_ordered_section_sequence_dedupes_repeated_heading():
+    tex = r"\section{Methods}a\section{Results}b\section{Methods}c"
+    assert ordered_section_sequence(tex) == ["methods", "results"]
+
+
+def test_section_order_clean_when_in_declared_order():
+    ref = ["Introduction", "Methods", "Results", "Discussion"]
+    tex = (r"\section{Introduction}a\section{Methods}b"
+           r"\section{Results}c\section{Discussion}d")
+    assert section_order_problems(tex, ref) == []
+
+
+def test_section_order_flags_out_of_order_sections():
+    ref = ["Introduction", "Methods", "Results", "Discussion"]
+    # Methods placed AFTER Discussion -- out of the declared order.
+    tex = (r"\section{Introduction}a\section{Results}c"
+           r"\section{Discussion}d\section{Methods}b")
+    problems = section_order_problems(tex, ref)
+    assert problems
+    assert "out of order" in " ".join(problems).lower()
+
+
+def test_section_order_ignores_extra_unlisted_sections():
+    # An extra section not in the reference order does not break the order of the declared ones.
+    ref = ["Introduction", "Methods", "Results"]
+    tex = (r"\section{Introduction}a\section{Background}x"
+           r"\section{Methods}b\section{Results}c")
+    assert section_order_problems(tex, ref) == []
+
+
+def test_section_order_empty_reference_skips():
+    assert section_order_problems(r"\section{Results}a\section{Methods}b", []) == []

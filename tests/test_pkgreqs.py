@@ -31,11 +31,17 @@ from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
     abstract_word_count,
     bib_keys,
+    body_word_count,
+    body_word_range_problems,
+    citation_disambiguation_problems,
+    citation_key_conforms,
+    citation_key_shape_problems,
     cite_resolution_problems,
     cited_keys,
     figure_presence_problems,
     layout_problems,
     readme_submission_readiness_problems,
+    unpublished_citation_warnings,
 )
 
 
@@ -336,3 +342,112 @@ def test_pkgreqs_freeze_no_runs_dir_errors(tmp_path):
 
     rc = main(["pkgreqs", "freeze", str(tmp_path), "--defaults"])   # no runs/ under it
     assert rc == 2
+
+
+# -- P3 citation-key shape (REQ-PG-301/302) ----------------------------------
+
+def test_citation_key_conforms_accepts_canonical_shapes():
+    # <Surname><Year>(+a/b), casing preserved (the convention does not force a leading capital).
+    for key in ("McKay2013", "Joe2026", "Jager1998a", "Jager1998b", "Anon2026",
+                "McKaynd", "Anonnd", "vanderBerg2020a"):
+        assert citation_key_conforms(key), key
+
+
+def test_citation_key_conforms_rejects_non_canonical():
+    # No year, 2-digit year, underscores, bare initials/words -> non-conforming.
+    for key in ("ref1", "mypaper", "smith20", "Smith_etal_2020", "JS", "2020"):
+        assert not citation_key_conforms(key), key
+
+
+def test_citation_key_shape_problems_names_offenders():
+    tex = r"As shown \cite{ref1} and \cite{McKay2013}."
+    bib = "@article{ref1, title={x}}\n@article{McKay2013, title={y}}\n"
+    problems = citation_key_shape_problems(tex, bib)
+    joined = " ".join(problems)
+    assert "ref1" in joined
+    assert "McKay2013" not in joined  # the conforming key is not flagged
+
+
+def test_citation_key_shape_problems_clean_when_all_conform():
+    tex = r"\cite{McKay2013} and \cite{Jager1998a}."
+    bib = "@article{McKay2013, title={x}}\n@article{Jager1998a, title={y}}\n"
+    assert citation_key_shape_problems(tex, bib) == []
+
+
+# -- P3 disambiguation (REQ-PG-303) ------------------------------------------
+
+def test_disambiguation_flags_bare_plus_suffixed():
+    # A bare base coexisting with a "...b" -> the bare one should be "...a".
+    tex = r"\cite{Smith2020} and \cite{Smith2020b}."
+    problems = citation_disambiguation_problems(tex, "")
+    assert problems
+    assert "Smith2020" in " ".join(problems)
+
+
+def test_disambiguation_flags_b_without_a():
+    bib = "@article{Jager1998b, title={x}}\n"
+    problems = citation_disambiguation_problems("", bib)
+    assert problems  # a "...b" with no "...a" is a gap
+
+
+def test_disambiguation_clean_for_complete_run_and_lone_bare():
+    # A complete a,b run and a lone bare key are both well-formed.
+    tex = r"\cite{Jager1998a} \cite{Jager1998b} \cite{McKay2013}."
+    assert citation_disambiguation_problems(tex, "") == []
+
+
+# -- P3 unpublished/DOI-less warning (REQ-PG-304, OD-5: WARN) -----------------
+
+def test_unpublished_citation_warns_on_doiless_cited_entry():
+    tex = r"\cite{Doe2025} supports this."
+    bib = "@misc{Doe2025, title={preprint}, year={2025}}\n"  # no doi field
+    warnings = unpublished_citation_warnings(tex, bib)
+    assert warnings
+    assert "Doe2025" in " ".join(warnings)
+
+
+def test_unpublished_citation_silent_when_doi_present():
+    tex = r"\cite{Doe2025}."
+    bib = "@article{Doe2025, title={x}, doi={10.1/abc}}\n"
+    assert unpublished_citation_warnings(tex, bib) == []
+
+
+def test_unpublished_citation_ignores_uncited_doiless_entry():
+    # An uncited DOI-less entry is NOT load-bearing -> no warning (only cited entries warn).
+    tex = r"\cite{Doe2025}."
+    bib = ("@article{Doe2025, title={x}, doi={10.1/abc}}\n"
+           "@misc{Uncited2024, title={y}}\n")
+    assert unpublished_citation_warnings(tex, bib) == []
+
+
+# -- P4 body word range (REQ-PG-404 / AC-3: gates) ---------------------------
+
+def test_body_word_count_excludes_the_abstract():
+    tex = (r"\begin{abstract}alpha beta gamma\end{abstract}"
+           r"\section{Results}one two three four")
+    # only the body words count (the 3 abstract words are excluded; section name + body counted).
+    assert body_word_count(tex) == body_word_count(r"\section{Results}one two three four")
+    assert "alpha" not in r"\section{Results}one two three four"
+
+
+def test_body_word_range_problems_fails_when_below_min():
+    tex = r"\section{Results}one two three"   # 4 body words (Results + one two three)
+    problems = body_word_range_problems(tex, (100, 200))
+    assert problems
+    assert "outside the declared range 100-200" in problems[0]
+
+
+def test_body_word_range_problems_fails_when_above_max():
+    tex = r"\section{Results}" + " ".join(["w"] * 50)
+    problems = body_word_range_problems(tex, (1, 10))
+    assert problems
+    assert "outside" in problems[0]
+
+
+def test_body_word_range_problems_clean_within_range():
+    tex = r"\section{Results}one two three four five"
+    assert body_word_range_problems(tex, (1, 100)) == []
+
+
+def test_body_word_range_problems_none_skips():
+    assert body_word_range_problems(r"\section{Results}a", None) == []

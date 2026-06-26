@@ -280,9 +280,19 @@ def test_package_gate_fails_on_missing_submission_readiness(tmp_path):
 
 # -- (4) advisory is surfaced, never gated -----------------------------------
 
-def test_package_gate_body_word_range_is_advisory_not_gated(tmp_path):
-    # body_word_range surfaces in advisory but never fails the gate, even for a tiny skeleton.
+def test_package_gate_body_word_range_now_gates(tmp_path):
+    # SPEC-PAPER-GATE-001 P4 / AC-3: the body word range GATES (was advisory). The tiny skeleton
+    # body is far below 4000, so the declared range FAILS the gate and names the count.
     ws = _assembled(tmp_path, body_word_range=(4000, 7000))
     report = verify_package(ws)
-    assert report.package_requirements_clean is True
-    assert any("body word range" in note for note in report.advisory)
+    assert report.package_requirements_clean is False
+    assert any("body word count" in p for p in report.package_requirements_problems)
+    # no longer surfaced as an advisory note (it gates now, not advises).
+    assert not any("body word range" in note for note in report.advisory)
+
+
+def test_package_gate_body_word_range_within_range_passes(tmp_path):
+    # AC-3 (no false positive): a range the skeleton body fits raises no body-word failure.
+    ws = _assembled(tmp_path, body_word_range=(0, 100000))
+    report = verify_package(ws)
+    assert not any("body word count" in p for p in report.package_requirements_problems)

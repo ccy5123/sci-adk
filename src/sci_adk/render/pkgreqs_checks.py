@@ -123,6 +123,122 @@ def cite_resolution_problems(tex: str, bib: str) -> List[str]:
     ]
 
 
+# -- citation-key shape + disambiguation (P3, REQ-PG-301/302/303) -------------
+
+# The canonical citation-key shape sci-adk's acquisition path emits (search/citation_keys.py):
+# <NormalizedSurname><Year>(+a/b). Surname = ASCII alnum starting with a letter; the convention
+# PRESERVES author casing ("McKay", "vanderBerg"), so the gate does NOT force a leading capital
+# (which would reject legitimate lower-cased compound surnames). Year = 4 digits OR the "nd"
+# no-date fallback. Optional lower-case a/b/c... disambiguation suffix. The gate VALIDATES the
+# manuscript against this convention -- OD-4: FAIL and name the key, never re-key (author files
+# are not mutated; the acquisition path search/citation_keys.py owns deterministic re-keying).
+_CITEKEY_SHAPE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:\d{4}|nd)[a-z]*$")
+# Split a CONFORMING key into (base=<surname><year>, suffix=<a/b/...>) for the disambiguation
+# check. The base ends at the LAST 4-digit year or "nd" so a surname containing digits is safe.
+_CITEKEY_BASE_RE = re.compile(r"^(.*(?:\d{4}|nd))([a-z]*)$")
+
+
+def citation_key_conforms(key: str) -> bool:
+    """True iff ``key`` matches the canonical ``<Surname><Year>(+a/b)`` shape. PURE."""
+    return bool(_CITEKEY_SHAPE_RE.match(key))
+
+
+def citation_key_shape_problems(tex: str, bib: str) -> List[str]:
+    """Every ``\\cite`` key and ``.bib`` entry key NOT matching the canonical shape (REQ-PG-301/302).
+
+    PURE + deterministic. Validates BOTH the cited keys and the defined ``.bib`` keys against
+    ``<Surname><Year>(+a/b)`` (the convention ``search/citation_keys.py`` owns); non-conforming
+    keys are named in a single sorted problem line (OD-4: FAIL -- the author fixes them, the gate
+    never re-keys). Returns ``[]`` when every key conforms (or there are no keys).
+    """
+    offenders = sorted(
+        k for k in set(cited_keys(tex)) | set(bib_keys(bib))
+        if not citation_key_conforms(k)
+    )
+    if not offenders:
+        return []
+    return [
+        "citation key shape: key(s) not matching <Surname><Year>(+a/b): "
+        + ", ".join(offenders)
+    ]
+
+
+def _letter_suffix(index: int) -> str:
+    """0 -> 'a', 1 -> 'b', ... 25 -> 'z', 26 -> 'aa' (bijective base-26; matches acquisition)."""
+    letters = ""
+    n = index + 1
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(ord("a") + rem) + letters
+    return letters
+
+
+def citation_disambiguation_problems(tex: str, bib: str) -> List[str]:
+    """Mis-disambiguated ``<Surname><Year>`` groups among the cite + ``.bib`` keys (REQ-PG-303).
+
+    PURE + deterministic. Groups every CONFORMING key by its base (``<surname><year>``); a group
+    is mis-disambiguated when a bare base coexists with a suffixed sibling (the bare one should be
+    "...a"), OR the suffixes present are not the contiguous ``a, b, c, ...`` from "a" (a "...b"
+    with no "...a", or a gap). Names each offending group's keys. Non-conforming keys are skipped
+    (the shape gate names them). A lone bare key or a complete ``a, b, c, ...`` run is well-formed.
+    """
+    groups: dict[str, list[str]] = {}
+    for key in set(cited_keys(tex)) | set(bib_keys(bib)):
+        m = _CITEKEY_BASE_RE.match(key)
+        if m is None or not citation_key_conforms(key):
+            continue
+        groups.setdefault(m.group(1), []).append(key)
+    problems: List[str] = []
+    for base in sorted(groups):
+        keys = sorted(groups[base])
+        suffixes = {_CITEKEY_BASE_RE.match(k).group(2) for k in keys}  # type: ignore[union-attr]
+        nonbare = sorted(s for s in suffixes if s)
+        if not nonbare:
+            continue  # only a bare key -> well-formed
+        has_bare = "" in suffixes
+        contiguous = nonbare == [_letter_suffix(i) for i in range(len(nonbare))]
+        if has_bare or not contiguous:
+            problems.append(
+                f"citation disambiguation: base '{base}' is mis-disambiguated: keys {keys}"
+            )
+    return problems
+
+
+# -- unpublished / DOI-less citation warning (P3, REQ-PG-304, OD-5: WARN) -----
+
+# A bib entry's head + its body (up to the next entry or EOF), to detect a per-entry doi field.
+_BIB_ENTRY_BODY_RE = re.compile(
+    r"@\w+\s*\{\s*([^,\s}]+)\s*,(.*?)(?=@\w+\s*\{|\Z)", re.DOTALL
+)
+_BIB_DOI_RE = re.compile(r"\bdoi\s*=\s*[{\"]\s*([^}\"]+?)\s*[}\"]", re.IGNORECASE)
+
+
+def _bib_entry_has_doi(bib: str) -> dict[str, bool]:
+    """Map each defined ``.bib`` key -> whether its entry carries a non-empty ``doi`` field. PURE."""
+    out: dict[str, bool] = {}
+    for m in _BIB_ENTRY_BODY_RE.finditer(bib):
+        out[m.group(1).strip()] = bool(_BIB_DOI_RE.search(m.group(2)))
+    return out
+
+
+def unpublished_citation_warnings(tex: str, bib: str) -> List[str]:
+    """Every load-bearing (cited) reference with NO DOI -> a WARNING (REQ-PG-304, OD-5: WARN).
+
+    PURE + deterministic. A cited key whose ``.bib`` entry EXISTS but declares no ``doi`` is an
+    unpublished / preprint / in-prep citation -- surfaced as a NON-BLOCKING warning (OD-5), never
+    a gate failure. A cited key with NO entry at all is a resolution FAILURE
+    (:func:`cite_resolution_problems`), not this warning. Returns sorted warning lines (empty =
+    every cited reference has a DOI, or nothing is cited).
+    """
+    has_doi = _bib_entry_has_doi(bib)
+    return sorted(
+        f"citation warning: load-bearing cite '{k}' has no DOI in references.bib "
+        "(unpublished/preprint/in-prep)"
+        for k in cited_keys(tex)
+        if k in has_doi and not has_doi[k]
+    )
+
+
 # -- abstract word count -----------------------------------------------------
 
 # The \begin{abstract}...\end{abstract} body (the venue abstract whose length venues cap).
@@ -165,6 +281,39 @@ def abstract_max_words_problems(tex: str, abstract_max_words: Optional[int]) -> 
         return []
     return [
         f"abstract word count: {count} words (> limit {abstract_max_words})"
+    ]
+
+
+# -- body word range (P4, REQ-PG-404 / AC-3: gates, no longer advisory) -------
+
+
+def body_word_count(tex: str) -> int:
+    """The deterministic word count over the manuscript BODY (the abstract env removed). PURE.
+
+    The 'body' is the prose OUTSIDE ``\\begin{abstract}...\\end{abstract}`` -- the abstract has
+    its own ``abstract_max_words`` gate, so the body range counts the rest. Reuses the same
+    conservative :func:`word_count` tokeniser (one definition of 'how many words').
+    """
+    return word_count(_ABSTRACT_BODY_RE.sub(" ", tex))
+
+
+def body_word_range_problems(
+    tex: str, body_word_range: Optional[tuple[int, int]]
+) -> List[str]:
+    """A single problem line iff the BODY word count is outside ``body_word_range`` (REQ-PG-404).
+
+    PURE + deterministic. ``None`` skips the check. SPEC-PAPER-GATE-001 P4 / AC-3 makes the body
+    range GATE (it was advisory): a body below ``min`` or above ``max`` FAILS and names the count
+    + range. Returns ``[]`` when within range or no range declared.
+    """
+    if body_word_range is None:
+        return []
+    lo, hi = body_word_range
+    count = body_word_count(tex)
+    if lo <= count <= hi:
+        return []
+    return [
+        f"body word count: {count} words is outside the declared range {lo}-{hi}"
     ]
 
 
@@ -240,9 +389,15 @@ __all__ = [
     "cited_keys",
     "bib_keys",
     "cite_resolution_problems",
+    "citation_key_conforms",
+    "citation_key_shape_problems",
+    "citation_disambiguation_problems",
+    "unpublished_citation_warnings",
     "abstract_body",
     "abstract_word_count",
     "abstract_max_words_problems",
+    "body_word_count",
+    "body_word_range_problems",
     "figure_presence_problems",
     "readme_submission_readiness_problems",
 ]

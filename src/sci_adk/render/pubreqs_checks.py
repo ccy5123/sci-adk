@@ -90,6 +90,60 @@ def required_sections_problems(tex: str, required: List[str]) -> List[str]:
     return missing
 
 
+# -- section ORDER (P4, REQ-PG-401/402) --------------------------------------
+
+
+def ordered_section_sequence(tex: str) -> List[str]:
+    """The section names (incl. the abstract env) in SOURCE order: lower-cased, first-occurrence
+    deduped. PURE.
+
+    The abstract is recorded as ``"abstract"`` at its ``\\begin{abstract}`` position; a
+    ``\\section{Abstract}`` records the same name where it appears (EC-6: either form counts, and
+    the abstract orders where it is written -- normally first). Repeated sections collapse to
+    their first occurrence so a duplicate heading does not spuriously read as out-of-order.
+    """
+    events: List[tuple[int, str]] = []
+    for m in _ABSTRACT_ENV_RE.finditer(tex):
+        events.append((m.start(), "abstract"))
+    for m in _SECTION_RE.finditer(tex):
+        events.append((m.start(), m.group(1).strip().lower()))
+    events.sort(key=lambda e: e[0])
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for _pos, name in events:
+        if name and name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    return ordered
+
+
+def section_order_problems(tex: str, reference_order: List[str]) -> List[str]:
+    """The manuscript's sections that appear OUT OF the reference order (REQ-PG-401/402).
+
+    PURE + deterministic. ``reference_order`` is the order the gate enforces -- the contract's
+    declared ``required_sections`` (its list order IS the declared order) or the default IMRaD
+    order. Among the sections present in BOTH the manuscript and the reference order, their
+    RELATIVE order must match the reference; a deviation is named (expected vs found). Sections in
+    the manuscript but NOT in the reference order are ignored (the gate enforces the declared
+    sections' order, not arbitrary extras). An empty ``reference_order`` -> no check (nothing
+    declared to order against). The CALLER decides severity: FAIL when an order is declared, WARN
+    when it falls back to the default (OD-6).
+    """
+    ref = [s.strip().lower() for s in reference_order if s and s.strip()]
+    if not ref:
+        return []
+    ref_set = set(ref)
+    actual_in_ref = [s for s in ordered_section_sequence(tex) if s in ref_set]
+    present = set(actual_in_ref)
+    expected = [s for s in ref if s in present]
+    if actual_in_ref == expected:
+        return []
+    return [
+        "section order: declared sections appear out of order -- expected "
+        f"{expected}, found {actual_in_ref}"
+    ]
+
+
 # -- F2 figure font policy ---------------------------------------------------
 
 # A document is "figure-bearing" iff it carries a native pgfplots figure (the renderer emits
@@ -411,6 +465,8 @@ __all__ = [
     "NOMINAL_TEXTWIDTH_IN",
     "section_names",
     "required_sections_problems",
+    "ordered_section_sequence",
+    "section_order_problems",
     "is_figure_bearing",
     "figure_font_policy_problems",
     "display_width_inches",

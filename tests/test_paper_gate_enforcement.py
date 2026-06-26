@@ -457,3 +457,167 @@ def test_compliant_paper_does_not_mask_reproduction_failure(tmp_path):
     report = verify_run(run_dir)
     assert not report.all_reproduced  # the existing record-green gate still fires
     assert not report.passed
+
+
+# ===========================================================================
+# P3 -- citation gates (MP-3 shape/disambiguation/unpublished, AC-4 per-run resolution)
+# ===========================================================================
+
+def _bib(run_dir: Path, content: str) -> None:
+    (run_dir / "paper").mkdir(exist_ok=True)
+    (run_dir / "paper" / "references.bib").write_text(content, encoding="utf-8")
+
+
+def test_per_run_cite_resolution_fails_on_dangling_key(tmp_path):
+    """AC-4 (REQ-PG-305): a per-run draft citing a key with no .bib entry FAILS and names it."""
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir, point=0.61)
+    _draft(run_dir, r"\section{Results}As shown \cite{McKay2013}, the value is 0.61.")
+    _bib(run_dir, "@article{Joe2026, title={x}, doi={10.1/j}}\n")  # different key -> dangling
+    _freeze_pubreqs(run_dir, required_sections=[], figure_font_policy=False,
+                    image_min_dpi=None, reproduction_bundle=False)
+    report = verify_run(run_dir)
+    joined = " ".join(report.paper_requirements_problems)
+    assert "McKay2013" in joined
+    assert not report.paper_requirements_clean
+
+
+def test_per_run_non_conforming_cite_key_fails(tmp_path):
+    """MP-3 (REQ-PG-302): a per-run \\cite key not matching <Surname><Year>(+a/b) FAILS."""
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir, point=0.61)
+    _draft(run_dir, r"\section{Results}See \cite{ref1}. The value is 0.61.")
+    _bib(run_dir, "@article{ref1, title={x}, doi={10.1/r}}\n")  # defined (resolves) but bad shape
+    _freeze_pubreqs(run_dir, required_sections=[], figure_font_policy=False,
+                    image_min_dpi=None, reproduction_bundle=False)
+    report = verify_run(run_dir)
+    joined = " ".join(report.paper_requirements_problems)
+    assert "ref1" in joined
+    assert "shape" in joined.lower()
+    assert not report.paper_requirements_clean
+
+
+def test_package_non_conforming_cite_key_fails(tmp_path):
+    """MP-3 (REQ-PG-301): a package \\cite/.bib key not matching the shape FAILS verify_package."""
+    ws = tmp_path
+    _package_main(
+        ws, r"\section{Results}See \cite{ref1}.",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None),
+    )
+    (ws / "package" / "01_manuscript" / "references.bib").write_text(
+        "@article{ref1, title={x}, doi={10.1/r}}\n", encoding="utf-8"
+    )
+    report = verify_package(ws)
+    joined = " ".join(report.package_requirements_problems)
+    assert "ref1" in joined
+    assert "shape" in joined.lower()
+    assert not report.package_requirements_clean
+
+
+def test_package_mis_disambiguated_citation_fails(tmp_path):
+    """MP-3 (REQ-PG-303): a bare base + a '...b' with no '...a' FAILS and names the group."""
+    ws = tmp_path
+    _package_main(
+        ws, r"\section{Results}See \cite{Smith2020} and \cite{Smith2020b}.",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None),
+    )
+    (ws / "package" / "01_manuscript" / "references.bib").write_text(
+        "@article{Smith2020, title={x}, doi={10.1/a}}\n"
+        "@article{Smith2020b, title={y}, doi={10.1/b}}\n", encoding="utf-8"
+    )
+    report = verify_package(ws)
+    joined = " ".join(report.package_requirements_problems)
+    assert "Smith2020" in joined
+    assert "disambiguation" in joined.lower()
+    assert not report.package_requirements_clean
+
+
+def test_package_unpublished_citation_warns_not_fails(tmp_path):
+    """MP-3 / OD-5 (REQ-PG-304): a load-bearing DOI-less citation WARNS (advisory), never FAILS."""
+    ws = tmp_path
+    _package_main(
+        ws, r"\section{Results}See \cite{Doe2025}.",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None),
+    )
+    (ws / "package" / "01_manuscript" / "references.bib").write_text(
+        "@misc{Doe2025, title={preprint}, year={2025}}\n", encoding="utf-8"  # no doi field
+    )
+    report = verify_package(ws)
+    assert any("Doe2025" in a for a in report.advisory)               # surfaced as a WARNING
+    assert not any("Doe2025" in p for p in report.package_requirements_problems)  # not a FAIL
+
+
+# ===========================================================================
+# P4 -- section ORDER (MP-2) + word-limit gating (AC-3)
+# ===========================================================================
+
+def test_per_run_section_order_out_of_declared_order_fails(tmp_path):
+    """MP-2 (REQ-PG-401/402, OD-6): a per-run draft with sections out of the DECLARED order FAILS."""
+    run_dir = tmp_path / "runs" / "spec-x"
+    _write_run(run_dir, point=0.61)
+    # All required sections present, but Methods is placed AFTER Discussion (out of IMRaD order).
+    _draft(
+        run_dir,
+        r"\begin{abstract}x\end{abstract}\section{Introduction}a"
+        r"\section{Results}c\section{Discussion}d\section{Methods}b"
+        r"\section{Conclusion}e The value is 0.61.",
+    )
+    _freeze_pubreqs(
+        run_dir,
+        required_sections=["Abstract", "Introduction", "Methods", "Results",
+                           "Discussion", "Conclusion"],
+        figure_font_policy=False, image_min_dpi=None, reproduction_bundle=False,
+    )
+    report = verify_run(run_dir)
+    joined = " ".join(report.paper_requirements_problems).lower()
+    assert "section order" in joined
+    assert not report.paper_requirements_clean
+
+
+def test_package_section_order_undeclared_warns_not_fails(tmp_path):
+    """MP-2 / OD-6: with NO declared order, out-of-IMRaD-order sections WARN (advisory), not FAIL."""
+    ws = tmp_path
+    # required_sections is NOT declared (empty) -> undeclared order -> WARN against default IMRaD.
+    _package_main(
+        ws,
+        r"\begin{abstract}x\end{abstract}\section{Results}c\section{Methods}b",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None),
+    )
+    report = verify_package(ws)
+    assert any("section order" in a.lower() for a in report.advisory)
+    assert not any("section order" in p.lower() for p in report.package_requirements_problems)
+
+
+def test_package_word_limits_gate_abstract_and_body(tmp_path):
+    """AC-3 (REQ-PG-404): an abstract over its limit AND a body outside its range both FAIL."""
+    ws = tmp_path
+    abstract = " ".join(["aw"] * 20)
+    body = " ".join(["bw"] * 5)
+    _package_main(
+        ws,
+        rf"\begin{{abstract}}{abstract}\end{{abstract}}\section{{Results}}{body}",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None,
+                            abstract_max_words=10, body_word_range=(1000, 2000)),
+    )
+    report = verify_package(ws)
+    joined = " ".join(report.package_requirements_problems).lower()
+    assert "abstract word count" in joined   # 20 > 10
+    assert "body word count" in joined        # ~6 < 1000
+    assert not report.package_requirements_clean
+
+
+def test_package_word_limits_within_limits_pass(tmp_path):
+    """AC-3 (no false positive): an abstract under its limit and a body in range raise no word fail."""
+    ws = tmp_path
+    abstract = " ".join(["aw"] * 5)
+    body = " ".join(["bw"] * 50)
+    _package_main(
+        ws,
+        rf"\begin{{abstract}}{abstract}\end{{abstract}}\section{{Results}}{body}",
+        pkgreqs=PackageReqs(digest="fixture-digest", figure_font_policy=False, image_min_dpi=None,
+                            abstract_max_words=100, body_word_range=(1, 1000)),
+    )
+    report = verify_package(ws)
+    joined = " ".join(report.package_requirements_problems).lower()
+    assert "abstract word count" not in joined
+    assert "body word count" not in joined
