@@ -184,8 +184,8 @@ def record_prior_work_searched(
     Unpaywall/OpenAlex polite pool, so by DEFAULT it REQUIRES a contact email,
     resolved from (``email`` arg -> ``~/.config/sci-adk/config.toml`` ->
     ``$UNPAYWALL_EMAIL``). When none is configured it raises ``ConfigHalt`` BEFORE any
-    acquisition is attempted -- silent degradation is refused (it is how the rice run
-    rode past the literature gate). Pass ``allow_no_email=True`` to proceed in the
+    acquisition is attempted -- silent degradation is refused (it is how the
+    degraded-acquisition failure rode past the literature gate). Pass ``allow_no_email=True`` to proceed in the
     degraded mode (no ``--email``). The resolution happens here (not only in the
     acquirer/adapter) so the requirement holds even when a fake ``adapter`` is injected
     for tests.

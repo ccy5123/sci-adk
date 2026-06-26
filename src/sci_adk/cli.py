@@ -1567,7 +1567,7 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
 
     # searched path: discovery (DOIs) is upstream; acquire + record LITERATURE.
     # By default a contact email is REQUIRED (E4): a missing one halts BEFORE any
-    # acquisition (refusing the silently degraded OA run that the rice case rode past).
+    # acquisition (refusing the silently degraded OA run that the degraded-acquisition failure rode past).
     # --allow-no-email is the explicit escape hatch to proceed degraded.
     from sci_adk.config import ConfigHalt
 

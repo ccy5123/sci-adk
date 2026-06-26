@@ -1,7 +1,7 @@
 """
 sci-adk Evidence-validity gate (referent-typed adequacy enforcement).
 
-This is the load-bearing fix for the rice-failure defect (design/evidence-validity.md):
+This is the load-bearing fix for the synthetic-proxy failure (design/evidence-validity.md):
 a run on an EMPIRICAL proposal used SYNTHETIC data and the harness reported
 "4/4 SUPPORTED". The gate makes evidence validity a HARD halt, not an advisory flag.
 
@@ -143,7 +143,7 @@ def check_evidence_adequacy(
             (SUPPORTS/REFUTES) triggers the "no measured data" / missing-attestation
             halts; a non-binding verdict affirms no belief and passes those checks.
     """
-    # @MX:ANCHOR: [AUTO] the single evidence-adequacy decision (the rice-failure fix).
+    # @MX:ANCHOR: [AUTO] the single evidence-adequacy decision (the synthetic-proxy failure fix).
     # @MX:REASON: [AUTO] ClaimUpdater calls this for EVERY hypothesis before persisting
     #   a Claim; it is the one place referent-typed validity is enforced. Weakening it
     #   (e.g. dropping the synthetic_proxy->empirical halt, or scoping the measured-data
@@ -167,8 +167,8 @@ def check_evidence_adequacy(
                 "design/evidence-validity.md Guard 3.",
             )
         # Guard 3 item 2: a binding empirical verdict needs at least one measured-grade
-        # item. data_source=None counts as "not measured" (fail-closed). The rice failure
-        # (all generated/synthetic, would-be SUPPORTED) stops here. A VERIFIED digitized
+        # item. data_source=None counts as "not measured" (fail-closed). The synthetic-proxy
+        # failure (all generated/synthetic, would-be SUPPORTED) stops here. A VERIFIED digitized
         # item (independent verifier) is measured-GRADE here (figure-digitization §5) --
         # it never becomes kind=measured, but a verified figure value satisfies the
         # requirement; a PROPOSED digitized item does NOT (and is excluded upstream).

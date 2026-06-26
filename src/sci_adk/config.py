@@ -4,8 +4,8 @@ sci-adk minimal configuration (contact email for OA acquisition).
 design/evidence-validity.md E4: the Unpaywall/OpenAlex polite-pool contact email is
 resolved from (explicit arg -> a small sci-adk config file -> ``$UNPAYWALL_EMAIL``).
 When ALL are empty the resolver HALTS with a clear, how-to-fix message instead of
-silently running degraded -- silent degradation is how the rice run bypassed the
-literature gate (it generated data rather than acquiring it).
+silently running degraded -- silent degradation is how the degraded-acquisition failure
+bypassed the literature gate (it generated data rather than acquiring it).
 
 The config file is a tiny TOML at ``~/.config/sci-adk/config.toml``::
 
@@ -37,7 +37,7 @@ class ConfigHalt(Exception):
     Raised when the contact email cannot be resolved from any source. The CLI/adapter
     surfaces it as a friendly message naming exactly how to set/persist the value,
     rather than proceeding in a silently degraded mode (no ``--email`` -> weaker OA
-    results, the failure mode the rice run rode past).
+    results, the failure mode the degraded-acquisition failure rode past).
     """
 
 
@@ -128,7 +128,7 @@ def require_contact_email(
     The single home for the policy every Open-Access *searched* trigger shares
     (prior-work, novelty, contested): by DEFAULT an email is REQUIRED -- a missing one
     raises ``ConfigHalt`` BEFORE any acquisition (E4, refusing the silently degraded OA
-    run the rice case rode past). ``allow_no_email=True`` is the explicit escape hatch to
+    run the degraded-acquisition failure rode past). ``allow_no_email=True`` is the explicit escape hatch to
     proceed degraded (returns whatever resolves, possibly ``None``, never halts).
 
     Resolving here (not only in the acquirer/adapter) keeps the requirement firm even

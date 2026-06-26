@@ -136,7 +136,7 @@ class PaperforgeAdapter:
         design/evidence-validity.md E4: when ``require`` is True and no source supplies
         an email, this raises ``ConfigHalt`` (a clear, how-to-fix message) rather than
         letting acquisition run silently degraded (no ``--email`` -> weaker OA results,
-        the failure the rice run rode past). When ``require`` is False it returns
+        the degraded-acquisition failure). When ``require`` is False it returns
         ``None`` on absence (the legacy permissive behavior, for callers that tolerate
         the degraded pool).
 

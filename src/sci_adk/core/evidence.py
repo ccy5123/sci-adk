@@ -140,7 +140,7 @@ class Provenance(BaseModel):
       - ``generated``       -- an in-silico/computed GENUINE instance of a formal
                                referent (the experiment's input set).
       - ``synthetic_proxy`` -- a FABRICATED stand-in for an external referent the data
-                               does not contain (the rice numbers).
+                               does not contain (a fabricated stand-in dataset).
       - ``None``            -- unstated; the gate treats it as "not measured"
                                (fail-closed).
 
