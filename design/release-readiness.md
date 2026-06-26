@@ -77,7 +77,7 @@ publication-plan memory; Phase 0 / MIT license already done.)
 | C5 | `CHANGELOG.md` | `[DONE]` | Keep a Changelog; accumulated history under `[Unreleased]` |
 | C6 | `SECURITY.md` | `[DONE]` | private reporting + Docker code-execution scope note |
 | C7 | `CITATION.cff` | `[DONE]` | CFF 1.2.0; Chan Young Joe, ORCID 0009-0007-5822-6714 |
-| C8 | CI (`.github/workflows/`) running the suite on push/PR | `[DONE]` | `.github/workflows/ci.yml`; py3.11 + 3.12; verified locally (1278 passed, 3 integration deselected) |
+| C8 | CI (`.github/workflows/`) running the suite on push/PR | `[DONE]` | `.github/workflows/ci.yml`; py3.11 + 3.12; green on push (1266 passed, 15 integration deselected -- Docker-path tests marked `integration` so the unit lane is hermetic) |
 | C9 | `pyproject` metadata: `[project.urls]`, description aligned to ADK framing | `[DONE]` | ADK-framed description + `authors` + classifiers + `[project.urls]` + `[dev]` extra (pytest) |
 
 ## 6. G-D — Versioning & API stability

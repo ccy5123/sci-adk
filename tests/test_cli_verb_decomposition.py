@@ -17,6 +17,7 @@ checkable without timestamp drift.
 from __future__ import annotations
 
 import json
+import pytest
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -331,6 +332,7 @@ def test_chain_byte_identical_multi_hypothesis_and_novelty(tmp_path):
     assert "novelty" in mono_draft.lower() or "novelty" in mono_si.lower()
 
 
+@pytest.mark.integration
 def test_run_t1_demo_byte_identical_to_verb_chain_via_cli(tmp_path):
     """End-to-end via the CLI: `run --t1-demo` matches `init-spec/execute/derive/render`.
 
@@ -460,6 +462,7 @@ def test_amend_spec_blank_rationale_errors_s5(tmp_path, capsys):
 # execute
 # --------------------------------------------------------------------------- #
 
+@pytest.mark.integration
 def test_execute_t1_demo_produces_evidence(tmp_path, capsys):
     main(["init-spec", "--t1-demo", "-o", str(tmp_path)])
     run_dir = tmp_path / "runs" / "t1-godel"
@@ -595,6 +598,7 @@ def test_render_missing_run_dir_errors(tmp_path, capsys):
 # run wrapper integration -- the full chain still produces everything.
 # --------------------------------------------------------------------------- #
 
+@pytest.mark.integration
 def test_run_wrapper_full_chain_produces_all_artifacts(tmp_path, capsys):
     # --no-strict-science: full-chain ARTIFACT plumbing test (does run produce all files?),
     # not a science test. The bare t1 demo has no negative control -> strict would HALT (G3).
@@ -611,6 +615,7 @@ def test_run_wrapper_full_chain_produces_all_artifacts(tmp_path, capsys):
     assert (run_dir / "checkpoints" / "prior_work.json").exists()
 
 
+@pytest.mark.integration
 def test_render_warns_in_multi_run_workspace_pf7(tmp_path, capsys):
     """PF-7 (design/near-submission-package.md): a per-run render in a multi-run
     workspace WARNS and points to `package` -- route-to-package + warn, never a refuse."""

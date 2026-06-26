@@ -26,6 +26,7 @@ class TestDockerExecutor:
         executor = DockerExecutor(image_name="custom-image")
         assert executor.image_name == "custom-image"
 
+    @pytest.mark.integration
     def test_execute_python_simple(self):
         """Test basic Python execution."""
         executor = DockerExecutor()
@@ -37,6 +38,7 @@ class TestDockerExecutor:
         assert result["provenance"]["image_name"] == "sci-adk-python-base"
         assert result["provenance"]["image_id"] is not None
 
+    @pytest.mark.integration
     def test_execute_python_with_args(self):
         """Test Python execution with arguments."""
         executor = DockerExecutor()
@@ -60,6 +62,7 @@ for arg in sys.argv[1:]:
         assert result["returncode"] != 0
         assert result["stderr"] is not None
 
+    @pytest.mark.integration
     def test_execute_python_calculation(self):
         """Test Python calculation execution."""
         executor = DockerExecutor()
@@ -68,6 +71,7 @@ for arg in sys.argv[1:]:
         assert result["success"] is True
         assert "4" in result["stdout"]
 
+    @pytest.mark.integration
     def test_execute_command(self):
         """Test arbitrary command execution."""
         executor = DockerExecutor()
@@ -114,6 +118,7 @@ for arg in sys.argv[1:]:
 class TestProvenanceCapture:
     """Test provenance capture mechanisms."""
 
+    @pytest.mark.integration
     def test_image_id_capture(self):
         """Test Docker image ID capture."""
         executor = DockerExecutor()

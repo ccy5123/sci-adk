@@ -119,6 +119,7 @@ class TestRegistryRegistration:
 class TestCliCapabilitySelector:
     """``--capability <id>`` resolves the provider; ``--t1-demo`` stays an alias."""
 
+    @pytest.mark.integration
     def test_capability_t1_demo_mode_runs_and_supports(self, tmp_path, capsys):
         # No proposal + --capability t1-molecular-godel => the provider's demo Spec +
         # demo molecules drive an autonomous SUPPORTED verdict (the real container path).
@@ -137,6 +138,7 @@ class TestCliCapabilitySelector:
         assert rc == 0
         assert "compiled Spec 'cap-demo'" in out
 
+    @pytest.mark.integration
     def test_t1_demo_alias_still_works(self, tmp_path, capsys):
         # Regression: the legacy --t1-demo flag must keep working as an alias for
         # --capability t1-molecular-godel (demo mode). No breakage.

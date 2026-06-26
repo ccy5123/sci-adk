@@ -246,6 +246,7 @@ class TestDockerBackedProduction:
     DecisionEngine renders an autonomous verdict (proves the science is Docker-backed,
     not only unit-tested)."""
 
+    @pytest.mark.integration
     def test_t1_demo_set_supported_via_real_container(self, tmp_path):
         from sci_adk.adapter.t1_capability import (
             build_t1_demo_molecules,
