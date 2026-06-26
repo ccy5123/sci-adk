@@ -129,6 +129,21 @@ def test_operational_layer_install_then_verb_chain_to_passing_verify(tmp_path):
     assert (run_dir / "paper" / "draft.tex").exists()
     assert (run_dir / "paper" / "si.tex").exists()
 
+    # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): a rendered draft.tex is a
+    # conclusion-bearing artifact, so freezing a publishing contract is now a completion step
+    # (REQ-PG-102) -- without it verify REFUSES. The skeleton paper carries no quantitative
+    # literal beyond the record, so a minimal contract (sub-checks off) gates green.
+    from sci_adk.core.pubreqs import PubReqs as _PubReqs
+    from sci_adk.provenance import pubreqs_digest as _pubreqs_digest
+
+    _pr = _PubReqs(
+        spec_id=spec_id, required_sections=[], figure_font_policy=False,
+        image_min_dpi=None, reference_style=None, max_words=None,
+        reproduction_bundle=False,
+    )
+    _pr = _pr.model_copy(update={"digest": _pubreqs_digest(_pr)})
+    (run_dir / "pubreqs.json").write_text(_pr.model_dump_json(indent=2), encoding="utf-8")
+
     # ---- Act 3: the verify gate -- the SAME verdict the Stop hook enforces. ----
     # verify_run is the kernel function behind the ``verify`` verb: re-derive belief from
     # the recorded run (no re-run, no LLM) and confirm it follows from the record AND the

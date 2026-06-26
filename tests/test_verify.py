@@ -353,6 +353,29 @@ def _write_paper(run_dir: Path, name: str, tex: str) -> None:
     (paper / name).write_text(tex, encoding="utf-8")
 
 
+def _freeze_minimal_pubreqs(run_dir: Path) -> None:
+    """Freeze a minimal compliant pubreqs.json so the SPEC-PAPER-GATE-001 P1 refusal is
+    silenced for a conclusion-bearing draft.tex.
+
+    Under the M1 non-vacuous posture (OD-1 strict + OD-8 immediate), ANY paper/draft.tex is a
+    conclusion-bearing artifact that REQUIRES a frozen publishing contract -- a run that renders
+    a paper but freezes no pubreqs.json now REFUSES (no silent clean pass). These tests target
+    OTHER gates (consistency / cross-doc / tool-vocab), so they freeze the smallest contract
+    that turns every contract-declared sub-check off; the P1 refusal and the P2 number-audit
+    (which is unconditional once a draft exists) remain in force.
+    """
+    from sci_adk.core.pubreqs import PubReqs as _PubReqs
+    from sci_adk.provenance import pubreqs_digest as _pubreqs_digest
+
+    pr = _PubReqs(
+        spec_id=run_dir.name, required_sections=[], figure_font_policy=False,
+        image_min_dpi=None, reference_style=None, max_words=None,
+        reproduction_bundle=False,
+    )
+    pr = pr.model_copy(update={"digest": _pubreqs_digest(pr)})
+    (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+
+
 def test_verify_no_paper_is_consistent(tmp_path):
     # A run with NO paper/ dir: paper_consistent is True (nothing to check), exit gate
     # unchanged. The new fields exist; paper_consistency is empty. (_seed renders a
@@ -373,6 +396,7 @@ def test_verify_seeded_skeletal_paper_is_consistent(tmp_path):
     # internally consistent -- the gate does not false-fail on a clean skeleton.
     spec = _numeric_spec("v-skeleton", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))  # compiler writes paper/
+    _freeze_minimal_pubreqs(run_dir)  # M1: a draft.tex is conclusion-bearing -> needs a contract
     report = verify_run(run_dir)
     assert set(report.paper_consistency) == {"draft.tex", "si.tex"}
     assert report.paper_consistent is True
@@ -386,6 +410,7 @@ def test_verify_consistent_paper_passes(tmp_path):
                  r"\label{fig:a} See Figure~\ref{fig:a}.")
     _write_paper(run_dir, "si.tex",
                  r"\label{tab:s1} Table~\ref{tab:s1}.")
+    _freeze_minimal_pubreqs(run_dir)  # M1: a draft.tex is conclusion-bearing -> needs a contract
     report = verify_run(run_dir)
     assert set(report.paper_consistency) == {"draft.tex", "si.tex"}
     assert all(isinstance(r, LatexRefReport) for r in report.paper_consistency.values())
@@ -444,6 +469,7 @@ def test_verify_seeded_skeleton_is_cross_doc_clean(tmp_path):
     # vacuously clean -- it must not false-fail an ordinary run.
     spec = _numeric_spec("v-xdoc-skeleton", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _freeze_minimal_pubreqs(run_dir)  # M1: a draft.tex is conclusion-bearing -> needs a contract
     report = verify_run(run_dir)
     assert report.paper_cross_doc_refs == []
     assert report.paper_cross_doc_clean is True
@@ -457,6 +483,7 @@ def test_verify_resolved_cross_doc_s_ref_passes(tmp_path):
     _write_paper(run_dir, "draft.tex", r"As shown in Figure S1, the property holds.")
     _write_paper(run_dir, "si.tex",
                  r"\begin{figure}[htbp]\caption{a}\label{fig:a}\end{figure}")
+    _freeze_minimal_pubreqs(run_dir)  # M1: a draft.tex is conclusion-bearing -> needs a contract
     report = verify_run(run_dir)
     assert report.paper_cross_doc_refs == []
     assert report.paper_cross_doc_clean is True
@@ -527,10 +554,14 @@ def test_verify_tool_vocabulary_in_si_is_exempt(tmp_path):
     # gated. A clean draft.tex + a vocabulary-rich si.tex still passes the tool gate.
     spec = _numeric_spec("v-si-exempt", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
-    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The collision count is 0.")
+    # M1: a draft.tex is conclusion-bearing -> needs a frozen contract AND every quantitative
+    # token must trace to the record. This test targets the SI tool-vocab exemption, so the
+    # draft prose carries no unbacked literal (the point estimate 0.95 IS recorded).
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The point estimate is 0.95.")
     _write_paper(run_dir, "si.tex",
                  r"\label{tab:s1} Table~\ref{tab:s1}. The append-only Evidence record; "
                  r"frozen Spec; engine-derived verdicts; result.point.")
+    _freeze_minimal_pubreqs(run_dir)
     report = verify_run(run_dir)
     assert report.paper_tool_clean is True   # the SI's vocabulary is exempt
     assert report.paper_tool_vocab == []
@@ -564,6 +595,7 @@ def test_verify_all_reproduced_unchanged_when_no_paper(tmp_path):
     spec = _numeric_spec("v-meaning", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.10))  # 0.10 < 0.9 -> refuted, but
     # the claim still reproduces (recorded refuted == re-derived refuted).
+    _freeze_minimal_pubreqs(run_dir)  # M1: the seeded draft.tex is conclusion-bearing
     report = verify_run(run_dir)
     assert report.all_reproduced is True   # the claim reproduces (refuted==refuted)
     assert report.paper_consistent is True
@@ -606,12 +638,32 @@ def _png_bytes(width: int, height: int = 10) -> bytes:
     return sig + _chunk(b"IHDR", ihdr) + _chunk(b"IEND", b"")
 
 
-def test_verify_no_pubreqs_is_vacuously_clean(tmp_path):
-    # BACKWARD COMPAT: a run with NO pubreqs.json declares no requirements -> the umbrella
-    # gate is vacuously clean and the full exit gate is UNCHANGED (every existing run still
-    # passes). This is the invariant the whole existing verify suite relies on.
+def test_verify_no_pubreqs_with_draft_refuses(tmp_path):
+    # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): the OLD "no pubreqs.json ->
+    # vacuously clean" posture is OVERTURNED for a conclusion-bearing artifact. A run that
+    # renders a paper/draft.tex but freezes NO pubreqs.json now REFUSES -- a loud, actionable
+    # failure naming what to freeze, NOT a silent clean pass (REQ-PG-101/108).
     spec = _numeric_spec("v-noreqs", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))  # compiler renders draft.tex
+    assert (run_dir / "paper" / "draft.tex").is_file()
+    assert not (run_dir / "pubreqs.json").exists()
+    report = verify_run(run_dir)
+    assert report.paper_requirements_clean is False
+    assert report.passed is False
+    joined = " ".join(report.paper_requirements_problems).lower()
+    assert "frozen" in joined or "freeze" in joined  # actionable
+    assert "pubreqs" in joined
+
+
+def test_verify_no_draft_is_vacuously_clean(tmp_path):
+    # The vacuous-clean path SURVIVES for a NON-conclusion-bearing run: a run with NO
+    # paper/draft.tex declared no paper, so the publishing gate is a no-op and the run passes
+    # exactly as before (every pre-paper run is unchanged -- EC-1 spirit).
+    import shutil
+
+    spec = _numeric_spec("v-nodraft", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    shutil.rmtree(run_dir / "paper")  # remove the rendered paper -> not conclusion-bearing
     assert not (run_dir / "pubreqs.json").exists()
     report = verify_run(run_dir)
     assert report.paper_requirements_problems == []

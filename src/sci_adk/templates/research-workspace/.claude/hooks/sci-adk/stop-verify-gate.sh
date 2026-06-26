@@ -53,6 +53,13 @@ for run in "$runs_dir"/*/; do
 	fi
 done
 
+# @MX:TODO: [AUTO] SPEC-PAPER-GATE-001 MP-5 (REQ-PG-104, deferred to the next increment): ALSO
+#   run the workspace PACKAGE gate at session close -- `$SCIADK verify "${CLAUDE_PROJECT_DIR:-$PWD}"`
+#   (which `verify_package` backs) -- and add its failure to $failed so a conclusion-bearing
+#   package/ that fails the gate (unbacked number, missing frozen pkgreqs.json, unresolved cite)
+#   BLOCKS Stop too. The per-run loop above (the claim-reproduction audit) stays unchanged; the
+#   package gate is ADDITIVE alongside it.
+
 if [ -n "$failed" ]; then
 	{
 		echo "[sci-adk] Stop blocked: recorded belief is not reproducible from the record."

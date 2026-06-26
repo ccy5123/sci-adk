@@ -467,6 +467,21 @@ def _write_draft(run_dir: Path, body: str) -> None:
     (paper_dir / "draft.tex").write_text(tex, encoding="utf-8")
 
 
+def _freeze_minimal_pubreqs(run_dir: Path) -> None:
+    """Freeze a minimal compliant pubreqs.json so the SPEC-PAPER-GATE-001 P1 refusal is
+    silenced for a conclusion-bearing draft.tex (M1, OD-1 strict + OD-8 immediate)."""
+    from sci_adk.core.pubreqs import PubReqs as _PubReqs
+    from sci_adk.provenance import pubreqs_digest as _pubreqs_digest
+
+    pr = _PubReqs(
+        spec_id=run_dir.name, required_sections=[], figure_font_policy=False,
+        image_min_dpi=None, reference_style=None, max_words=None,
+        reproduction_bundle=False,
+    )
+    pr = pr.model_copy(update={"digest": _pubreqs_digest(pr)})
+    (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+
+
 class TestVerifyNoveltyGate:
     def test_supported_novelty_in_draft_passes(self):
         import tempfile
@@ -476,6 +491,10 @@ class TestVerifyNoveltyGate:
             spec = _spec()
             run_dir = _seed(ws, spec, _experiment_found_nothing(0.95))
             _write_draft(run_dir, r"This is \novelty{result}{hyp-n}{first}.")
+            # M1 (SPEC-PAPER-GATE-001 P1): a draft.tex is conclusion-bearing -> freeze a minimal
+            # publishing contract so the P1 refusal is silenced; this test targets the novelty
+            # gate, and the draft prose carries no quantitative literal (number-audit clean).
+            _freeze_minimal_pubreqs(run_dir)
 
             report = verify_run(run_dir)
             assert report.paper_novelty_clean is True

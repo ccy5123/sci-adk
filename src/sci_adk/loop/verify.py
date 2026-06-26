@@ -72,6 +72,11 @@ from sci_adk.render.consistency import (
 )
 from sci_adk.render.factref import find_unresolved_factrefs
 from sci_adk.render.novelty import find_unsupported_novelty
+from sci_adk.render.number_audit import (
+    RecordedValuePool,
+    number_audit_problems,
+    pool_from_record,
+)
 from sci_adk.render.paper import check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
@@ -394,9 +399,14 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # Publishing-requirements gate (F1, design/paper-publishing-requirements.md §1.3): the
     # umbrella gate that consumes F2 (font/DPI) + F3 (reproduction bundle) + the section/
     # reference/word-count checks the FROZEN pubreqs.json declares. READ-ONLY, no recompile,
-    # no LLM. When pubreqs.json is ABSENT -> vacuously clean (every existing run is unchanged
-    # -- backward compatible). advisory + max_pages are surfaced (CLI) but NEVER gated.
-    paper_requirements_problems = _check_paper_requirements(run_dir, evidence)
+    # no LLM. SPEC-PAPER-GATE-001 P1+P2: when paper/draft.tex EXISTS (a conclusion-bearing
+    # artifact, OD-1 strict) the gate is NO LONGER vacuous -- an absent pubreqs.json is a loud
+    # REFUSAL (OD-8 immediate), and every quantitative token in draft.tex+si.tex must trace to
+    # the recorded-value pool (P2 number-audit). A run with NO draft.tex stays vacuously clean.
+    # advisory + max_pages are surfaced (CLI) but NEVER gated.
+    paper_requirements_problems = _check_paper_requirements(
+        run_dir, evidence, list(recorded_claims.values()), spec
+    )
     paper_requirements_clean = not paper_requirements_problems
 
     return VerifyReport(
@@ -439,11 +449,15 @@ def verify_package(workspace_dir: Path) -> PackageVerifyReport:
     per-run paper; it adds the package-SPECIFIC checks (layout, cite resolution, abstract limit,
     traceability tables, every listed run reproduces, README submission-readiness).
 
-    Vacuity / backward-compat (design §3):
+    Vacuity / posture (design §3, amended by SPEC-PAPER-GATE-001 P1, OD-1 strict + OD-8):
       - NO ``package/`` -> vacuously clean (nothing to gate; an empty workspace is fine).
-      - ``package/`` present but NO ``pkgreqs.json`` -> the venue-FORMAT sub-checks
-        (required_sections / reference_style / abstract limit) are vacuously clean, while the
-        layout / traceability / compile / fidelity / record-green checks still run.
+      - ``package/`` present is now a CONCLUSION-BEARING artifact. A present ``package/`` with
+        NO frozen ``pkgreqs.json`` is no longer a silent clean pass for the venue-FORMAT checks
+        -- it is a LOUD REFUSAL naming what to freeze (REQ-PG-101/103/108). The number-audit
+        (P2) ALSO runs whenever a ``package/`` exists. The venue-FORMAT sub-checks
+        (required_sections / reference_style / abstract limit) still require a contract to run;
+        the layout / traceability / compile / fidelity / record-green / number-audit checks run
+        regardless.
 
     The ``record green`` check re-uses :func:`verify_run` over each run the ``run_index.csv``
     lists (the headless record audit) -- a listed run that does not reproduce fails the gate.
@@ -804,7 +818,10 @@ def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
 # -- F1 publishing-requirements gate (design §1.3) ---------------------------
 
 def _check_paper_requirements(
-    run_dir: Path, evidence: List[EvidenceItem]
+    run_dir: Path,
+    evidence: List[EvidenceItem],
+    claims: Optional[List[Claim]] = None,
+    spec: Optional[Spec] = None,
 ) -> List[str]:
     """Run the deterministic checks the FROZEN ``pubreqs.json`` declares (F1, design §1.3).
 
@@ -813,12 +830,21 @@ def _check_paper_requirements(
     ``run_dir/paper/reproduce.py`` -- never recompiles, never writes, never calls an LLM. Runs
     ONLY the requirements the contract turns on, and returns the failure lines (empty = clean).
 
-    Backward compatibility: when ``pubreqs.json`` is ABSENT the run declared no requirements,
-    so this returns ``[]`` (vacuously clean) and the umbrella gate is a no-op -- every existing
-    run keeps passing exactly as before. ADVISORY items and ``max_pages`` are NEVER gated here
-    (no deterministic page count exists without a compile); the CLI surfaces them separately.
+    SPEC-PAPER-GATE-001 P1+P2 (the non-vacuous posture, OD-1 strict + OD-8 immediate):
+      - A run with NO ``paper/draft.tex`` is NOT a conclusion-bearing artifact -> this stays
+        vacuously clean exactly as before (every pre-paper run is unchanged).
+      - A run WITH a ``paper/draft.tex`` IS conclusion-bearing. An absent ``pubreqs.json`` is
+        no longer a silent clean pass -- it is a LOUD, actionable REFUSAL (REQ-PG-101/108)
+        naming the missing contract and what to run to freeze it. With the contract present,
+        the P2 number-audit ALSO runs: every quantitative token in draft.tex + si.tex must
+        trace to the recorded-value pool (Claim statistics + Evidence scalars), else FAIL
+        (REQ-PG-201/202). This is ADDITIVE -- it never touches the claim-reproduction gate
+        (REQ-PG-107).
 
-    The checks (design §1.3 table), each guarded by its contract field:
+    ADVISORY items and ``max_pages`` are NEVER gated here (no deterministic page count exists
+    without a compile); the CLI surfaces them separately.
+
+    The contract-declared checks (design §1.3 table), each guarded by its field:
       - required_sections -> each named ``\\section{...}`` present in draft.tex;
       - figure_font_policy -> the F2 font preamble present for a figure-bearing draft;
       - image_min_dpi      -> every raster ``\\includegraphics`` >= the threshold DPI;
@@ -828,18 +854,40 @@ def _check_paper_requirements(
         ``code_ref``s (FAIL-OPEN for a pointer-only bundle, design §6 OF-4 -- see
         :func:`_reproduction_bundle_problems`).
     """
+    draft = run_dir / "paper" / "draft.tex"
+    draft_tex = draft.read_text(encoding="utf-8") if draft.is_file() else ""
+
+    # OD-1 strict conclusion-bearing trigger (per-run): ANY paper/draft.tex. A run with no
+    # draft.tex declared no paper -> vacuously clean (backward compatible, EC-1 spirit).
+    if not draft.is_file():
+        return []
+
     pubreqs_path = run_dir / "pubreqs.json"
     if not pubreqs_path.is_file():
-        return []  # no declared requirements -> vacuously clean (backward compatible)
+        # OD-8 IMMEDIATE refusal: a conclusion-bearing draft with no frozen contract is NOT a
+        # silent clean pass. Name what to freeze (REQ-PG-101/108) -- actionable, not a flip.
+        return [
+            "publishing contract: paper/draft.tex is conclusion-bearing but no frozen "
+            "pubreqs.json exists -- run `sci-adk pubreqs freeze <run>` to freeze the "
+            "publishing contract before verify can pass (SPEC-PAPER-GATE-001 P1)"
+        ]
 
     pubreqs = PubReqs.model_validate(
         json.loads(pubreqs_path.read_text(encoding="utf-8"))
     )
 
-    draft = run_dir / "paper" / "draft.tex"
-    draft_tex = draft.read_text(encoding="utf-8") if draft.is_file() else ""
-
     problems: List[str] = []
+
+    # P2 number-audit (REQ-PG-201/202/204): every quantitative token in draft.tex + si.tex
+    # traces to the recorded-value pool (Claim statistics + Evidence scalars). Compares ONLY
+    # against recorded values (record vs belief, REQ-PG-203).
+    pool = pool_from_record(claims or [], evidence, spec)
+    for name in _PAPER_DOCS:
+        doc = run_dir / "paper" / name
+        if doc.is_file():
+            problems.extend(
+                number_audit_problems(doc.read_text(encoding="utf-8"), pool, source=name)
+            )
 
     if pubreqs.required_sections:
         problems.extend(
@@ -1034,6 +1082,27 @@ def _check_package_requirements(
     if bib_path.is_file():
         bib = bib_path.read_text(encoding="utf-8")
 
+    # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): a package/ that exists at all is a
+    # conclusion-bearing artifact. An absent frozen pkgreqs.json is NOT a silent clean pass --
+    # it is a LOUD, actionable REFUSAL naming what to freeze (REQ-PG-101/103/108). This is
+    # additive; the layout/traceability/fidelity/record-green checks below still run.
+    if pkgreqs is None:
+        problems.append(
+            "package contract: package/ is conclusion-bearing but no frozen pkgreqs.json "
+            "exists -- run `sci-adk pkgreqs freeze <workspace>` to freeze the package "
+            "contract before verify can pass (SPEC-PAPER-GATE-001 P1)"
+        )
+
+    # SPEC-PAPER-GATE-001 P2 (REQ-PG-201/202/204): every quantitative token in main.tex + si.tex
+    # must trace to the package's recorded-value pool (the 02_data/*.csv record dump: the
+    # claims_all.csv statistics + any per-figure CSVs). Compares ONLY against recorded values
+    # (record vs belief, REQ-PG-203). Runs whenever a package/ exists -- the merged manuscript
+    # is the central leak (L2/L3: hand-typed prose) this gate closes.
+    pool = RecordedValuePool.from_data_csvs(package_dir / "02_data")
+    for name, tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
+        if tex:
+            problems.extend(number_audit_problems(tex, pool, source=name))
+
     # 1. Layout: the 6 folders + MANIFEST.md + README.md present.
     problems.extend(layout_problems(package_dir))
 
@@ -1079,6 +1148,12 @@ def _check_package_requirements(
             )
 
     # 6. Venue-FORMAT checks (only when the contract declares them).
+    # @MX:TODO: [AUTO] F2 package-gate gap (SPEC-PAPER-GATE-001 REQ-PG-106, deferred to the next
+    #   increment): when PackageReqs gains `figure_font_policy` + `image_min_dpi` (mirroring
+    #   PubReqs), call render.pubreqs_checks.figure_font_policy_problems(main_tex) +
+    #   image_dpi_problems(main_tex, manuscript_dir/"figures", pkgreqs.image_min_dpi) HERE -- the
+    #   per-run checkers are already pure and reusable. Section ORDER (P4) and Conclusion-in-
+    #   defaults (REQ-PG-105/403) also plug in around required_sections_problems in M2.
     if pkgreqs is not None and main_tex:
         if pkgreqs.required_sections:
             problems.extend(

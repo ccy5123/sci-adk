@@ -94,13 +94,19 @@ def test_cli_package_then_verify_reports_green(tmp_path, capsys):
     assert "2/2 reproduce" in out
 
 
-def test_cli_package_without_pkgreqs_still_gates_green(tmp_path):
-    # `sci-adk package` with no frozen contract: assembles + runs the layout/traceability gate
-    # (venue-format checks vacuous) -> green for a clean assembly. Backward compatible.
+def test_cli_package_without_pkgreqs_refuses(tmp_path, capsys):
+    # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): `sci-adk package` with NO frozen
+    # contract still ASSEMBLES the package, but the gate now REFUSES (exit non-zero) with a
+    # loud, actionable message naming what to freeze -- the OLD "vacuously green" posture is
+    # overturned (REQ-PG-103/108). Freezing a pkgreqs.json is now a completion step.
     from sci_adk.cli import main
 
     ws = _seed_two_run_workspace(tmp_path)
-    assert main(["package", str(ws)]) == 0
+    rc = main(["package", str(ws)])
+    assert rc != 0
+    err = capsys.readouterr().err.lower()
+    assert "pkgreqs" in err
+    assert "frozen" in err or "freeze" in err
 
 
 def test_cli_verify_workspace_without_package_is_clean(tmp_path):

@@ -85,6 +85,7 @@ def _seed_numeric(workspace: Path, spec: Spec, point: float, hyp_id: str = "hyp-
 def test_verify_reproduced_exits_zero(tmp_path, capsys):
     spec = _numeric_spec("cli-ok", value=0.9)
     run_dir = _seed_numeric(tmp_path, spec, 0.95)
+    _freeze_minimal_pubreqs(run_dir)  # M1: the seeded draft.tex is conclusion-bearing
     rc = main(["verify", str(run_dir)])
     out = capsys.readouterr().out
     assert rc == 0
@@ -209,6 +210,22 @@ def _write_paper(run_dir: Path, name: str, tex: str) -> None:
     (paper / name).write_text(tex, encoding="utf-8")
 
 
+def _freeze_minimal_pubreqs(run_dir: Path) -> None:
+    """Freeze a minimal compliant pubreqs.json so the SPEC-PAPER-GATE-001 P1 refusal is
+    silenced for a conclusion-bearing draft.tex (M1, OD-1 strict + OD-8 immediate). These CLI
+    tests target the exit-code behaviour of OTHER gates, so they freeze the smallest contract."""
+    from sci_adk.core.pubreqs import PubReqs as _PubReqs
+    from sci_adk.provenance import pubreqs_digest as _pubreqs_digest
+
+    pr = _PubReqs(
+        spec_id=run_dir.name, required_sections=[], figure_font_policy=False,
+        image_min_dpi=None, reference_style=None, max_words=None,
+        reproduction_bundle=False,
+    )
+    pr = pr.model_copy(update={"digest": _pubreqs_digest(pr)})
+    (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+
+
 def test_verify_inconsistent_paper_exits_nonzero_and_prints_unresolved(tmp_path, capsys):
     # A reproducing run whose RENDERED draft.tex has a dangling \ref must exit non-zero
     # (the combined gate) and print the unresolved reference so a third party sees why.
@@ -231,14 +248,20 @@ def test_verify_consistent_paper_exits_zero(tmp_path, capsys):
     run_dir = _seed_numeric(tmp_path, spec, 0.95)
     _write_paper(run_dir, "draft.tex", r"\label{fig:a} See Figure~\ref{fig:a}.")
     _write_paper(run_dir, "si.tex", r"\label{tab:s1}\ref{tab:s1}")
+    _freeze_minimal_pubreqs(run_dir)  # M1: a draft.tex is conclusion-bearing -> needs a contract
 
     rc = main(["verify", str(run_dir)])
     assert rc == 0
 
 
 def test_verify_no_paper_exits_zero_unchanged(tmp_path, capsys):
-    # No paper/ -> the paper gate is vacuously satisfied; exit behavior is unchanged.
+    # No paper/draft.tex -> the run is NOT conclusion-bearing, the paper gate is vacuously
+    # satisfied; exit behavior is unchanged (M1: the vacuous-clean path survives for a
+    # pre-paper run). _seed_numeric renders a paper/, so remove it to exercise the path.
+    import shutil
+
     spec = _numeric_spec("cli-paper-none", value=0.9)
     run_dir = _seed_numeric(tmp_path, spec, 0.95)
+    shutil.rmtree(run_dir / "paper")
     rc = main(["verify", str(run_dir)])
     assert rc == 0

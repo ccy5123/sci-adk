@@ -131,14 +131,23 @@ def test_package_gate_no_package_is_vacuously_clean(tmp_path):
     assert report.runs == []
 
 
-def test_package_gate_no_pkgreqs_still_runs_layout_and_traceability(tmp_path):
-    # A package with NO pkgreqs.json: the venue-FORMAT checks are vacuous, but the layout +
-    # traceability + record-green checks still run (and pass for a clean assembly).
+def test_package_gate_no_pkgreqs_refuses_but_still_runs_layout_and_traceability(tmp_path):
+    # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): a package/ that exists at all is
+    # conclusion-bearing, so the OLD "no pkgreqs.json -> vacuously clean for venue-format
+    # checks" posture is OVERTURNED. A package with NO frozen pkgreqs.json now REFUSES with a
+    # loud, actionable message naming what to freeze (REQ-PG-101/103/108) -- while the
+    # layout/traceability/record-green checks still run alongside it (still additive).
     ws = _assembled(tmp_path, freeze=False)
     assert not (ws / "pkgreqs.json").exists()
     report = verify_package(ws)
-    assert report.package_requirements_clean is True
+    assert report.package_requirements_clean is False
+    assert report.passed is False
+    joined = " ".join(report.package_requirements_problems).lower()
+    assert "frozen" in joined or "freeze" in joined
+    assert "pkgreqs" in joined
+    # the traceability checks still ran -- the listed runs were audited (they reproduce).
     assert sorted(report.runs) == ["run-alpha", "run-beta"]
+    assert all(report.runs_reproduced.values())
 
 
 # -- (3) fail modes ----------------------------------------------------------
