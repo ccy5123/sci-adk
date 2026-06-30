@@ -74,21 +74,26 @@ verify gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
    the regenerated `package/`, so re-running `package` never clobbers it). A worker never
    freezes or relaxes it. ABSENT contract → the gate runs layout/traceability but the
    venue-format checks are vacuously clean (backward compatible).
-3. **Author the merged manuscript.** `Agent(expert-writer)` authors ONE `main.tex` (+ a
-   `si.tex` where the record dump is augmented) synthesizing ALL runs to the [1] contract —
-   deriving narrative / contribution / discussion FROM the record, authoring TO the
-   `pkgreqs.json` contract: naming the science (no toolchain nouns), separating
-   confirmatory from exploratory, foregrounding null / negative / refuted. The writer drops
-   the authored manuscript at `<ws>/package_src/main.tex` (+ `package_src/references.bib`) —
-   OUTSIDE `package/` so the assembler preserves it across a rebuild. Authorial =
-   contract-driven, not gated.
+3. **Author the merged manuscript and SI.** `Agent(expert-writer)` authors ONE `main.tex` AND
+   an AUTHORED `si.tex` (its body-overflow Supplementary Information, SYMMETRIC to `main.tex` —
+   authored belief, NOT a record dump) synthesizing ALL runs to the [1] contract — deriving
+   narrative / contribution / discussion FROM the record, authoring TO the `pkgreqs.json`
+   contract: naming the science (no toolchain nouns), separating confirmatory from exploratory,
+   foregrounding null / negative / refuted. The writer drops the authored documents at
+   `<ws>/package_src/main.tex` and `<ws>/package_src/si.tex` (+ `package_src/references.bib`) —
+   OUTSIDE `package/` so the assembler preserves them across a rebuild. The deterministic record
+   is NOT authored: it is the package's record artifact at `06_provenance/record.tex` (the
+   `make_si.py` dump), a sibling of the per-run `runs/<id>/record.tex`. Authorial =
+   contract-driven, not gated; every number in the authored `si.tex` is still record-gated.
 4. **Assemble the 6 folders.** `sci-adk package <ws>` runs the record-driven builders
    (shipped in `04_scripts/`: `build_record_index.py`, `make_si.py`, `check_package.py`)
    and lays down `01_manuscript … 06_provenance` + `MANIFEST.md` + `README.md`. It
-   PRESERVES the author `main.tex`/`references.bib` from `<ws>/package_src/` verbatim (and
-   flips `main_tex_authored`); if no author manuscript is present it emits a deterministic,
-   tool-agnostic skeleton from the recorded hypothesis statements. Deterministic +
-   idempotent: it asserts no value and never touches `pkgreqs.json`.
+   PRESERVES the author `main.tex`/`si.tex`/`references.bib` from `<ws>/package_src/` verbatim
+   (and flips `main_tex_authored`/`si_tex_authored`); if no author manuscript/SI is present it
+   emits a deterministic, tool-agnostic skeleton. `make_si.py` writes the deterministic record
+   to `06_provenance/record.tex` (NOT the manuscript SI slot), with a "Data & code availability"
+   statement in its body. Deterministic + idempotent: it asserts no value and never touches
+   `pkgreqs.json`.
 5. **Advisory review.** `Agent(evaluator-rigor)` runs an ADVISORY pass over the assembled
    package — is the contribution stated? are negatives first-class? are confirmatory and
    exploratory clearly separated? This is SURFACED to the user; it NEVER gates (no LLM in
@@ -102,12 +107,13 @@ verify gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
 
 ```
 package/
-├── 01_manuscript/   main.tex + si.tex + references.bib (+ figures/)
+├── 01_manuscript/   main.tex + si.tex (BOTH authored belief) + references.bib (+ figures/)
 ├── 02_data/         claims_all.csv (master traceability) + per-run claim CSVs
 ├── 03_figures/      per-run communication figures + their generators
 ├── 04_scripts/      the field-agnostic builders + each run's official scripts
 ├── 05_inputs/       inputs or copyright-respecting pointers
 ├── 06_provenance/   run_index.csv (spec-id · digest · verdict) + per-run verify logs
+│                    + record.tex (the deterministic record dump + availability statement)
 ├── MANIFEST.md      the file inventory
 └── README.md        overview + reproduction + submission-readiness self-assessment
 ```
@@ -123,8 +129,13 @@ the abstract word count ≤ `abstract_max_words`; the declared `reference_style`
 (`\bibliographystyle`); `02_data/claims_all.csv` is present with every run's claims
 represented (traceability); `06_provenance/run_index.csv` is present and every listed run
 reproduces (the record audit); `\evval`/`\status`-marked numbers re-derive from the record
-(reuse the reframe value-fidelity gate); and the `README.md` carries a submission-readiness
-section. SURFACED as ADVISORY (never gated): `body_word_range`, free-prose numbers not
+(reuse the reframe value-fidelity gate); the `README.md` carries a submission-readiness
+section; and the deposit is complete — `06_provenance/record.tex` is present and its body
+carries a "Data & code availability" statement (reuses the per-run deposit-completeness
+checker; in the package path this is a HARD gate). The deterministic record at
+`06_provenance/record.tex` is EXEMPT from the tool-vocab gate by construction (the gate reads
+only `01_manuscript/`), so it may legitimately name provenance. SURFACED as ADVISORY (never
+gated): `body_word_range`, free-prose numbers not
 behind `\evval`, and the §4 evaluator qualities. A gate-bearing field cannot be relaxed
 after a failure except by an explicit re-freeze (anti-moving-the-goalposts).
 

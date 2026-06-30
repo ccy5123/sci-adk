@@ -67,8 +67,9 @@ from sci_adk.render.figures import (
     image_figure_filename,
     order_figures_by_reference,
 )
+from sci_adk.render.authored_si import render_authored_si_latex
 from sci_adk.render.paper import render_paper_latex
-from sci_adk.render.prose import PaperProse, SIProse
+from sci_adk.render.prose import AuthoredSI, PaperProse, SIProse
 from sci_adk.render.reproduction import (
     ReproListing,
     listing_inlinable,
@@ -78,6 +79,29 @@ from sci_adk.render.si import render_si_latex
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
 ExperimentFn = Callable[[Spec, Path], Sequence[EvidenceItem]]
+
+# SPEC-SI-AUTHORING-001 REQ-SA-202: the deterministic record dump's relocation target.
+# The run dir IS the deposit (``runs/<spec.id>/``); the retained deterministic record
+# artifact lives at its root as ``record.tex`` -- OUTSIDE ``paper/`` (which now holds the
+# BELIEF submission documents ``draft.tex``/``si.tex``). Keeping it out of ``paper/`` makes
+# the record EXEMPT from the per-run tool-vocab gate BY CONSTRUCTION (that gate scans only
+# ``paper/`` documents; REQ-SA-206 / AC-B6) and gives the M2 deposit-completeness checker a
+# single source of truth for where the record artifact lives.
+RECORD_ARTIFACT_NAME: str = "record.tex"
+
+
+# @MX:ANCHOR: [AUTO] the canonical deposit path for the deterministic record artifact;
+#   the compiler writes it and the M2 deposit-completeness checker reads it (single source).
+# @MX:REASON: [AUTO] REQ-SA-202 (F4) -- one source of truth for the relocation target so
+#   the record/belief boundary (record.tex in the deposit, si.tex in paper/) cannot drift.
+def deposit_record_path(run_dir: Path) -> Path:
+    """The deposit path of the retained deterministic record artifact for ``run_dir``.
+
+    ``run_dir`` is the run's deposit (``runs/<spec.id>/``); the record artifact is
+    ``run_dir/record.tex`` -- the SINGLE SOURCE both the compiler (which writes it,
+    REQ-SA-202) and the deposit-completeness check (M2, REQ-SA-301) reference.
+    """
+    return run_dir / RECORD_ARTIFACT_NAME
 
 # Rule kinds the engine cannot reduce to a formula -> need an agent/judge.
 _NON_NUMERIC = {DecisionRuleKind.PROOF, DecisionRuleKind.QUALITATIVE}
@@ -119,6 +143,9 @@ class CompileResult:
     run_dir: Path
     paper_path: Path
     si_path: Optional[Path] = None
+    # SPEC-SI-AUTHORING-001 REQ-SA-202: the deposit's retained deterministic record
+    # artifact (record.tex). The dump that used to occupy si_path lives here now.
+    record_path: Optional[Path] = None
     prior_work_checkpoint: Optional[PriorWorkCheckpoint] = None
     contested_checkpoints: List[ContestedCheckpoint] = field(default_factory=list)
     novelty_checkpoints: List[NoveltyCheckpoint] = field(default_factory=list)
@@ -165,6 +192,7 @@ class ResearchCompiler:
         experiment: Optional[ExperimentFn] = None,
         prose: Optional[PaperProse] = None,
         si_prose: Optional[SIProse] = None,
+        si: Optional[AuthoredSI] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
         si_figures: Optional[Sequence[AnyFigure]] = None,
     ) -> CompileResult:
@@ -193,8 +221,17 @@ class ResearchCompiler:
                 ``notes`` after Record integrity (design/paper-figures-and-si.md D3,
                 Phase 4). Threaded into ``render_si_latex``; the no-authoring record dump
                 is the spine and is never replaced. Never LLM-generated -- input, the same
-                spirit as ``prose``. Absent -> si.tex is byte-identical to the no-prose
-                dump.
+                spirit as ``prose``. Absent -> the record dump is byte-identical to the
+                no-prose dump.
+            si: optional AUTHORED Supporting Information -- the belief artifact ② (the
+                overflow of ``main.tex``), rendered to ``paper/si.tex`` via
+                ``render_authored_si_latex`` (SPEC-SI-AUTHORING-001 Pillar A / M4). When
+                supplied, the authored ``si.tex`` is emitted alongside ① ``draft.tex`` and ③
+                the deposit ``record.tex``; when absent, NO ``paper/si.tex`` is written (a
+                thin/absent SI is permitted, REQ-SA-107). Never LLM-generated -- input, the
+                same spirit as ``prose``. Distinct from ``si_prose`` (which wraps the record
+                dump): ``si`` is the authored overflow that REPLACES the dump in the
+                ``paper/si.tex`` slot.
             figures: optional agent-authored figure list -- native (pgfplots) or image
                 (``\\includegraphics``) specs (design/paper-figures-and-si.md, Phase
                 1/4). Threaded into the LaTeX renderers (native y pulled from this run's
@@ -242,13 +279,14 @@ class ResearchCompiler:
             self.stage_derive_claim(spec, evidence=evidence)
         )
 
-        paper_path, si_path, figure_consistency = self.stage_render(
+        paper_path, si_path, record_path, figure_consistency = self.stage_render(
             spec,
             evidence=evidence,
             claims=claims,
             checkpoints=checkpoints,
             prose=prose,
             si_prose=si_prose,
+            si=si,
             figures=figures,
             si_figures=si_figures,
         )
@@ -260,7 +298,11 @@ class ResearchCompiler:
             checkpoints=checkpoints,
             run_dir=self.workspace_dir / "runs" / spec.id,
             paper_path=paper_path,
+            # SPEC-SI-AUTHORING-001 M4: the paper/si.tex slot (freed in M1) now carries the
+            # AUTHORED overflow ② when an AuthoredSI is supplied; si_path points at it then,
+            # else None (a thin/absent SI). record_path always points at the deposit record ③.
             si_path=si_path,
+            record_path=record_path,
             prior_work_checkpoint=prior_work_checkpoint(spec),
             contested_checkpoints=contested_checkpoints,
             novelty_checkpoints=novelty_checkpoints,
@@ -477,11 +519,24 @@ class ResearchCompiler:
         checkpoints: Optional[Sequence["Checkpoint"]] = None,
         prose: Optional[PaperProse] = None,
         si_prose: Optional[SIProse] = None,
+        si: Optional[AuthoredSI] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
         si_figures: Optional[Sequence[AnyFigure]] = None,
-    ) -> tuple[Path, Optional[Path], Optional[FigureConsistencyReport]]:
-        """Render the ``paper/`` artifacts -- ``draft.tex`` + ``si.tex`` + figures + bib
-        (the ``render`` verb's stage).
+    ) -> tuple[Path, Optional[Path], Optional[Path], Optional[FigureConsistencyReport]]:
+        """Render the ``paper/`` belief artifacts (``draft.tex`` + optional authored
+        ``si.tex`` + figures + bib) and the deposit's deterministic ``record.tex`` (the
+        ``render`` verb's stage).
+
+        SPEC-SI-AUTHORING-001:
+          - M1: the deterministic dump is RELOCATED to the deposit as ``record.tex``
+            (REQ-SA-202); the THIRD tuple element is that record path.
+          - M4: when an ``AuthoredSI`` is supplied, the freed ``paper/si.tex`` slot carries
+            the AUTHORED overflow ② rendered via ``render_authored_si_latex`` (the prose
+            pipeline, NOT the dump); the SECOND tuple element is that si.tex path. When ``si``
+            is absent, NO ``paper/si.tex`` is written (a thin/absent SI, REQ-SA-107) and the
+            second element is ``None``. This is the end-to-end emit of the three correctly-
+            typed artifacts: ① ``draft.tex`` (authored) · ② ``si.tex`` (authored) · ③
+            ``record.tex`` (the deposit record).
 
         The MAIN figures (``figures``) appear ONLY in the paper's Results; the SI carries
         only ``si_figures`` (supplementary, default none) -- so a main figure is never
@@ -494,7 +549,8 @@ class ResearchCompiler:
         out); this stage is the composition root that locates the citations + bib and
         co-locates figure/bib sources into ``paper/`` for Overleaf self-containment.
 
-        Returns ``(paper_path, si_path, figure_consistency)``.
+        Returns ``(paper_path, si_path, record_path, figure_consistency)`` -- ``si_path`` is
+        ``None`` when no ``AuthoredSI`` was supplied.
         """
         evidence_list = (
             list(evidence) if evidence is not None
@@ -555,10 +611,28 @@ class ResearchCompiler:
         # source fails loud here (record fidelity). Native specs carry no file.
         self._colocate_figures(figures, paper_dir, paper_tex)
 
-        # Supporting Information (design/paper-figures-and-si.md Phase 2 / D3): a
-        # STANDALONE si.tex = the deterministic record dump (every Evidence item, the
-        # numeric data tables, ALL figures, the verdicts + frozen decision rules). It
-        # uploads alongside draft.tex as a second compilable document in paper/.
+        # AUTHORED si.tex (SPEC-SI-AUTHORING-001 M4, REQ-SA-101/202): when an AuthoredSI is
+        # supplied, the freed paper/si.tex slot carries the AUTHORED overflow ② -- rendered
+        # through render_authored_si_latex (the REUSED prose pipeline: factref fidelity +
+        # \novelty gate + the sanitizer), NOT the deterministic dump (which lands in the
+        # deposit record.tex below). The render is pure + FAIL-LOUD (an unbacked \evval raises
+        # ValueError, record fidelity); the compiler only writes the returned string. When
+        # si is None NOTHING is written -- a thin/absent SI is permitted (REQ-SA-107) and the
+        # paper/si.tex slot stays empty (backward compatible with M1). This is the single
+        # end-to-end wiring point that fills ② alongside ① (above) and ③ (below).
+        si_path: Optional[Path] = None
+        if si is not None:
+            si_tex = render_authored_si_latex(si, spec, claims_list, evidence_list)
+            if si_tex is not None:
+                si_path = paper_dir / "si.tex"
+                si_path.write_text(si_tex, encoding="utf-8")
+
+        # Deposit record artifact (SPEC-SI-AUTHORING-001 M1, REQ-SA-201/202/203): a
+        # STANDALONE record.tex = the deterministic record dump (every Evidence item, the
+        # numeric data tables, ALL figures, the verdicts + frozen decision rules). It is the
+        # deposit's ONE retained deterministic record, written to the run dir (the deposit)
+        # via deposit_record_path -- OUTSIDE paper/, which holds the belief submission docs.
+        # render_si_latex is reused VERBATIM; only the write target + identity wording moved.
         #
         # digest=None on purpose: at COMPILE time the evidence may not yet be persisted to
         # disk (the loop persists AFTER compile), so record_digest(run_dir) here would
@@ -584,13 +658,18 @@ class ResearchCompiler:
         # invariant). Resolution is fail-open: a bare commit ref is a POINTER, never an error.
         repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
 
-        si_tex = render_si_latex(
+        # SPEC-SI-AUTHORING-001 REQ-SA-202: the deterministic dump is RELOCATED to the
+        # deposit as record.tex (re-named to read as the record, REQ-SA-203), freeing the
+        # paper/si.tex slot for the authored overflow path (M3). render_si_latex is reused
+        # VERBATIM (REQ-SA-201) -- only the WRITE TARGET changed. Living outside paper/ keeps
+        # the record EXEMPT from the per-run tool-vocab gate by construction (REQ-SA-206).
+        record_tex = render_si_latex(
             spec, claims_list, evidence_list, figures=si_figures, digest=None,
             prose=si_prose, paper_body=None, bib_path=bib_path,
             repro_listings=repro_listings,
         )
-        si_path = paper_dir / "si.tex"
-        si_path.write_text(si_tex, encoding="utf-8")
+        record_path = deposit_record_path(run_dir)
+        record_path.write_text(record_tex, encoding="utf-8")
 
         # Land the runnable bundle (paper/code/ + paper/reproduce.py) ONLY when at least
         # one code_ref resolved to a co-located script. A pointer-only set (every code_ref
@@ -607,7 +686,7 @@ class ResearchCompiler:
         figure_consistency = check_figure_consistency(
             figure_labels(figures), paper_tex
         )
-        return paper_path, si_path, figure_consistency
+        return paper_path, si_path, record_path, figure_consistency
 
     # -- disk loaders (the verb path reads its inputs from the run dir) -----
 

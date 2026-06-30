@@ -112,6 +112,16 @@ def build_parser() -> argparse.ArgumentParser:
              "is the spine. Never LLM-generated. Omit -> record dump only",
     )
     run.add_argument(
+        "--si", default=None, metavar="PATH",
+        help="optional JSON file: an AuthoredSI object {title?, sections:[{title, body}], "
+             "figures?} -- the AUTHORED Supporting Information ②, the overflow of the main "
+             "paper (SPEC-SI-AUTHORING-001). Rendered to paper/si.tex through the prose "
+             "pipeline (NOT the record dump, which lands in the deposit record.tex): author "
+             "each section body LaTeX-safe, a measured value as \\evval{<id>}{<field>} and a "
+             "verdict as \\status{<hyp>} (FAIL-LOUD on an unbacked macro). Never LLM-"
+             "generated. Omit -> no paper/si.tex (a thin/absent SI is permitted)",
+    )
+    run.add_argument(
         "--figures", default=None, metavar="PATH",
         help="optional JSON file: a PaperFigures object {\"figures\": [...]} OR a bare "
              "list of figure specs (native or image). A NATIVE spec names which Evidence "
@@ -584,6 +594,13 @@ def _add_verb_parsers(sub) -> None:
              "dump (never LLM-generated). Same as `run --si-prose`",
     )
     render.add_argument(
+        "--si", default=None, metavar="PATH",
+        help="optional JSON file: an AuthoredSI object {title?, sections:[{title, body}], "
+             "figures?} -- the AUTHORED Supporting Information ② rendered to paper/si.tex "
+             "through the prose pipeline (never LLM-generated). Same as `run --si`. Omit -> "
+             "no paper/si.tex",
+    )
+    render.add_argument(
         "--figures", default=None, metavar="PATH",
         help="optional JSON file: a PaperFigures object or a bare list of figure specs "
              "(native or image). Same as `run --figures`",
@@ -737,6 +754,27 @@ def _load_prose(args: argparse.Namespace):
     return prose, si_prose, figures
 
 
+def _load_authored_si(args: argparse.Namespace):
+    """Load an optional ``--si`` AuthoredSI JSON file (shared by run + render).
+
+    The AUTHORED Supporting Information ② (SPEC-SI-AUTHORING-001) -- agent-authored INPUT,
+    never autonomous generation (sci-adk never calls an LLM to write it). Returns the
+    ``AuthoredSI`` or ``None`` when ``--si`` is absent (a thin/absent SI is permitted).
+    Raises :class:`_CliError` on a missing file or invalid JSON/model.
+    """
+    if not getattr(args, "si", None):
+        return None
+    si_path = Path(args.si)
+    if not si_path.exists():
+        raise _CliError(f"si file not found: {si_path}")
+    from sci_adk.render.prose import AuthoredSI
+
+    try:
+        return AuthoredSI.model_validate_json(si_path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise _CliError(f"invalid si JSON ({si_path}): {e}")
+
+
 def _load_run_spec(run_dir: Path):
     """Load + validate ``run_dir/spec.json`` (shared by the run-dir verbs).
 
@@ -785,6 +823,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     try:
         spec, experiment, proposal_text = _resolve_capability_selection(args)
         prose, si_prose, figures = _load_prose(args)
+        si = _load_authored_si(args)
     except _CliError as e:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
@@ -801,7 +840,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     try:
         result = compiler.compile(
             proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
-            prose=prose, si_prose=si_prose, figures=figures)
+            prose=prose, si_prose=si_prose, si=si, figures=figures)
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
         return 2
@@ -1348,14 +1387,15 @@ def _cmd_render(args: argparse.Namespace) -> int:
     try:
         spec = _load_run_spec(run_dir)
         prose, si_prose, figures = _load_prose(args)
+        si = _load_authored_si(args)
     except _CliError as e:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
 
     compiler = ResearchCompiler(workspace_dir=workspace)
     try:
-        paper_path, si_path, figure_consistency = compiler.stage_render(
-            spec, prose=prose, si_prose=si_prose, figures=figures
+        paper_path, si_path, record_path, figure_consistency = compiler.stage_render(
+            spec, prose=prose, si_prose=si_prose, si=si, figures=figures
         )
     except ValueError as e:
         # A missing image-figure source / malformed figure spec fails loud (record
@@ -1364,8 +1404,13 @@ def _cmd_render(args: argparse.Namespace) -> int:
         return 2
 
     print(f"render: compiled paper for Spec '{spec.id}' -> {paper_path}")
+    # SPEC-SI-AUTHORING-001 M4: the AUTHORED si.tex ② (when an --si AuthoredSI was supplied).
     if si_path is not None:
-        print(f"  supporting information: {si_path}")
+        print(f"  authored SI: {si_path}")
+    # SPEC-SI-AUTHORING-001 M1: the deposit's deterministic record artifact (record.tex) ③,
+    # not the Supporting Information.
+    if record_path is not None:
+        print(f"  deposit record: {record_path}")
     fc = figure_consistency
     if fc is not None and not fc.ok:
         print("  figure consistency warnings (non-blocking):")
@@ -1564,6 +1609,17 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # IMRaD. Surfaced here, NEVER gated (not in report.passed).
         for note in report.paper_advisory:
             print(f"  publishing advisory: {note} (advisory only -- not gated)")
+
+    # SPEC-SI-AUTHORING-001 M2 (Pillar C): the RECORD-side deposit-completeness channel --
+    # the retained record artifact + a "Data & code availability" statement. Surfaced here,
+    # ADDITIVE (REQ-SA-305): NOT in report.passed, so it never weakens the claim-reproduction
+    # / record-green gate.
+    if report.deposit_complete:
+        print("  deposit complete (record artifact + data & code availability statement)")
+    else:
+        print("  deposit INCOMPLETE (record-side, advisory -- not gated):", file=sys.stderr)
+        for problem in report.deposit_problems:
+            print(f"    - {problem}", file=sys.stderr)
 
     # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent
     # AND no residual fact macro AND the paper is tool-agnostic AND every cross-document

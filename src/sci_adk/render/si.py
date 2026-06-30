@@ -275,8 +275,9 @@ def render_si_latex(
     hyp_by_id = {h.id: h for h in spec.hypotheses}
 
     lines: List[str] = []
-    # The SI title is the spec id, not the goal/hypothesis wall (the same short title the
-    # paper falls back to; the agent's narrative title lives in the main paper).
+    # The record title is the spec id, not the goal/hypothesis wall (the same short title
+    # the paper falls back to; the agent's narrative title lives in the main paper). The
+    # identity wording reads as the RECORD (SPEC-SI-AUTHORING-001 REQ-SA-203), not an SI.
     title = spec.id
 
     # -- Preamble (standalone document; same inputenc/hyperref/url as the paper, so
@@ -323,10 +324,13 @@ def render_si_latex(
     # package + compile-order dependency; design/paper-figures-and-si.md).
     lines.append(r"\renewcommand{\thetable}{S\arabic{table}}")
     lines.append(r"\renewcommand{\thefigure}{S\arabic{figure}}")
+    # SPEC-SI-AUTHORING-001 REQ-SA-203: the identity wording reads as the RECORD (the
+    # deposit's retained deterministic record), NOT as a "Supporting Information" sibling
+    # of the paper. Presentation-only -- the record-dump LOGIC below is unchanged.
     lines.append(
-        f"\\title{{Supporting Information: {_latex_sanitize(title)}}}"
+        f"\\title{{Record: {_latex_sanitize(title)}}}"
     )
-    lines.append(r"\author{sci-adk (deterministic record dump)}")
+    lines.append(r"\author{sci-adk (deterministic record)}")
     lines.append(r"\date{\today}")
     lines.append("")
     lines.append(r"\begin{document}")

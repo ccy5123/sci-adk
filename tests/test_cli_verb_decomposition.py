@@ -217,26 +217,33 @@ def _multi_hyp_experiment(spec: Spec):
 
 
 def _draft_si_via_compile(workspace: Path, spec: Spec, experiment):
-    """Render draft.tex + si.tex via the monolithic compile() path."""
+    """Render draft.tex + the deposit record.tex via the monolithic compile() path.
+
+    SPEC-SI-AUTHORING-001 M1: the deterministic dump is at result.record_path (the deposit
+    record), not paper/si.tex (the freed slot)."""
     result = ResearchCompiler(workspace_dir=workspace).compile(
         "", spec=spec, experiment=experiment
     )
     return (
         result.paper_path.read_text(encoding="utf-8"),
-        result.si_path.read_text(encoding="utf-8"),
+        result.record_path.read_text(encoding="utf-8"),
     )
 
 
 def _draft_si_via_verbs(workspace: Path, spec: Spec, experiment):
-    """Render draft.tex + si.tex via the stage-by-stage verb path (disk round-trip)."""
+    """Render draft.tex + the deposit record.tex via the stage verb path (disk round-trip).
+
+    stage_render returns (paper_path, si_path, record_path, figure_consistency) -- the
+    THIRD element is the deposit record dump (SPEC-SI-AUTHORING-001 M1/M4; the second is the
+    authored si.tex, None here as no AuthoredSI is supplied)."""
     compiler = ResearchCompiler(workspace_dir=workspace)
     compiler.stage_init_spec(spec=spec)
     compiler.stage_execute(spec, experiment=experiment)
     compiler.stage_derive_claim(spec)
-    paper_path, si_path, _fc = compiler.stage_render(spec)
+    paper_path, _si_path, record_path, _fc = compiler.stage_render(spec)
     return (
         paper_path.read_text(encoding="utf-8"),
-        si_path.read_text(encoding="utf-8"),
+        record_path.read_text(encoding="utf-8"),
     )
 
 
@@ -259,7 +266,7 @@ def test_decomposed_chain_byte_identical_to_monolith(tmp_path):
         "", spec=spec_a, experiment=_experiment_fn(spec_a)
     )
     mono_draft = result.paper_path.read_text(encoding="utf-8")
-    mono_si = result.si_path.read_text(encoding="utf-8")
+    mono_si = result.record_path.read_text(encoding="utf-8")  # the deposit record (M1)
 
     # (b) verb-style stage chain into workspace B (disk round-trip between stages).
     ws_b = tmp_path / "verbs"
@@ -269,12 +276,13 @@ def test_decomposed_chain_byte_identical_to_monolith(tmp_path):
     compiler.stage_execute(spec_b, experiment=_experiment_fn(spec_b))
     # derive-claim + render read Evidence/Claims FROM DISK (no in-memory pass-through).
     compiler.stage_derive_claim(spec_b)
-    paper_path, si_path, _fc = compiler.stage_render(spec_b)
+    # M4: 4-tuple; the deposit record dump is the THIRD element (record_path).
+    paper_path, _si_path, record_path, _fc = compiler.stage_render(spec_b)
     verb_draft = paper_path.read_text(encoding="utf-8")
-    verb_si = si_path.read_text(encoding="utf-8")
+    verb_si = record_path.read_text(encoding="utf-8")
 
     assert verb_draft == mono_draft, "draft.tex diverged between compile() and verb chain"
-    assert verb_si == mono_si, "si.tex diverged between compile() and verb chain"
+    assert verb_si == mono_si, "record.tex diverged between compile() and verb chain"
 
 
 def test_chain_byte_identical_multi_evidence_production_order_ne_sorted(tmp_path):
@@ -352,8 +360,9 @@ def test_run_t1_demo_byte_identical_to_verb_chain_via_cli(tmp_path):
     # both paths run lenient so the comparison exercises the decomposition, not the gate.
     assert main(["derive-claim", str(run_a), "--no-strict-science"]) == 0
     assert main(["render", str(run_a)]) == 0
+    from sci_adk.loop.compiler import deposit_record_path
     verb_draft = (run_a / "paper" / "draft.tex").read_text(encoding="utf-8")
-    verb_si = (run_a / "paper" / "si.tex").read_text(encoding="utf-8")
+    verb_si = deposit_record_path(run_a).read_text(encoding="utf-8")  # the deposit record (M1)
 
     # workspace B: pre-seed the SAME Evidence (so F5 reuse fires), then `run --t1-demo`.
     ws_b = tmp_path / "runw"
@@ -365,10 +374,10 @@ def test_run_t1_demo_byte_identical_to_verb_chain_via_cli(tmp_path):
     assert main(["run", "--t1-demo", "--no-strict-science", "-o", str(ws_b)]) == 0
     run_b = ws_b / "runs" / "t1-godel"
     run_draft = (run_b / "paper" / "draft.tex").read_text(encoding="utf-8")
-    run_si = (run_b / "paper" / "si.tex").read_text(encoding="utf-8")
+    run_si = deposit_record_path(run_b).read_text(encoding="utf-8")  # the deposit record (M1)
 
     assert run_draft == verb_draft, "run --t1-demo draft.tex != verb-chain draft.tex"
-    assert run_si == verb_si, "run --t1-demo si.tex != verb-chain si.tex"
+    assert run_si == verb_si, "run --t1-demo record.tex != verb-chain record.tex"
 
 
 # --------------------------------------------------------------------------- #
@@ -582,9 +591,12 @@ def test_render_compiles_paper(tmp_path, capsys):
     rc = main(["render", str(run_dir)])
     out = capsys.readouterr().out
     assert rc == 0
+    from sci_adk.loop.compiler import deposit_record_path
     assert "compiled paper" in out
     assert (run_dir / "paper" / "draft.tex").exists()
-    assert (run_dir / "paper" / "si.tex").exists()
+    # SPEC-SI-AUTHORING-001 M1: the deterministic dump is the deposit record.tex (the
+    # paper/si.tex slot is freed for the authored overflow path).
+    assert deposit_record_path(run_dir).exists()
 
 
 def test_render_missing_run_dir_errors(tmp_path, capsys):
@@ -611,7 +623,9 @@ def test_run_wrapper_full_chain_produces_all_artifacts(tmp_path, capsys):
     assert list((run_dir / "evidence").glob("*.json"))
     assert (run_dir / "claims" / "claim-hyp-t1.json").exists()
     assert (run_dir / "paper" / "draft.tex").exists()
-    assert (run_dir / "paper" / "si.tex").exists()
+    # SPEC-SI-AUTHORING-001 M1: the deterministic dump is the deposit record.tex.
+    from sci_adk.loop.compiler import deposit_record_path
+    assert deposit_record_path(run_dir).exists()
     assert (run_dir / "checkpoints" / "prior_work.json").exists()
 
 

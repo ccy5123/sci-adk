@@ -17,9 +17,11 @@ Reference: design/directory-structure.md (render/), design/abstractions.md.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+from sci_adk.render.figures import AnyFigure
 
 
 class PaperProse(BaseModel):
@@ -156,4 +158,87 @@ class SIProse(BaseModel):
     )
 
 
-__all__ = ["PaperProse", "SIProse"]
+class SISection(BaseModel):
+    """One AUTHORED section of the belief ``si.tex`` (SPEC-SI-AUTHORING-001, Pillar A).
+
+    The free-structure unit of the authored Supporting Information -- the overflow of
+    ``main.tex`` (design/si-belief-record-split.md §5, artifact ②). A section is just a
+    ``title`` + a free ``body``; there is NO fixed record-type axis (REQ-SA-102), so the
+    agent writes whatever the overflow needs (extended discussion, supplementary methods,
+    a hand-authored table, ...) and the renderer emits the sections in the AUTHORED order.
+
+    The ``body`` is **LaTeX body input under the SAME prose contract as
+    :class:`PaperProse`**: author LaTeX-safe, and record-derived facts use the fidelity
+    macros -- a measured value is written ``\\evval{<id>}{<field>}`` and a verdict
+    ``\\status{<hyp>}`` (the engine substitutes the TRUE recorded value at render time,
+    FAIL-LOUD; REQ-SA-103). ``\\ref`` / ``\\cite`` / ``\\novelty`` pass through verbatim;
+    every other special is escaped. A HAND-AUTHORED table (REQ-SA-104) is simply a
+    ``\\begin{table}...\\evval{..}{..}...\\end{table}`` written in the ``body`` -- each
+    cited cell is gated cell-by-cell by the shared pipeline (the dump's ``tabular`` builder
+    is NOT reused).
+
+    Attributes:
+        title: the section heading (rendered as ``\\section{<title>}``, LaTeX-sanitized).
+        body: the section body (the authored prose / table / figure refs).
+    """
+
+    model_config = {"frozen": True, "str_strip_whitespace": True}
+
+    title: str = Field(..., min_length=1, description="Section heading")
+    body: str = Field(default="", description="Authored section body (LaTeX, prose contract)")
+
+
+class AuthoredSI(BaseModel):
+    """The AUTHORED ``si.tex`` belief artifact (SPEC-SI-AUTHORING-001, Pillar A / ②).
+
+    The free-structured Supporting Information -- the overflow of ``main.tex``, a BELIEF
+    artifact rendered through the reused ``paper.py`` prose pipeline (NOT the
+    ``render_si_latex`` deterministic dump). It carries an optional ``title``, the authored
+    ``sections`` (in agent order -- free structure, REQ-SA-102), and the SUPPLEMENTARY
+    ``figures`` owned by the SI (drawn from the SAME shared ``figures/`` file set as
+    ``main.tex``; figure ownership is XOR across the two documents, REQ-SA-105).
+
+    It is INPUT supplied by the in-session agent (or a ``--si <json>`` file), never
+    sci-adk-generated -- the SAME spirit as :class:`PaperProse`; the render path is
+    deterministic GIVEN this input (no LLM in the render path). A thin/absent SI is
+    permitted (REQ-SA-107): an empty ``sections`` list renders a minimal valid document,
+    and a caller may supply no ``AuthoredSI`` at all (the render path returns ``None``).
+
+    Attributes:
+        title: optional SI title (``\\title{<title>}``). ``None`` -> ``spec.id`` fallback.
+        sections: the authored sections, in render (== authored) order. Empty -> a thin SI.
+        figures: optional SUPPLEMENTARY figures owned by the SI (native or image). XOR with
+            the main paper's figures; they reference the same co-located ``figures/`` set.
+    """
+
+    model_config = {"frozen": True, "str_strip_whitespace": True}
+
+    title: Optional[str] = Field(
+        default=None, description="SI title (None -> spec.id fallback)"
+    )
+    sections: List[SISection] = Field(
+        default_factory=list, description="Authored sections in render order (empty -> thin)"
+    )
+    figures: List[AnyFigure] = Field(
+        default_factory=list, description="Supplementary figures owned by the SI (XOR main)"
+    )
+
+    @classmethod
+    def default_skeleton(cls) -> "AuthoredSI":
+        """An OPTIONAL conventional skeleton the agent MAY reorganize (REQ-SA-102).
+
+        A starting set of empty sections (Supplementary Methods / Notes / Figures /
+        Tables) -- a convenience the agent can fill, reorder, or discard. It is NOT
+        forced: the renderer emits whatever ``sections`` it is given, in their order.
+        """
+        return cls(
+            sections=[
+                SISection(title="Supplementary Methods", body=""),
+                SISection(title="Supplementary Notes", body=""),
+                SISection(title="Supplementary Figures", body=""),
+                SISection(title="Supplementary Tables", body=""),
+            ]
+        )
+
+
+__all__ = ["PaperProse", "SIProse", "SISection", "AuthoredSI"]
