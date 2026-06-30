@@ -86,6 +86,7 @@ from sci_adk.render.number_audit import (
 from sci_adk.render.paper import check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
+    bib_latex_safety_problems,
     body_word_range_problems,
     citation_disambiguation_problems,
     citation_key_shape_problems,
@@ -958,6 +959,7 @@ def _check_paper_requirements(
     problems.extend(cite_resolution_problems(draft_tex, bib))
     problems.extend(citation_key_shape_problems(draft_tex, bib))
     problems.extend(citation_disambiguation_problems(draft_tex, bib))
+    problems.extend(bib_latex_safety_problems(bib))
     warnings.extend(unpublished_citation_warnings(draft_tex, bib))
 
     if pubreqs.reproduction_bundle:
@@ -1185,6 +1187,7 @@ def _check_package_requirements(
         problems.extend(cite_resolution_problems(main_tex, bib))
         problems.extend(citation_key_shape_problems(main_tex, bib))
         problems.extend(citation_disambiguation_problems(main_tex, bib))
+        problems.extend(bib_latex_safety_problems(bib))
         warnings.extend(unpublished_citation_warnings(main_tex, bib))
 
     # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. The package's si.tex is the

@@ -40,6 +40,7 @@ per-run sibling), src/sci_adk/render/package.py (the assembler that produces the
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import List, Optional
 
@@ -239,6 +240,81 @@ def unpublished_citation_warnings(tex: str, bib: str) -> List[str]:
     )
 
 
+# -- bib LaTeX-safety (Phase 2: the compile blind spot the cite/key gates miss) -----
+
+# HTML entities that arrive from XML-rooted registrar metadata (Crossref/DataCite) and are
+# invalid in LaTeX: &amp; &lt; &gt; &quot; &apos; &nbsp; &#NN; &#xNN;.
+_HTML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|apos|nbsp|#\d+|#[xX][0-9a-fA-F]+);")
+# HTML markup tags (e.g. <i>...</i> from a JATS/JSON title). Requires a letter after '<' so a
+# legacy bracketed DOI fragment like ``<1175:BOPACB>`` (digit-led) is NOT a false positive.
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*\s*>")
+# A bare '&' that is neither an escaped '\&' nor the start of an HTML entity -- the LaTeX
+# column separator, which errors in running text.
+_BARE_AMP_RE = re.compile(
+    r"(?<!\\)&(?!(?:amp|lt|gt|quot|apos|nbsp|#\d+|#[xX][0-9a-fA-F]+);)"
+)
+
+
+def _nonstandard_space_codepoints(s: str) -> set:
+    """Codepoints in ``s`` that are spaces ``inputenc(utf8)`` will not render. PURE.
+
+    Any Space-Separator (Unicode category ``Zs``) other than ASCII space (U+0020), plus the
+    zero-width formatting chars. Deliberately EXCLUDES en-/em-dash and Latin-1 accented
+    letters -- those are meaningful and inputenc utf8 handles them, so flagging them would be a
+    false positive. (The real case: Crossref encodes author given names like ``Jon<U+2005>A.``.)
+    """
+    bad = set()
+    for ch in s:
+        cp = ord(ch)
+        if cp == 0x20:
+            continue
+        if unicodedata.category(ch) == "Zs" or cp in (0x200B, 0x200C, 0x200D, 0xFEFF):
+            bad.add(cp)
+    return bad
+
+
+def bib_latex_safety_problems(bib: str) -> List[str]:
+    """Every ``.bib`` entry whose field values carry LaTeX-unsafe content (Phase 2). PURE.
+
+    The cite/key gates validate that citations RESOLVE and are SHAPED right; this gate validates
+    that the bib actually COMPILES -- the blind spot a manual or non-paperforge ``.bib`` leaves.
+    paperforge's ``latex_safety.sanitize`` closes it on the acquisition path; this is the
+    verify-side safety net for every OTHER path (hand-authored bib, a different tool, an old file).
+
+    Flags, per entry: HTML entities (``&amp;`` …), HTML markup tags (``<i>``), a bare unescaped
+    ``&`` (the LaTeX column separator), and non-standard Unicode spaces (U+2005 four-per-em etc.).
+    Does NOT flag the LaTeX-safe ``\\&``, en-/em-dash, or Latin-1 accents -- no false positive.
+
+    OD-4 style: names the offending entry; never rewrites the bib (the author re-runs paperforge
+    or fixes it by hand). Returns sorted problem lines (empty = clean).
+    """
+    problems: List[str] = []
+    for m in _BIB_ENTRY_BODY_RE.finditer(bib):
+        key, body = m.group(1).strip(), m.group(2)
+        if _HTML_ENTITY_RE.search(body):
+            problems.append(
+                f"bib LaTeX-safety: entry '{key}' contains an HTML entity (e.g. &amp;) -- "
+                "invalid in LaTeX, use the LaTeX form (e.g. \\&)"
+            )
+        if _HTML_TAG_RE.search(body):
+            problems.append(
+                f"bib LaTeX-safety: entry '{key}' contains an HTML tag (e.g. <i>) -- "
+                "use the LaTeX command (e.g. \\textit{...})"
+            )
+        if _BARE_AMP_RE.search(body):
+            problems.append(
+                f"bib LaTeX-safety: entry '{key}' contains a bare '&' -- escape it as \\&"
+            )
+        bad = _nonstandard_space_codepoints(body)
+        if bad:
+            cps = ", ".join("U+%04X" % c for c in sorted(bad))
+            problems.append(
+                f"bib LaTeX-safety: entry '{key}' contains non-standard Unicode space(s) "
+                f"[{cps}] -- replace with an ASCII space"
+            )
+    return sorted(problems)
+
+
 # -- abstract word count -----------------------------------------------------
 
 # The \begin{abstract}...\end{abstract} body (the venue abstract whose length venues cap).
@@ -388,6 +464,7 @@ __all__ = [
     "layout_problems",
     "cited_keys",
     "bib_keys",
+    "bib_latex_safety_problems",
     "cite_resolution_problems",
     "citation_key_conforms",
     "citation_key_shape_problems",

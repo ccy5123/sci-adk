@@ -31,6 +31,7 @@ from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
     abstract_word_count,
     bib_keys,
+    bib_latex_safety_problems,
     body_word_count,
     body_word_range_problems,
     citation_disambiguation_problems,
@@ -167,6 +168,44 @@ def test_cite_resolution_uncited_bib_entry_is_benign():
     tex = r"\citep{a}"
     bib = "@article{a,}\n@book{unused,}"   # 'unused' never cited -> NOT a problem
     assert cite_resolution_problems(tex, bib) == []
+
+
+# -- bib LaTeX-safety (Phase 2: catch the gate blind spot manual/non-paperforge bibs leave) --
+
+def test_bib_latex_safety_flags_html_entity():
+    bib = "@article{Arnot2003,\n  journal = {QSAR &amp; Combinatorial Science},\n}"
+    problems = bib_latex_safety_problems(bib)
+    assert problems
+    assert "Arnot2003" in problems[0]
+
+
+def test_bib_latex_safety_flags_html_tag():
+    bib = "@article{X2020,\n  title = {carp (<i>Cyprinus</i>)},\n}"
+    assert bib_latex_safety_problems(bib)
+
+
+def test_bib_latex_safety_flags_bare_ampersand():
+    bib = "@article{X2020,\n  journal = {Acme & Sons},\n}"
+    assert bib_latex_safety_problems(bib)
+
+
+def test_bib_latex_safety_flags_nonstandard_space():
+    # U+2005 FOUR-PER-EM SPACE in an author given name (the real Crossref encoding)
+    bib = "@article{X2020,\n  author = {Jon A. Arnot},\n}"
+    assert bib_latex_safety_problems(bib)
+
+
+def test_bib_latex_safety_passes_clean_latex():
+    # \&, \textit, en-dash (U+2013) and Latin-1 accents are LaTeX-safe -> no false positive
+    bib = (
+        "@article{X2020,\n"
+        "  journal = {Env Sci \\& Tech},\n"
+        "  title = {carp \\textit{Cyprinus}},\n"
+        "  pages = {1–2},\n"
+        "  author = {Könemann, Hans and Børseth, Jan},\n"
+        "}"
+    )
+    assert bib_latex_safety_problems(bib) == []
 
 
 # -- abstract word count -----------------------------------------------------
