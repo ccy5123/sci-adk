@@ -29,8 +29,9 @@ Honesty boundary (G-E; design/g-a-a3-decision.md): claim a domain-general
 *verification* kernel validated on a 2nd domain for VERIFICATION; do NOT claim
 a cross-domain-validated autonomous-experiment *system*.
 
-Remaining [SUPPLY]: AI-usage disclosure wording and Acknowledgements.
-(paper.bib metadata verified 2026-06-26 against the arXiv abstract pages.)
+All sections drafted; paper.bib metadata verified 2026-06-26 against the arXiv
+abstract pages. Before submission: confirm the GitHub repo is public, then (at
+JOSS acceptance) make the v1.0.0 tagged release + Zenodo archive (G-D D2/D3).
 -->
 
 # Summary
@@ -117,13 +118,15 @@ the artifact a reviewer receives is the artifact the engine verified.
 
 # AI usage disclosure
 
-<!-- [SUPPLY: confirm scope / align to JOSS's current AI-usage policy wording] -->
-sci-adk's own source was developed with substantial AI assistance (agentic coding)
-under a human verification gate: every change was reviewed and accepted by the
-author, and the automated test suite is the acceptance check.
+sci-adk's source code and this paper were developed with substantial AI assistance
+(agentic coding and drafting with large language models) under a human verification
+gate: every change and claim was reviewed and accepted by the author, who is
+responsible for all content, and the automated test suite is the acceptance check
+for the software.
 
 # Acknowledgements
 
-<!-- [SUPPLY: acknowledgements / funding, if any] -->
+The author carried out this work as independent research with no specific grant
+funding.
 
 # References
