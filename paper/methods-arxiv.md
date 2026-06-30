@@ -4,7 +4,13 @@ DRAFT — NOT SUBMISSION-READY.
 Author review required before any posting:
 - Confirm affiliation and funding statement are literally accurate.
 - Verify all paper.bib DOIs against source pages before posting.
-- arXiv first submission in cs.SE / cs.DL may require category endorsement [UNVERIFIED — author to confirm].
+- arXiv eligibility (researched 2026-06-30, official arXiv blog): the CS review/survey/
+  position-paper restriction (blog.arxiv.org 2025-10-31) does NOT apply here -- it covers only
+  review/survey/position papers; this is an original systems/software-methods paper, which the
+  policy explicitly exempts. Keep the AI-usage disclosure intact: arXiv's one-year ban targets
+  UNCHECKED AI-generated content ("AI slop"), not disclosed, author-reviewed AI-assisted work.
+  Remaining practical step: a first-time submitter to a CS category may need endorsement --
+  confirm at arxiv.org/help/endorsement. Suggested category: cs.SE (cs.DL / cs.AI alternates).
 - Strip this comment block before submission.
 -->
 
