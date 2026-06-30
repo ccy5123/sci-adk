@@ -130,6 +130,8 @@ A bare `run` compiles the Spec + a proposal draft and surfaces any proof/qualita
 
 ### Quick Start
 
+> **New here?** The [**15-minute tutorial**](docs/tutorial.md) walks through re-verifying the bundled run, reading record vs belief in a real run directory, compiling your own proposal, and what `verify` does and does not guarantee.
+
 ```bash
 # 1. Install
 pip install -e .
