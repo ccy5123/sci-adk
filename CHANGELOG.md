@@ -10,6 +10,22 @@ The public surface (CLI + curated Python API) is frozen as the 1.0 contract
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-30
+
+### Added
+
+- bib LaTeX-safety gate in `sci-adk verify`: a blocking check
+  (`bib_latex_safety_problems`) that fails on a `references.bib` containing HTML
+  entities (`&amp;`), HTML tags (`<i>`), a bare `&`, or non-standard Unicode
+  spaces — the failure modes that break `bibtex`/`pdflatex`. Runs per-run and at
+  the package level; names the offending entry, never rewrites it.
+- `--version` flag (reads the installed package metadata).
+- 15-minute try-it tutorial for external users (`docs/tutorial.md`), the landing
+  page for a clean-clone first run (`git clone` -> `pip install -e .` ->
+  `sci-adk verify runs/t1-godel`, verified reproducible offline).
+- pyOpenSci / JOSS readiness: coverage report in CI and GitHub issue templates
+  (bug report / feature request).
+
 ## [0.2.0] - 2026-06-30
 
 ### Added — public API
