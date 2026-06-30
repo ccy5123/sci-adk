@@ -118,7 +118,54 @@ screening gate is explicit that it will desk-reject regardless of paper quality.
 
 ---
 
-Version: 1.0
+## Part D — Submission-path strategy: JOSS-first, arXiv deferred (session 11)
+
+**Context.** Community consensus (independent-researcher arXiv-endorsement threads,
+e.g. r/AskPhysics) is blunt: arXiv endorsement is the wrong *first* step. The right
+order is (1) situate the work in existing literature, (2) seek feedback from related
+researchers — ideally face-to-face / coalition-building, not cold endorsement
+requests, (3) go through journal peer review (no endorsement needed; passing it makes
+arXiv endorsement trivial), (4) endorsement / arXiv last.
+
+**Why this validates the existing plan.** sci-adk's primary venue is already JOSS — a
+peer-reviewed journal. The consensus therefore *supports* the current track; arXiv was
+only ever the optional visibility play, never the gate.
+
+**sci-adk is not the cautionary case.** Unlike an unaffiliated theory manuscript of
+doubtful substance, sci-adk is a working tool with a public repo, a large automated
+test suite, demonstrated runs, and a `verify` reproducibility property — a
+peer-reviewable artifact with prior-work / novelty positioning built in.
+
+**The convergence that matters.** JOSS's open review *is* the community-feedback step the
+consensus recommends, and JOSS reviewers run the tool — which is itself external-use
+evidence. So "engage real users / get community feedback" (Part C, P0-2) and "go through
+journal review" (this section) are the *same* action, with three payoffs at once: correct
+scientific procedure + P0-2 evidence + eventual trivial endorsement.
+
+**Decisions.**
+- [DECISION] **arXiv is deprioritized to post-JOSS / optional.** Do NOT pursue arXiv
+  endorsement as a near-term step. The thicker `paper/methods-arxiv.md` (+ `.tex`) is not
+  wasted: it serves as outreach material (share with related researchers for feedback) and
+  can go to arXiv later — after JOSS acceptance, via an institutional-email endorsement path,
+  or not at all. (Eligibility itself is fine: it is an original systems/methods paper, exempt
+  from the CS review-paper ban — see the methods DRAFT banner.)
+- [DECISION] **Primary effort = JOSS + genuine engagement** (Part C), which is the right
+  procedure *and* the P0-2 unblock.
+- [OPEN — author] **Affiliation.** The manuscripts say "Independent Researcher," but the
+  author holds a University-of-Seoul affiliation. An institutional email would (a) largely
+  dissolve any arXiv-endorsement friction and (b) place the author outside the
+  unaffiliated-submitter scrutiny bucket. Confirm whether "Independent Researcher" is the
+  intended framing or whether the institutional affiliation should appear (also a DRAFT-banner
+  item).
+- [GUARDRAIL] **AI-assistance reputational risk.** Heavy disclosed AI assistance invites the
+  "LLM-generated" suspicion the community flags. Manage it by keeping the AI-usage disclosure
+  and by demonstrating genuine author ownership / understanding in any outreach or review
+  exchange — never abstract hand-waving or "delegated to others" phrasing.
+
+---
+
+Version: 1.1
 Source: sci-adk session 10 — first-review triage (manuscript passed; repo gate
-identified). Measured 2026-06-30.
+identified). Measured 2026-06-30. Part D added session 11 (2026-06-30): JOSS-first /
+arXiv-deferred submission-path strategy after community-consensus review.
 Status: Active until JOSS submission (~2026-12).
