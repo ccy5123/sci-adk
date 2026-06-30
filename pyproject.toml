@@ -37,6 +37,10 @@ dependencies = [
 # suite is ordinary pytest and CI runs it.
 dev = [
     "pytest>=8.0.0",
+    # Coverage is REPORTED in CI, never gated: per design/tool-policy.md sci-adk
+    # excludes coverage *thresholds* (no --cov-fail-under). The report is for
+    # reviewers (pyOpenSci/JOSS), not a pass/fail signal.
+    "pytest-cov>=5.0.0",
 ]
 # Acquisition tooling invoked as a subprocess, not imported (see
 # src/sci_adk/search/paperforge_adapter.py). Pinned to a git SHA for

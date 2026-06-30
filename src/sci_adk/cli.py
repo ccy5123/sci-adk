@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 
 from sci_adk.core.spec import Spec
@@ -66,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sci-adk",
         description="Research compiler: a four-pane proposal -> paper + code + evidence.",
     )
+    try:
+        _v = _pkg_version("sci-adk")
+    except PackageNotFoundError:  # running from source without an install
+        _v = "unknown"
+    parser.add_argument("--version", action="version", version=f"sci-adk {_v}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="compile a proposal into runs/<spec.id>/")

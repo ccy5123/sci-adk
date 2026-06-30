@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question / usage help
+    url: https://github.com/ccy5123/sci-adk/issues
+    about: Open an issue describing what you ran and what you expected. Questions are welcome.
