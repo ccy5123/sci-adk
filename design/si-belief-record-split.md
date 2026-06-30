@@ -1,7 +1,6 @@
 # Authoring-Flow SI — "main and SI are both authored; the record is the deposit"
 
-> Status: AGREED (2026-07-01), design — NOT yet built. One open item remains (§8.4, the
-> gate-surface extent); everything else is confirmed.
+> Status: AGREED (2026-07-01), design — NOT yet built. ALL open points closed; SPEC-ready.
 >
 > The Supporting Information is AUTHORED (agent-written, fidelity-gated) as the natural
 > overflow of the main paper — not machine-generated as a record dump. The auditable
@@ -123,6 +122,27 @@ determinism and `sci-adk verify` unchanged.
   the author's responsibility (per §4).
 - **8.3 figure ownership.** Each figure lives in exactly one of ① / ② (Figure N XOR S*); ③'s
   record artifact carries all exhaustively (R*). One shared `figures/` file set; labels differ.
+- **8.4 gate surface (MEASURED — the existing gate already audits `si.tex` as a manuscript).**
+  `verify.py` already scans BOTH documents: `_PAPER_DOCS = (draft.tex, si.tex)`
+  ([verify.py:114](../src/sci_adk/loop/verify.py)); **P2 number-audit runs over draft.tex + si.tex**
+  ([verify.py:908,1145](../src/sci_adk/loop/verify.py)), as do tool-vocabulary
+  ([verify.py:1196](../src/sci_adk/loop/verify.py)), value-fidelity, ref-consistency, novelty,
+  and cross-doc S-ref. So:
+  - **②'s gate is UNCHANGED — authoring ② opens NO verification hole.** When `si.tex` was a
+    dump, P2 passed trivially (dump = record); now ② is authored, P2 does REAL work auditing the
+    authored numbers against the record pool, and that wiring already exists
+    ([number_audit.py:7-10](../src/sci_adk/render/number_audit.py) closes "fidelity is opt-in per
+    number"). Hand-authored ② tables (8.2) are likewise number-audited cell by cell; row
+    completeness stays the author's responsibility.
+  - **③ `record.tex` = tool-vocabulary EXEMPT.** The dump relocates to ③; as the record /
+    provenance it legitimately names `capability:…`, `docker:…`, `environment:…` (cf. T-1
+    evidence provenance). The tool-agnostic gate stays on ① and ② (the submission); the
+    "the dump is exempt" intent moves to the correct artifact now that ② is genuine belief.
+    ③ is by-construction clean on number-audit (it IS the record).
+  - **Deposit-completeness check = IN this SPEC**: ③ record artifact present + a "Data & code
+    availability" statement present (precedent: `readme_submission_readiness_problems`);
+    `sci-adk verify` green already exists. So the new gate work is small and all on the record
+    side, not the belief side.
 
 ## 7. Authoring flow (`/sci publish`, the new shape)
 
@@ -135,29 +155,14 @@ determinism and `sci-adk verify` unchanged.
 4. The through-line is authorial (one agent writing both) — the missing through-line is
    exactly why the old dump-SI read as disconnected; no `zref-xr` needed to fix it.
 
-## 8. Open question — the only one left
+## 8. Resolved questions
 
-### 8.4 Gate / pkgreqs surface extent
+All §8 points are now closed (see §6 for 8.1–8.4). Recap of the two that needed measurement:
 
-Today the package gate runs PURE checks over main.tex/si.tex
-([pkgreqs_checks.py](../src/sci_adk/render/pkgreqs_checks.py)) and the ref gates
-([consistency.py](../src/sci_adk/render/consistency.py)). After this rework the deterministic-
-record anchor must move off `si.tex` (now authored) onto ③. With `zref-xr` dropped, the
-sub-checks reduce to:
-
-- (i) ① fidelity + ref gate — **already exists**, no change.
-- (ii) ② fidelity + ref gate — **mostly exists** (same checks, now run on the authored si.tex).
-- (iii) ③ deposit completeness — **NEW**: record artifact present + `verify` green + a
-  "Data & code availability" statement present.
-- (iv) cross-doc S-ref resolution — **already exists** (`check_cross_doc_s_refs`), unchanged.
-
-So the decision is narrow: **include (iii) deposit-completeness in this SPEC (recommended —
-otherwise "the record is the deposit" is unenforced and the move is cheap), or defer it.**
-DECISION PENDING (user holding).
-
-### Resolved (no longer open)
-
-- **8.5 Thin records** — self-resolves: a 1-hypothesis run gets a short authored SI (or none),
+- **8.4 gate surface** — RESOLVED (§6): the existing gate already audits `si.tex` as a
+  manuscript, so ②'s gate is unchanged and no hole is opened; ③ `record.tex` is tool-vocab
+  exempt; deposit-completeness is in this SPEC. The new work is small and record-side only.
+- **8.5 thin records** — self-resolves: a 1-hypothesis run gets a short authored SI (or none),
   as a small real study has a short supplement. No special degenerate case needed.
 
 ## 9. Scope and non-goals
@@ -171,7 +176,7 @@ DECISION PENDING (user holding).
 
 ---
 
-Version: 0.3.0 (design, pre-build) — supersedes v0.1, v0.2
+Version: 0.4.0 (design, SPEC-ready) — supersedes v0.1, v0.2, v0.3
 History:
 - v0.1 (2026-07-01): split SI into readable narrative + deterministic record PDF, both as
   paper siblings. Superseded same day.
@@ -179,7 +184,11 @@ History:
   authored belief, record is the deposit; proposed `zref-xr` linkage.
 - v0.3 (2026-07-01): confirmed open points 8.1/8.2/8.3 + dropped `zref-xr` (measured: the
   existing cross-doc S-ref gate already prevents dangling without compile coupling; authoring
-  supplies the through-line). 8.4 (gate-surface extent) remains the sole open item.
+  supplies the through-line). 8.4 (gate-surface extent) left open.
+- v0.4 (2026-07-01): 8.4 resolved by measurement — the existing gate already audits `si.tex`
+  as a manuscript (P2 number-audit over draft.tex+si.tex), so ②'s gate is unchanged and opens
+  no hole; ③ record.tex is tool-vocab exempt; deposit-completeness is in this SPEC. All open
+  points closed; SPEC-ready.
 Source: 2026-07-01 session — SI readability + main↔SI linkage pivot
 Extends / revises: design/render-architecture-reframe.md
 Related: design/paper-figures-and-si.md, design/paper-publishing-requirements.md,
