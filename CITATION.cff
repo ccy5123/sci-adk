@@ -13,7 +13,7 @@ authors:
   - family-names: "Joe"
     given-names: "Chan Young"
     orcid: "https://orcid.org/0009-0007-5822-6714"
-version: "0.1.0"
+version: "0.2.0"
 license: MIT
 repository-code: "https://github.com/ccy5123/sci-adk"
 url: "https://github.com/ccy5123/sci-adk"

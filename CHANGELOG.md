@@ -1,14 +1,23 @@
 # Changelog
 
 All notable changes to sci-adk are documented here. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
-follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-sci-adk is pre-1.0; no version has been tagged yet. Everything built so far is
-listed under **Unreleased** and will be moved under a version heading at the
-first tagged release.
+The public surface (CLI + curated Python API) is frozen as the 1.0 contract
+(`design/surface-freeze-analysis.md`); `1.0.0` will be tagged near the methods-paper
+(JOSS) submission. `0.2.0` is the first tagged release.
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-06-30
+
+### Added — public API
+
+- Curated public Python API: `sci_adk` re-exports the 29-symbol record/belief
+  surface (Spec / Evidence / Claim + `DecisionEngine` + `verify_run` /
+  `verify_package`), guarded by a contract test; everything else is
+  internal/unstable.
 
 ### Added — kernel spine
 
@@ -52,5 +61,8 @@ first tagged release.
 
 - MIT license; `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
   `CITATION.cff`; CI running the unit suite on Python 3.11 and 3.12.
+- CLI/API surface-freeze analysis fixing the 1.0 contract
+  (`design/surface-freeze-analysis.md`); methods-paper (JOSS) draft under `paper/`.
 
-[Unreleased]: https://github.com/ccy5123/sci-adk/commits/master
+[Unreleased]: https://github.com/ccy5123/sci-adk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ccy5123/sci-adk/releases/tag/v0.2.0
