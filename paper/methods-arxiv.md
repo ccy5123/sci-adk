@@ -217,11 +217,13 @@ As AI systems take on more autonomous research roles, the separation between the
 
 The author carried out this work as independent research with no specific grant funding. [Author to confirm this statement is literally accurate before posting.]
 
+sci-adk was developed using MoAI-ADK [@moaiadk], an agentic development kit for Claude Code. Beyond serving as the build environment, MoAI-ADK's pattern of using a language model as an orchestrator that delegates to specialist worker agents and evaluator guards, gated by deterministic hooks, shaped sci-adk's operational layer (the science-orchestrator persona, its worker and guard agents, the `/sci` command hub, and the Stop-hook gate). sci-adk adopts that structure while repurposing its deterministic gate from a software-build verdict to the scientific record/belief verdict described here; the verification kernel itself is sci-adk's own.
+
 ---
 
 ## AI Usage Disclosure
 
-The source code of sci-adk and this paper were developed with substantial AI assistance (agentic coding and drafting with large language models) under a human verification gate. Every change and every claim was reviewed and accepted by the author, who is solely responsible for all content. The automated test suite (`pytest`, continuous integration on Python 3.11 and 3.12) is the acceptance check for the software.
+The source code of sci-adk and this paper were developed with substantial AI assistance (agentic coding and drafting with large language models, via the MoAI-ADK agentic development kit [@moaiadk]) under a human verification gate. Every change and every claim was reviewed and accepted by the author, who is solely responsible for all content. The automated test suite (`pytest`, continuous integration on Python 3.11 and 3.12) is the acceptance check for the software.
 
 ---
 
@@ -246,3 +248,5 @@ The source code of sci-adk and this paper were developed with substantial AI ass
 [@aar]: Rasheed, R. A. et al. (2026). From Fluent to Verifiable: Claim-Level Auditability for Deep Research Agents. arXiv:2602.13855. doi:10.48550/arXiv.2602.13855
 
 [@aiscientist]: Lu, C. et al. (2024). The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery. arXiv:2408.06292. doi:10.48550/arXiv.2408.06292
+
+[@moaiadk]: modu-ai (2026). MoAI-ADK: SPEC-First Agentic Development Kit for Claude Code. Version 2.14.0, Apache-2.0. https://github.com/modu-ai/moai-adk

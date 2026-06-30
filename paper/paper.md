@@ -171,14 +171,18 @@ verified.
 # AI usage disclosure
 
 sci-adk's source code and this paper were developed with substantial AI assistance
-(agentic coding and drafting with large language models) under a human verification
-gate: every change and claim was reviewed and accepted by the author, who is
-responsible for all content, and the automated test suite is the acceptance check
-for the software.
+(agentic coding and drafting with large language models, via the MoAI-ADK agentic
+development kit [@moaiadk]) under a human verification gate: every change and claim
+was reviewed and accepted by the author, who is responsible for all content, and
+the automated test suite is the acceptance check for the software.
 
 # Acknowledgements
 
 The author carried out this work as independent research with no specific grant
-funding.
+funding. sci-adk was developed using MoAI-ADK [@moaiadk], an agentic development
+kit for Claude Code; its orchestrator-plus-specialist-plus-hook pattern also shaped
+sci-adk's operational layer, which adopts that structure while repurposing its
+deterministic gate from a software-build verdict to sci-adk's scientific
+record/belief verdict.
 
 # References
