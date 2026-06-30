@@ -1,14 +1,14 @@
 # sci-adk: Agentic Discovery Kit (ADK)
 
-> Version: 0.1.0
-> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 1281 tests passing
-> Last Updated: 2026-06-25
+> Version: 0.2.0
+> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 1369 tests passing
+> Last Updated: 2026-06-30
 
 ## What is sci-adk?
 
-**sci-adk** is an **Agentic Discovery Kit (ADK)** — a rigor / verification system built on a **domain-general kernel** (zero domain code) and a capability-adapter seam; a *referee/scorekeeper, not a player* — for the user's own research.
+**sci-adk** is an **Agentic Discovery Kit (ADK)** — a rigor / verification system built on a **domain-general kernel** (zero domain code) and a capability-adapter seam; a *referee/scorekeeper, not a player* — for rigorous, reproducible agent-assisted research.
 
-It **builds** the rigor kernel (record vs belief, frozen criteria, verification, provenance, deterministic replay) and **borrows** capabilities (experiment authoring, literature, prose) via the in-session Claude agent and subagents. External release is a deferred, not foreclosed, future option. The operating rule is: **agents propose; the engine judges by frozen criteria. No self-certification. The verdict path is deterministic and rule-based.**
+It **builds** the rigor kernel (record vs belief, frozen criteria, verification, provenance, deterministic replay) and **borrows** capabilities (experiment authoring, literature, prose) via the in-session Claude agent and subagents. It is openly developed and free to install, use, and extend. The operating rule is: **agents propose; the engine judges by frozen criteria. No self-certification. The verdict path is deterministic and rule-based.**
 
 See `design/sci-adk-productization-plan.md` §2 / §2.1a for the full identity statement.
 
@@ -58,7 +58,7 @@ Run a capability's built-in demo. The capability adapter resolves an `Experiment
 ```
 sci-adk run --t1-demo [-o OUTPUT] [--spec-id ID]
 ```
-Alias for `--capability t1-molecular-godel`. Runs the T-1 molecular Godel-encoding capability over its designed molecule test set. Yields an autonomous injectivity verdict via the DecisionEngine (numeric threshold rule — no judge needed).
+Alias for `--capability t1-molecular-godel`. Runs the T-1 molecular Godel-encoding capability over its designed molecule test set. Yields an autonomous injectivity verdict via the DecisionEngine (numeric threshold rule — no judge needed). Under the default strict science guards the bare demo surfaces rigor findings (it carries no negative control by design, G3); pass `--no-strict-science` for a quick smoke run.
 
 ```
 sci-adk resolve <run-dir>
@@ -134,14 +134,17 @@ A bare `run` compiles the Spec + a proposal draft and surfaces any proof/qualita
 # 1. Install
 pip install -e .
 
-# 2. Run the built-in T-1 demo (autonomous numeric verdict, no proposal file needed)
-sci-adk run --t1-demo
-
-# 3. Inspect the run directory
-ls runs/t1-godel/
-
-# 4. Headless re-verification (no LLM required)
+# 2. Re-verify the bundled T-1 run -- deterministic, offline, no LLM.
+#    This is sci-adk's core property: a third party reproduces the verdict from
+#    the record alone. Exit 0 iff every recorded claim reproduces.
 sci-adk verify runs/t1-godel
+sci-adk status runs/t1-godel
+
+# 3. (optional) Generate a fresh demo run. Under the default science guards the
+#    bare demo SURFACES rigor findings (G1-G4) -- the engine refusing to bless an
+#    under-justified toy claim is the point, not a failure. Add --no-strict-science
+#    for a quick smoke run that completes with an autonomous injectivity verdict.
+sci-adk run --t1-demo --no-strict-science
 ```
 
 ### Library Usage (secondary interface)
@@ -230,7 +233,7 @@ kernel** — it adds delegation and early checks, never a new verdict path. See
 - **Paper figures + SI**: native pgfplots data-plot renderer with stable labels + Overleaf folder co-location; SI auto-record-dump (`si.tex`); a `\ref`↔`\label` within-document consistency gate as a `sci-adk verify` HARD gate; image-path figures (`ImageFigureSpec`, domain-general — the kernel carries zero domain code); optional `SIProse` hook around the SI record dump; body-order figure numbering. See `design/paper-figures-and-si.md`.
 - **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (IMRaD structure, no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
 - **paperforge re-pin → DOI→BibTeX**: pin `2cec69b` ships `paperforge.bibtex`
-- 1281 unit tests passing (`python3 -m pytest -q`)
+- 1369 unit tests passing (`python3 -m pytest -q`)
 
 ### Remaining
 
@@ -306,7 +309,7 @@ sci-adk/
 │   └── session-6-handoff.md  # Latest session handoff
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
-├── tests/                    # Engineering-layer tests (1281 passing)
+├── tests/                    # Engineering-layer tests (1369 passing)
 │   ├── test_spec.py          # Spec invariants
 │   ├── test_evidence.py      # Evidence invariants
 │   ├── test_claim.py         # Claim invariants
@@ -328,7 +331,7 @@ sci-adk/
 │       ├── checkpoints.md    # Agent checkpoints (unresolved)
 │       ├── verdicts/         # Agent-authored verdict files
 │       └── paper/draft.tex   # Paper draft (Overleaf-compilable LaTeX)
-├── pyproject.toml            # sci-adk v0.1.0; console script sci-adk = sci_adk.cli:main
+├── pyproject.toml            # sci-adk v0.2.0; console script sci-adk = sci_adk.cli:main
 └── README.md                 # This file
 ```
 
@@ -337,7 +340,7 @@ sci-adk/
 ## Testing
 
 ```bash
-# All tests (1281 passing)
+# All tests (1369 passing)
 python3 -m pytest -q
 
 # Integration tests (require Docker)
@@ -412,10 +415,21 @@ These exclusions apply to *sci-adk's research runtime*, NOT the build harness. F
 
 ---
 
+## Support & Contributing
+
+Contributions, bug reports, and questions are welcome.
+
+- **Report a bug or request a feature**: open an issue at <https://github.com/ccy5123/sci-adk/issues>
+- **Contributing guidelines**: see [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **Questions / usage help**: open a GitHub issue describing what you ran and what you expected
+- **Cite sci-adk**: see [`CITATION.cff`](CITATION.cff)
+
+---
+
 ## License
 
 MIT License — Copyright (c) 2026 Chan Young Joe. See `LICENSE`.
 
 ## Authors
 
-cyjoe (sci-adk project lead)
+Chan Young Joe (cyjoe) — sci-adk project lead
