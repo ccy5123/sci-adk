@@ -60,16 +60,20 @@ discharge the G-A keystone.
 
 ## 4. G-B — Methods paper
 
-Publication plan = Option 4 (methods paper + T-1/T-2 case studies). (Source:
-publication-plan memory; Phase 0 / MIT license already done.)
+Publication plan reframed 2026-06-26 (session 9): the G-B paper is a **JOSS
+software/methods paper about the sci-adk tool** (venue = JOSS, hard no-APC
+constraint; SoftwareX USD 1560 / Patterns ruled out). This is distinct from the
+heavier "methods + both case studies" concept — the deep T-1/T-2 writeups are the
+author's **separate domain-journal papers** (J. Math. Chem. etc.), not part of the
+JOSS tool paper. (Source: publication-plan memory + `project_research-roadmap-and-joss`.)
 
 | # | Criterion | Status | Basis |
 |---|-----------|--------|-------|
-| B1 | Paper drafted (methods + both case studies) | `[OPEN]` | no manuscript in repo |
-| B2 | T-1 case study writeup | `[OPEN]` | `runs/t1-godel/paper/` has a draft; needs paper-grade writeup |
-| B3 | T-2 case study writeup | `[OPEN]` | == G-A A1/A4 (research-gated) |
+| B1 | JOSS tool-paper drafted | `[DONE]` | `paper/paper.md` + `paper/paper.bib` committed (`d575fae`, ~844 words, JOSS-format; refs EviBound/AAR/AI-Scientist arXiv-verified; G-E honesty-scoped). Repo-side JOSS reqs met (README install/usage, LICENSE, CONTRIBUTING, COC, SECURITY, CITATION, CI) |
+| B2 | T-1 case study writeup (domain paper) | `[OPEN]` | the author's separate research paper (J. Math. Chem./J. Cheminformatics); `runs/t1-godel/paper/` draft + `science.md` G1-G4 to resolve. NOT a JOSS-paper blocker |
+| B3 | T-2 case study writeup (domain paper) | `[OPEN]` | the author's separate research paper (p-adic, research-gated). NOT a JOSS-paper blocker |
 | B4 | Render + publishing pipeline exists | `[DONE]` | render reframe + publishing F1/F2/F3 + package layer on master |
-| B5 | CITATION.cff present and consistent with the paper | `[OPEN]` | software `CITATION.cff` added (G-C/C7); paper-citation consistency still pending the paper itself |
+| B5 | CITATION.cff present and consistent with the paper | `[OPEN]` | software `CITATION.cff` present (G-C/C7); paper draft committed. Paper↔CITATION DOI cross-reference completes at JOSS acceptance (CrossRef DOI minted then) |
 
 ## 5. G-C — OSS release hygiene
 
