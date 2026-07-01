@@ -121,6 +121,7 @@ verb, which enforces typing, provenance, and append-only-ness.
 | `sci-adk prior-work` | plan | Records the prior-art search + what was found (or none) |
 | `sci-adk novelty --kind {result\|method}` | plan | Records the per-kind novelty decision (`found_nothing` or prior-art) |
 | `sci-adk contested` | plan | Records a contested-literature finding |
+| `sci-adk add-literature` | plan | Saves a user-provided PDF (paperforge can't fetch) under its canonical bibkey into `literature/pdfs/` |
 
 `sci-adk run [SPEC-id]` remains a monolithic wrapper chaining the stage verbs
 (`init-spec → execute → append-evidence → derive-claim → render`). Workers MAY call
