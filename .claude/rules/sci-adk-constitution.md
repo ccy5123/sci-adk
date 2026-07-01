@@ -154,6 +154,26 @@ When adding new tools:
 
 **Principle**: Tool addition = system surface increase = debugging/reproducibility burden. Be conservative.
 
+### Manual Literature Ingest (user-provided documents)
+
+[HARD] When the user provides a document/paper DIRECTLY in the conversation — the
+case paperforge cannot fetch (no Open-Access copy, or the user simply has the PDF) —
+immediately, without being asked again:
+
+1. Read the document to extract the FIRST-AUTHOR surname (or institutional name,
+   e.g. "OECD") and the publication YEAR, and determine whether it is supplementary
+   information (SI).
+2. Run `sci-adk add-literature <run_dir> --pdf <path> --author "<Surname>" --year
+   <YYYY> [--si]`. The verb assigns the canonical bibkey deterministically and copies
+   the PDF to `runs/<spec.id>/literature/pdfs/<bibkey>.pdf`.
+
+Naming is OWNED by the verb, never hand-crafted: base = `<Surname><Year>` (Anon/nd
+fallbacks); DOI-less same-base collisions get an arrival-order UPPERCASE suffix
+(bare, then A, B, …); SI is a `_SI` variant of its paper's key. These provisional
+uppercase keys are re-sorted to canonical lowercase `a/b` by DOI at render time
+(a later, separate step). The agent's ONLY judgement is author/year/SI (from reading
+the document); the key assignment and disambiguation are deterministic (no LLM).
+
 ---
 
 ## Directory Structure

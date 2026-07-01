@@ -269,6 +269,33 @@ def build_parser() -> argparse.ArgumentParser:
              "email is set (default: refuse and halt)",
     )
 
+    add_lit = sub.add_parser(
+        "add-literature",
+        help="save a manually-provided PDF (one paperforge could not fetch) into "
+             "the run's literature/pdfs/ under its canonical bibkey "
+             "<Surname><Year> (arrival-order UPPERCASE A/B for DOI-less collisions; "
+             "_SI for supplementary). The agent supplies author/year after reading "
+             "the document",
+    )
+    add_lit.add_argument("run_dir", help="path to a runs/<spec.id>/ dir")
+    add_lit.add_argument(
+        "--pdf", required=True, metavar="PATH",
+        help="path to the PDF the user provided",
+    )
+    add_lit.add_argument(
+        "--author", default=None, metavar="SURNAME",
+        help="first-author surname or institutional name (e.g. 'Niimi', 'OECD'); "
+             "empty -> Anon",
+    )
+    add_lit.add_argument(
+        "--year", default=None, metavar="YYYY",
+        help="publication year; empty -> nd",
+    )
+    add_lit.add_argument(
+        "--si", action="store_true",
+        help="this file is supplementary information (-> a _SI key)",
+    )
+
     status = sub.add_parser(
         "status",
         help="terse, read-only session-state snapshot of a run dir (recorded claim "
@@ -1808,6 +1835,36 @@ def _cmd_init_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_add_literature(args: argparse.Namespace) -> int:
+    """Save a manually-provided PDF into the run's literature store under its bibkey.
+
+    For a paper paperforge cannot fetch, the agent reads the document, then calls
+    this verb with the first-author surname + year (+ ``--si`` for supplementary
+    info). The bibkey is assigned deterministically (no LLM) and the PDF is copied
+    to ``runs/<spec.id>/literature/pdfs/<bibkey>.pdf``.
+    """
+    import shutil
+
+    from sci_adk.search.manual_literature import assign_manual_key
+
+    run_dir = Path(args.run_dir)
+    src = Path(args.pdf)
+    if not src.exists():
+        print(f"error: file not found: {src}", file=sys.stderr)
+        return 2
+
+    pdfs_dir = run_dir / "literature" / "pdfs"
+    key = assign_manual_key(pdfs_dir, args.author, args.year, is_si=args.si)
+    pdfs_dir.mkdir(parents=True, exist_ok=True)
+    dest = pdfs_dir / f"{key}.pdf"
+    shutil.copy2(src, dest)
+
+    print(f"add-literature: saved '{src.name}' as bibkey '{key}' -> {dest}")
+    print("  provisional key: an UPPERCASE A/B is arrival-order (DOI unknown); "
+          "render-time normalization re-sorts to lowercase a/b by DOI")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
@@ -1840,6 +1897,8 @@ def main(argv=None) -> int:
         return _cmd_novelty(args)
     if args.command == "contested":
         return _cmd_contested(args)
+    if args.command == "add-literature":
+        return _cmd_add_literature(args)
     if args.command == "status":
         return _cmd_status(args)
     if args.command == "init-session":
