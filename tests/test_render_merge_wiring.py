@@ -439,10 +439,11 @@ def test_compile_colocates_image_figure_into_paper_figures(tmp_path):
     assert r"\includegraphics[width=\linewidth]{figures/fig1.png}" in draft
     assert r"\label{fig:scheme}" in draft
 
-    # si.tex does NOT re-render the MAIN figure (the reframe: main figures live ONLY in
-    # the paper's Results; the SI carries only supplementary si_figures, none here). So a
-    # main figure is never duplicated across draft.tex + si.tex (design feedback 5.2).
-    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    # The record dump does NOT re-render the MAIN figure (the reframe: main figures live
+    # ONLY in the paper's Results; the record carries only supplementary si_figures, none
+    # here). So a main figure is never duplicated across draft.tex + the record.
+    from sci_adk.loop.compiler import deposit_record_path
+    si = deposit_record_path(tmp_path / "runs" / "t-img").read_text(encoding="utf-8")
     assert "{figures/fig1.png}" not in si
     assert r"\label{fig:scheme}" not in si
 
@@ -547,9 +548,10 @@ def test_compile_shares_figure_numbering_and_filenames_main_and_si(tmp_path):
     ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-order", experiment=_point_experiment, figures=figs)
 
+    from sci_adk.loop.compiler import deposit_record_path
     paper_dir = tmp_path / "runs" / "t-order" / "paper"
     draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
-    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    si = deposit_record_path(tmp_path / "runs" / "t-order").read_text(encoding="utf-8")
     figures_dir = paper_dir / "figures"
 
     # Supply order (no live ref in the body): alpha=fig1, beta=fig2. The co-located bytes
@@ -766,40 +768,46 @@ def test_cli_run_figures_invalid_spec_errors(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Supporting Information (paper-figures Phase 2, D3): the compiler also emits a
-# standalone si.tex next to draft.tex; CompileResult.si_path points at it.
+# Record artifact (SPEC-SI-AUTHORING-001 M1, REQ-SA-202/203): the compiler relocates the
+# deterministic dump to the deposit's record.tex (re-named from "Supporting Information")
+# and frees the paper/si.tex slot for the authored overflow path (M3). CompileResult
+# .record_path points at the relocated deposit record.
 # ---------------------------------------------------------------------------
 
-def test_compile_emits_si_next_to_draft(tmp_path):
-    """The compiler writes paper/si.tex next to paper/draft.tex; si.tex is a
-    standalone compilable document and CompileResult.si_path points at it."""
+def test_compile_emits_record_in_the_deposit(tmp_path):
+    """The compiler writes the deterministic dump to the deposit as record.tex; it is a
+    standalone compilable document and CompileResult.record_path points at it."""
+    from sci_adk.loop.compiler import deposit_record_path
+
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-si-wire", experiment=_point_experiment)
 
-    paper_dir = tmp_path / "runs" / "t-si-wire" / "paper"
-    si_path = paper_dir / "si.tex"
-    draft_path = paper_dir / "draft.tex"
-    assert si_path.exists(), "paper/si.tex must be emitted next to draft.tex"
+    run_dir = tmp_path / "runs" / "t-si-wire"
+    record_path = deposit_record_path(run_dir)
+    draft_path = run_dir / "paper" / "draft.tex"
+    assert record_path.exists(), "the deterministic dump must land as the deposit record.tex"
     assert draft_path.exists()
 
-    # CompileResult.si_path points at the standalone SI.
-    assert result.si_path == si_path
-    assert result.si_path.name == "si.tex"
+    # CompileResult.record_path points at the relocated deposit record.
+    assert result.record_path == record_path
+    assert result.record_path.name == "record.tex"
 
-    si = si_path.read_text(encoding="utf-8")
+    record = record_path.read_text(encoding="utf-8")
     # Standalone doc: parses on its own (own \documentclass + \end{document}).
-    assert r"\documentclass{article}" in si
-    assert r"\end{document}" in si
-    assert "Supporting Information" in si
-    # The record dump carries the run's evidence id.
-    assert "ev-pt-0" in si
+    assert r"\documentclass{article}" in record
+    assert r"\end{document}" in record
+    # Re-named: it reads as the record, not "Supporting Information".
+    assert "Supporting Information" not in record
+    # The record dump carries the run's evidence id (content unchanged).
+    assert "ev-pt-0" in record
 
 
-def test_compile_si_figures_render_in_si_only(tmp_path):
-    """The SI carries only SUPPLEMENTARY si_figures (the reframe: main figures live only
-    in the paper, 5.2). A si_figure renders into si.tex with the pgfplots preamble; y
-    pulled from the recorded Evidence. A MAIN figure does NOT appear in the SI."""
+def test_compile_si_figures_render_in_record_only(tmp_path):
+    """The record dump carries the SUPPLEMENTARY si_figures (the reframe: main figures
+    live only in the paper, 5.2). A si_figure renders into record.tex with the pgfplots
+    preamble; y pulled from the recorded Evidence. A MAIN figure does NOT appear."""
     from sci_adk.render.figures import PaperFigures
+    from sci_adk.loop.compiler import deposit_record_path
 
     main = PaperFigures.model_validate(_figures_json("main", "ev-pt-0")).figures
     supp = PaperFigures.model_validate(_figures_json("supp", "ev-pt-0")).figures
@@ -807,32 +815,36 @@ def test_compile_si_figures_render_in_si_only(tmp_path):
         PROPOSAL, spec_id="t-si-fig", experiment=_point_experiment,
         figures=main, si_figures=supp)
 
-    si = (tmp_path / "runs" / "t-si-fig" / "paper" / "si.tex").read_text(
+    record = deposit_record_path(tmp_path / "runs" / "t-si-fig").read_text(
         encoding="utf-8")
-    assert r"\usepackage{pgfplots}" in si
-    assert r"\label{fig:supp}" in si      # the supplementary figure is in the SI
-    assert r"\label{fig:main}" not in si  # the main figure is NOT duplicated into the SI
-    assert "(1, 1)" in si  # ev-pt-0 point=1.0 at x=1
+    assert r"\usepackage{pgfplots}" in record
+    assert r"\label{fig:supp}" in record      # the supplementary figure is in the record
+    assert r"\label{fig:main}" not in record  # the main figure is NOT duplicated
+    assert "(1, 1)" in record  # ev-pt-0 point=1.0 at x=1
 
 
-def test_compile_si_integrity_points_to_verify(tmp_path):
-    """Phase 2 passes digest=None at compile time (evidence not yet persisted), so the
-    SI's integrity section points to ``sci-adk verify`` rather than a fake digest."""
+def test_compile_record_integrity_points_to_verify(tmp_path):
+    """digest=None at compile time (evidence not yet persisted), so the record's integrity
+    section points to ``sci-adk verify`` rather than a fake digest."""
+    from sci_adk.loop.compiler import deposit_record_path
+
     ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-si-verify", experiment=_point_experiment)
-    si = (tmp_path / "runs" / "t-si-verify" / "paper" / "si.tex").read_text(
+    record = deposit_record_path(tmp_path / "runs" / "t-si-verify").read_text(
         encoding="utf-8")
-    assert "sci-adk verify" in si
-    assert "Record digest (sha256):" not in si
+    assert "sci-adk verify" in record
+    assert "Record digest (sha256):" not in record
 
 
 # ---------------------------------------------------------------------------
 # SI prose hook (Phase 4-3): the compiler threads si_prose into render_si_latex; the
-# CLI gains --si-prose <json>. The no-prose si.tex stays byte-identical (regression).
+# CLI gains --si-prose <json>. The no-prose record dump stays byte-identical (regression).
+# After SPEC-SI-AUTHORING-001 M1 the dump lands at the deposit record.tex.
 # ---------------------------------------------------------------------------
 
-def test_compile_threads_si_prose_into_si_tex(tmp_path):
+def test_compile_threads_si_prose_into_record_tex(tmp_path):
     from sci_adk.render.prose import SIProse
+    from sci_adk.loop.compiler import deposit_record_path
 
     prose = SIProse(
         overview="An overview of the complete record dump.",
@@ -841,41 +853,45 @@ def test_compile_threads_si_prose_into_si_tex(tmp_path):
     ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-si-prose", experiment=_point_experiment, si_prose=prose)
 
-    si = (tmp_path / "runs" / "t-si-prose" / "paper" / "si.tex").read_text(
+    record = deposit_record_path(tmp_path / "runs" / "t-si-prose").read_text(
         encoding="utf-8")
-    assert r"\section{Overview}" in si
-    assert "An overview of the complete record dump." in si
-    assert r"\section{Notes}" in si
-    assert "Closing notes on reproducibility." in si
+    assert r"\section{Overview}" in record
+    assert "An overview of the complete record dump." in record
+    assert r"\section{Notes}" in record
+    assert "Closing notes on reproducibility." in record
 
 
 def test_compile_without_si_prose_has_no_prose_sections(tmp_path):
     """No si_prose -> the record dump only, no Overview/Notes narrative sections."""
+    from sci_adk.loop.compiler import deposit_record_path
     ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-si-noprose", experiment=_point_experiment)
-    si = (tmp_path / "runs" / "t-si-noprose" / "paper" / "si.tex").read_text(
+    si = deposit_record_path(tmp_path / "runs" / "t-si-noprose").read_text(
         encoding="utf-8")
     assert r"\section{Overview}" not in si
     assert r"\section{Notes}" not in si
 
 
 def test_compile_si_prose_does_not_touch_paper_prose(tmp_path):
-    """si_prose wraps si.tex ONLY; draft.tex (paper prose) is unaffected."""
+    """si_prose wraps the record dump ONLY; draft.tex (paper prose) is unaffected."""
     from sci_adk.render.prose import SIProse
+    from sci_adk.loop.compiler import deposit_record_path
 
     ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-si-prose-iso", experiment=_point_experiment,
         si_prose=SIProse(overview="SI overview only."))
     paper_dir = tmp_path / "runs" / "t-si-prose-iso" / "paper"
-    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    si = deposit_record_path(tmp_path / "runs" / "t-si-prose-iso").read_text(
+        encoding="utf-8")
     draft = (paper_dir / "draft.tex").read_text(encoding="utf-8")
-    # The SI carries the overview; the main paper draft does not (no leakage).
+    # The record carries the overview; the main paper draft does not (no leakage).
     assert "SI overview only." in si
     assert "SI overview only." not in draft
 
 
-def test_cli_run_si_prose_injects_into_si_tex(tmp_path):
+def test_cli_run_si_prose_injects_into_record_tex(tmp_path):
     from sci_adk.cli import main
+    from sci_adk.loop.compiler import deposit_record_path
 
     proposal = tmp_path / "proposal.md"
     proposal.write_text(PROPOSAL, encoding="utf-8")
@@ -894,8 +910,8 @@ def test_cli_run_si_prose_injects_into_si_tex(tmp_path):
     ])
     assert rc == 0
 
-    paper_dir = tmp_path / "runs" / "t-cli-si-prose" / "paper"
-    si = (paper_dir / "si.tex").read_text(encoding="utf-8")
+    si = deposit_record_path(tmp_path / "runs" / "t-cli-si-prose").read_text(
+        encoding="utf-8")
     assert r"\section{Overview}" in si
     assert "An offline SI overview." in si
     assert r"\section{Notes}" in si
@@ -904,6 +920,7 @@ def test_cli_run_si_prose_injects_into_si_tex(tmp_path):
 
 def test_cli_run_without_si_prose_has_no_prose_sections(tmp_path):
     from sci_adk.cli import main
+    from sci_adk.loop.compiler import deposit_record_path
 
     proposal = tmp_path / "proposal.md"
     proposal.write_text(PROPOSAL, encoding="utf-8")
@@ -911,7 +928,7 @@ def test_cli_run_without_si_prose_has_no_prose_sections(tmp_path):
         "run", str(proposal), "-o", str(tmp_path), "--spec-id", "t-cli-si-noprose",
     ])
     assert rc == 0
-    si = (tmp_path / "runs" / "t-cli-si-noprose" / "paper" / "si.tex").read_text(
+    si = deposit_record_path(tmp_path / "runs" / "t-cli-si-noprose").read_text(
         encoding="utf-8")
     assert r"\section{Overview}" not in si
     assert r"\section{Notes}" not in si

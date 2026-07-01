@@ -39,6 +39,7 @@ from sci_adk.render.pkgreqs_checks import (
     citation_key_shape_problems,
     cite_resolution_problems,
     cited_keys,
+    deposit_completeness_problems,
     figure_presence_problems,
     layout_problems,
     readme_submission_readiness_problems,
@@ -273,6 +274,77 @@ def test_readme_submission_readiness_present_is_clean():
 def test_readme_submission_readiness_missing_fails():
     problems = readme_submission_readiness_problems("# Pkg\n\nno such section here\n")
     assert len(problems) == 1 and "submission-readiness" in problems[0].lower()
+
+
+# -- Deposit-completeness (SPEC-SI-AUTHORING-001 M2, Pillar C) ----------------
+# The PURE checker, modeled on readme_submission_readiness_problems: returns [] iff the
+# deposit carries BOTH (a) the record artifact (located by deposit_record_path; passed here
+# as a resolved path so the checker stays seam-clean, render/ never imports loop/) AND (b) a
+# "Data & code availability" statement (detected presence-only in the record text), else one
+# problem line per missing element. Presence-only, deterministic, no LLM (REQ-SA-304).
+
+_AVAILABILITY_STMT = (
+    "\\section{Data \\& code availability}\n"
+    "The full record (Spec, Evidence, Claims, verdict trail) is deposited; "
+    "run \\texttt{sci-adk verify <run>} to re-derive it."
+)
+
+
+def test_deposit_completeness_both_present_is_clean(tmp_path):
+    # AC-C1 (REQ-SA-301): record artifact present AND availability statement present -> [].
+    record = tmp_path / "record.tex"
+    record.write_text(
+        r"\documentclass{article}\begin{document}" + _AVAILABILITY_STMT + r"\end{document}",
+        encoding="utf-8",
+    )
+    assert deposit_completeness_problems(record) == []
+
+
+def test_deposit_completeness_missing_record_artifact_fails(tmp_path):
+    # AC-C2 (REQ-SA-302): no record artifact on disk -> one problem line naming it.
+    record = tmp_path / "record.tex"  # not written
+    problems = deposit_completeness_problems(record)
+    assert len(problems) == 1
+    assert "record.tex" in problems[0] and "record" in problems[0].lower()
+
+
+def test_deposit_completeness_missing_availability_statement_fails(tmp_path):
+    # AC-C3 (REQ-SA-303): record present but no "Data & code availability" statement ->
+    # one problem line naming the missing statement.
+    record = tmp_path / "record.tex"
+    record.write_text(
+        r"\documentclass{article}\begin{document}\section{Record integrity}\end{document}",
+        encoding="utf-8",
+    )
+    problems = deposit_completeness_problems(record)
+    assert len(problems) == 1
+    assert "availability" in problems[0].lower()
+
+
+def test_deposit_completeness_absent_record_names_only_the_record(tmp_path):
+    # EC-5: the availability statement lives IN the record artifact, so an absent record is
+    # the SINGLE missing element (the "availability without record" case cannot arise). The
+    # missing record is named on its own line; AC-C3 (availability-only) is exercised
+    # separately above where the record IS present.
+    record = tmp_path / "record.tex"  # absent
+    problems = deposit_completeness_problems(record)
+    assert len(problems) == 1
+    assert "record.tex" in problems[0]
+
+
+def test_deposit_completeness_is_deterministic(tmp_path):
+    # AC-C4 (REQ-SA-304): same inputs -> same result (presence-only, no LLM, no network).
+    record = tmp_path / "record.tex"
+    record.write_text(_AVAILABILITY_STMT, encoding="utf-8")
+    assert deposit_completeness_problems(record) == deposit_completeness_problems(record)
+
+
+def test_deposit_completeness_availability_phrase_tolerant(tmp_path):
+    # The phrase is matched tolerantly (case-insensitive, "and" or "&"), mirroring the
+    # readme_submission_readiness precedent -- a hand-authored variant still passes.
+    record = tmp_path / "record.tex"
+    record.write_text("Data and Code Availability\nThe deposit re-derives.\n", encoding="utf-8")
+    assert deposit_completeness_problems(record) == []
 
 
 # -- pkgreqs freeze CLI verb -------------------------------------------------

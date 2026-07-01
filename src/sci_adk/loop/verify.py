@@ -68,6 +68,7 @@ from sci_adk.core.validity import (
     derive_novelty_status,
 )
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
+from sci_adk.loop.compiler import deposit_record_path
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
@@ -91,8 +92,10 @@ from sci_adk.render.pkgreqs_checks import (
     citation_disambiguation_problems,
     citation_key_shape_problems,
     cite_resolution_problems,
+    deposit_completeness_problems,
     figure_presence_problems,
     layout_problems,
+    package_record_path,
     readme_submission_readiness_problems,
     unpublished_citation_warnings,
 )
@@ -105,17 +108,26 @@ from sci_adk.render.pubreqs_checks import (
     section_order_problems,
 )
 
-# The rendered paper documents verify re-checks for internal \ref<->\label integrity
-# (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN themselves; the
-# cross-DOCUMENT main<->SI reference (the plain-text "Figure S<n>" / "Table S<n>" a real
-# \ref cannot carry across the compile boundary) is gated SEPARATELY and statically by
-# _check_cross_doc_refs (it counts SI floats, no xr package, no recompile). A document
-# absent from paper/ is simply skipped.
+# The rendered paper SUBMISSION documents verify re-checks for internal \ref<->\label
+# integrity (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN
+# themselves; the cross-DOCUMENT main<->SI reference (the plain-text "Figure S<n>" /
+# "Table S<n>" a real \ref cannot carry across the compile boundary) is gated SEPARATELY
+# and statically by _check_cross_doc_refs (it counts SI floats, no xr package, no
+# recompile). A document absent from paper/ is simply skipped.
+#
+# SPEC-SI-AUTHORING-001: si.tex is now an AUTHORED belief artifact (the overflow of the
+# main paper), NOT the record dump -- so BOTH draft.tex and si.tex are submission
+# documents audited as manuscripts (P2 number-audit, value-fidelity, novelty, cross-doc,
+# and now the per-run tool-vocab gate, REQ-SA-204). The deterministic record dump was
+# RELOCATED to the deposit's record.tex (which lives OUTSIDE paper/ and is NOT in this
+# tuple, so it is never scanned by these paper gates; REQ-SA-206).
 _PAPER_DOCS: tuple[str, ...] = ("draft.tex", "si.tex")
 
 # The merged-manuscript documents the workspace-PACKAGE gate checks (design/near-submission-
-# package.md §3). main.tex is the tool-agnostic submission; si.tex is the record dump (EXEMPT
-# from the tool-vocabulary gate, like the per-run si.tex). Both live in package/01_manuscript/.
+# package.md §3). BOTH main.tex and si.tex are tool-agnostic SUBMISSION documents (the merged
+# manuscript reads as science end to end); the package tool-vocab scan covers both. (Under
+# SPEC-SI-AUTHORING-001 the per-run gate matches this -- si.tex is no longer the record dump.)
+# The deterministic record lives in the deposit (record.tex), not in package/01_manuscript/.
 _PACKAGE_MAIN: str = "main.tex"
 _PACKAGE_SI: str = "si.tex"
 _PACKAGE_DOCS: tuple[str, ...] = (_PACKAGE_MAIN, _PACKAGE_SI)
@@ -172,13 +184,14 @@ class VerifyReport:
             divergence). EMPTY when clean / no paper.
         paper_factref_clean: True iff no paper document carries a residual factref macro
             (and True vacuously with no paper). Part of the HARD gate.
-        paper_tool_vocab: tool-vocabulary leaks (§10) found in the PAPER (``draft.tex``
-            only -- the SI is the record dump and is EXEMPT): phrases/words that name the
-            sci-adk machinery instead of the science (``sci-adk``, ``frozen Spec``,
-            ``verdict``, ``Evidence record``, ...). EMPTY when the paper reads as
-            tool-agnostic science / no paper.
-        paper_tool_clean: True iff the paper carries no tool-vocabulary leak (and True
-            vacuously with no draft.tex). Part of the HARD gate.
+        paper_tool_vocab: tool-vocabulary leaks (§10) found in the SUBMISSION documents
+            (``draft.tex`` AND the authored ``si.tex`` -- SPEC-SI-AUTHORING-001 REQ-SA-204
+            lifted the old SI exemption; the deposit's ``record.tex`` stays EXEMPT,
+            REQ-SA-206): phrases/words that name the sci-adk machinery instead of the
+            science (``sci-adk``, ``frozen Spec``, ``verdict``, ``Evidence record``, ...).
+            EMPTY when the submission documents read as tool-agnostic science / no paper.
+        paper_tool_clean: True iff no submission document carries a tool-vocabulary leak
+            (and True vacuously with no draft.tex/si.tex). Part of the HARD gate.
         paper_novelty_problems: per-paper-document ``\\novelty{kind}{hyp}{...}`` assertions
             (the novelty/priority markup) that do NOT re-derive SUPPORTED from the record
             (N3 gate), keyed by file name. A SUPPORTED assertion is silent; an unsupported /
@@ -210,6 +223,17 @@ class VerifyReport:
             (not in ``passed``). The per-run companion to ``PackageVerifyReport.advisory``. EMPTY
             when clean / no paper / no contract. Closing the per-run advisory-channel gap the
             package gate already had.
+        deposit_problems: the RECORD-side deposit-completeness problems (SPEC-SI-AUTHORING-001
+            M2, Pillar C) -- presence-only lines naming a deposit element that is absent: the
+            retained deterministic record artifact (located via ``deposit_record_path``, the M1
+            single source of truth) and/or a "Data & code availability" statement in it. PURE,
+            deterministic, no LLM (REQ-SA-304); it judges ONLY presence, never belief content.
+            ADDITIVE (REQ-SA-305): surfaced as its OWN channel -- it never weakens or replaces
+            the existing claim-reproduction / record-green audit (``all_reproduced``). EMPTY
+            when the deposit carries both elements.
+        deposit_complete: True iff the deposit carries both record-side elements (i.e.
+            ``deposit_problems`` is empty). The record-side companion to the belief-side
+            ``paper_*_clean`` flags.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
             paper_cross_doc_clean and paper_requirements_clean``. This is what the CLI exits
@@ -233,6 +257,8 @@ class VerifyReport:
     paper_requirements_problems: List[str] = field(default_factory=list)
     paper_requirements_clean: bool = field(default=True)
     paper_advisory: List[str] = field(default_factory=list)
+    deposit_problems: List[str] = field(default_factory=list)
+    deposit_complete: bool = field(default=True)
     passed: bool = field(default=False)
 
 
@@ -397,8 +423,9 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     paper_factrefs = _check_paper_factrefs(run_dir)
     paper_factref_clean = not any(paper_factrefs.values())
 
-    # Tool-vocabulary gate (§10): the PAPER (draft.tex only -- the SI is exempt) must read
-    # as tool-agnostic science. READ-ONLY, no recompile, no LLM.
+    # Tool-vocabulary gate (§10): the SUBMISSION documents (draft.tex AND the authored
+    # si.tex; SPEC-SI-AUTHORING-001 REQ-SA-204) must read as tool-agnostic science. The
+    # deposit's record.tex is EXEMPT (REQ-SA-206, lives outside paper/). READ-ONLY, no LLM.
     paper_tool_vocab = _check_paper_tool_vocab(run_dir)
     paper_tool_clean = not paper_tool_vocab
 
@@ -428,6 +455,17 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     )
     paper_requirements_clean = not paper_requirements_problems
 
+    # Deposit-completeness gate (SPEC-SI-AUTHORING-001 M2, Pillar C): the ONE new RECORD-side
+    # gate. Confirms the deposit carries (a) the retained deterministic record artifact
+    # (located via deposit_record_path -- the M1 single source of truth, never a hard-coded
+    # path) AND (b) a "Data & code availability" statement. PURE, presence-only, no LLM
+    # (REQ-SA-304). ADDITIVE (REQ-SA-305): surfaced as its OWN channel below; it does NOT
+    # join the `passed` exit gate, so it never weakens or replaces the existing claim-
+    # reproduction / record-green audit (all_reproduced) -- the M2 exit criterion is a checker
+    # that fails loud on each missing element and is additive, not a new pass/fail conjunct.
+    deposit_problems = deposit_completeness_problems(deposit_record_path(run_dir))
+    deposit_complete = not deposit_problems
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -446,6 +484,8 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
         paper_advisory=paper_advisory,
+        deposit_problems=deposit_problems,
+        deposit_complete=deposit_complete,
         passed=(
             all_reproduced
             and paper_consistent
@@ -824,17 +864,32 @@ def _check_paper_novelty(
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
-    """Re-scan ``draft.tex`` for §10 tool-vocabulary leaks (READ-ONLY; the SI is EXEMPT).
+    """Re-scan the SUBMISSION documents for §10 tool-vocabulary leaks (READ-ONLY).
 
-    Only the belief-narrative PAPER is checked -- ``si.tex`` is openly the record dump and
-    legitimately uses sci-adk vocabulary, so it is never scanned. Returns the distinct
-    forbidden terms found (empty = clean / no draft.tex), via the pure
+    SPEC-SI-AUTHORING-001 REQ-SA-204 (AC-B4): under the authoring flow ``si.tex`` is a
+    SUBMISSION belief document (the authored overflow of ``draft.tex``), so the per-run
+    tool-vocab gate scans BOTH ``draft.tex`` AND ``si.tex`` -- the same documents the
+    package-path gate already covers (``verify.py`` package scan). Previously only
+    ``draft.tex`` was scanned and ``si.tex`` was exempt; that exemption is now lifted.
+
+    The deposit's deterministic ``record.tex`` (REQ-SA-206 / AC-B6) is NOT scanned: it is
+    the record/provenance and legitimately names ``capability:``/``docker:``/
+    ``environment:``. It lives OUTSIDE ``paper/`` (only ``_PAPER_DOCS`` under ``paper/``
+    are scanned), so the exemption holds BY CONSTRUCTION -- the boundary cannot invert.
+
+    Returns the distinct forbidden terms found across the submission documents (empty =
+    clean / no submission docs), via the pure
     :func:`sci_adk.render.paper.check_paper_tool_vocabulary`.
     """
-    draft = run_dir / "paper" / "draft.tex"
-    if not draft.is_file():
-        return []
-    return check_paper_tool_vocabulary(draft.read_text(encoding="utf-8"))
+    paper_dir = run_dir / "paper"
+    leaks: List[str] = []
+    for name in _PAPER_DOCS:
+        doc = paper_dir / name
+        if doc.is_file():
+            for term in check_paper_tool_vocabulary(doc.read_text(encoding="utf-8")):
+                if term not in leaks:
+                    leaks.append(term)
+    return leaks
 
 
 # -- F1 publishing-requirements gate (design §1.3) ---------------------------
@@ -1190,9 +1245,12 @@ def _check_package_requirements(
         problems.extend(bib_latex_safety_problems(bib))
         warnings.extend(unpublished_citation_warnings(main_tex, bib))
 
-    # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. The package's si.tex is the
-    #    record dump, but the design §3 table gates BOTH main.tex AND si.tex tool-agnostic (the
-    #    merged manuscript reads as science end to end) -- REUSE the per-run paper checker.
+    # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. SPEC-SI-AUTHORING-001 M5
+    #    (REQ-SA-507): the package si.tex is now AUTHORED belief (a sibling of main.tex), so the
+    #    gate legitimately polices BOTH manuscript documents tool-agnostic (the merged submission
+    #    reads as science end to end) -- REUSE the per-run paper checker. The deterministic record
+    #    relocated OUT of this dir to 06_provenance/record.tex and is EXEMPT BY CONSTRUCTION (the
+    #    gate reads only 01_manuscript/), so it may legitimately name provenance.
     for name, tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
         leaks = check_paper_tool_vocabulary(tex) if tex else []
         if leaks:
@@ -1265,6 +1323,18 @@ def _check_package_requirements(
             readme_submission_readiness_problems(readme.read_text(encoding="utf-8"))
         )
     # (a missing README.md is already reported by layout_problems; do not double-report)
+
+    # 9. Deposit-completeness (SPEC-SI-AUTHORING-001 M5, Pillar E / REQ-SA-508): REUSE the M2
+    #    `deposit_completeness_problems` checker, pointed at the package record path via the
+    #    single source `package_record_path` (symmetric to per-run `deposit_record_path`, never
+    #    a hard-coded path). It confirms the package carries (a) the relocated record artifact
+    #    `06_provenance/record.tex` AND (b) a "Data & code availability" statement IN THAT RECORD
+    #    BODY (REQ-SA-506a, the authoritative source -- NOT the README). PURE, presence-only, no
+    #    LLM (REQ-SA-511); reports ONE problem at a time (record-missing first, REQ-SA-509).
+    #    F3 (INTENDED asymmetry): UNLIKE per-run M2 (a separate non-gating channel), this APPENDS
+    #    to the package `problems`, so the package path's `clean = not problems` / `passed = clean`
+    #    makes it a HARD gate -- a package is the final submission unit (REQ-SA-510).
+    problems.extend(deposit_completeness_problems(package_record_path(package_dir)))
 
     return problems, warnings, runs, runs_reproduced
 

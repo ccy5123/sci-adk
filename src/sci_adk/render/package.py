@@ -56,7 +56,8 @@ from sci_adk.render.pkgreqs_checks import PACKAGE_FOLDERS
 
 # The builders shipped under templates/research-workspace/package/04_scripts/. The assembler
 # copies them into the package's 04_scripts/ (so the package is self-regenerating) AND runs
-# them in-process to populate 02_data + 06_provenance + 01_manuscript/si.tex.
+# them in-process to populate 02_data + 06_provenance (the run index + claims tables and the
+# relocated deterministic record artifact 06_provenance/record.tex -- SPEC-SI-AUTHORING-001 M5).
 _BUILDER_NAMES: tuple[str, ...] = (
     "build_record_index.py",
     "make_si.py",
@@ -82,8 +83,11 @@ class PackageAssembly:
         main_tex_authored: True iff an author-supplied ``main.tex`` was preserved; False iff
             the deterministic record-derived skeleton was emitted (the Wave-2 writer replaces
             it). Surfaced so the caller can report that the manuscript is a skeleton.
+        si_tex_authored: True iff an author-supplied ``si.tex`` was preserved (M5,
+            REQ-SA-501); False iff none was supplied (a thin/absent authored package SI is
+            valid -- the deterministic record dump is NEVER the ``si.tex`` fallback, REQ-SA-502).
         builder_outputs: file -> one-line note, the artifacts the builders produced
-            (claims_all.csv, run_index.csv, si.tex).
+            (claims_all.csv, run_index.csv, the relocated 06_provenance/record.tex).
         notes: free-form notes (e.g. a run with no per-run paper figures).
     """
 
@@ -91,6 +95,7 @@ class PackageAssembly:
     runs: List[str]
     folders_created: List[str]
     main_tex_authored: bool
+    si_tex_authored: bool = False
     builder_outputs: Dict[str, str] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
 
@@ -159,11 +164,14 @@ def assemble_package(
       3. Copy the field-agnostic builders into ``04_scripts/`` and co-locate each run's
          official scripts/figures (``runs/<id>/artifacts`` + ``runs/<id>/paper/figures``).
       4. Run the builders in-process to populate ``02_data/claims_all.csv``,
-         ``06_provenance/run_index.csv``, and ``01_manuscript/si.tex`` from the frozen record.
+         ``06_provenance/run_index.csv``, and the deterministic record artifact
+         ``06_provenance/record.tex`` from the frozen record (M5 relocation, REQ-SA-505).
       5. Co-locate the merged manuscript: preserve an author-supplied ``main.tex`` /
-         ``references.bib`` if present; else emit a DETERMINISTIC, tool-agnostic skeleton from
-         the recorded hypothesis statements (the authorial manuscript is the Wave-2 writer's
-         job). Write per-run verify logs into ``06_provenance/``.
+         ``si.tex`` / ``references.bib`` if present; else emit a DETERMINISTIC, tool-agnostic
+         ``main.tex`` skeleton from the recorded hypothesis statements (the authorial manuscript
+         is the Wave-2 writer's job). The authored ``si.tex`` is the package's AUTHORED belief
+         SI (M5, REQ-SA-501/502) -- the record dump is NEVER its fallback. Write per-run verify
+         logs into ``06_provenance/``.
       6. Write ``MANIFEST.md`` + ``README.md`` (with the submission-readiness self-assessment).
 
     Args:
@@ -202,7 +210,9 @@ def assemble_package(
 
     # (5) Merged manuscript: preserve an author-supplied main.tex/references.bib, else emit a
     # deterministic record-derived skeleton (tool-agnostic, names the science).
-    main_tex_authored = _ensure_manuscript(workspace_dir, manuscript_dir, runs, pkgreqs)
+    main_tex_authored, si_tex_authored = _ensure_manuscript(
+        workspace_dir, manuscript_dir, runs, pkgreqs
+    )
     _write_verify_logs(workspace_dir, package_dir, runs)
     _write_inputs_readme(package_dir)
 
@@ -217,6 +227,7 @@ def assemble_package(
         runs=runs,
         folders_created=list(PACKAGE_FOLDERS),
         main_tex_authored=main_tex_authored,
+        si_tex_authored=si_tex_authored,
         builder_outputs=builder_outputs,
         notes=notes,
     )
@@ -272,12 +283,14 @@ def _copytree_idempotent(src: Path, dest: Path) -> None:
 # -- (4) run the record-driven builders --------------------------------------
 
 def _run_builders(workspace_dir: Path, package_dir: Path) -> Dict[str, str]:
-    """Run the builders IN-PROCESS to populate the record-derived tables + the SI.
+    """Run the builders IN-PROCESS to populate the record-derived tables + the record artifact.
 
     Imports the two generating builders as modules from the package's own ``04_scripts/`` (the
     copies just laid down) and calls their entry points with the workspace resolved -- no
-    subprocess, deterministic. ``check_package.py`` is the reviewer self-check (run by the
-    gate, not here). Returns file -> note for the produced artifacts.
+    subprocess, deterministic. ``make_si.py`` writes the deterministic RECORD artifact to
+    ``06_provenance/record.tex`` (M5 relocation, REQ-SA-505), NOT the manuscript SI slot.
+    ``check_package.py`` is the reviewer self-check (run by the gate, not here). Returns
+    file -> note for the produced artifacts.
     """
     import sys
 
@@ -295,13 +308,15 @@ def _run_builders(workspace_dir: Path, package_dir: Path) -> Dict[str, str]:
     outputs["02_data/claims_all.csv"] = "per-Claim traceability (record-derived)"
     outputs["06_provenance/run_index.csv"] = "per-run verdicts + digest (record-derived)"
 
-    # make_si.py -> 01_manuscript/si.tex.
+    # make_si.py -> 06_provenance/record.tex (SPEC-SI-AUTHORING-001 M5, REQ-SA-505): the
+    # deterministic dump is the package RECORD and relocates to the provenance floor, freeing
+    # 01_manuscript/si.tex for the authored package SI.
     _run_builder_module(
         scripts_dir / "make_si.py",
         "sci_adk_pkg_make_si",
         lambda mod: mod.build(),
     )
-    outputs["01_manuscript/si.tex"] = "Supporting Information record dump (record-derived)"
+    outputs["06_provenance/record.tex"] = "deterministic record dump (record-derived)"
 
     # The dynamically-imported builder modules are throwaway; drop them so a re-run re-imports
     # fresh against the current package paths (the modules close over PKG/WS at import time).
@@ -387,23 +402,30 @@ def _ensure_manuscript(
     manuscript_dir: Path,
     runs: List[str],
     pkgreqs: Optional[PackageReqs],
-) -> bool:
-    """Preserve an author-supplied manuscript, else emit a deterministic skeleton.
+) -> tuple[bool, bool]:
+    """Preserve author-supplied ``main.tex``/``si.tex``, else emit deterministic skeletons.
 
-    Source of an author manuscript: ``<ws>/package_src/{main.tex,references.bib}`` (the
+    Source of an author manuscript: ``<ws>/package_src/{main.tex,si.tex,references.bib}`` (the
     Wave-2 writer's drop point -- OUTSIDE ``package/`` so a rebuild does not erase it). When a
     ``main.tex`` is present there it is copied verbatim (author owns the prose); otherwise the
     assembler writes a record-derived, tool-agnostic skeleton naming the recorded hypotheses.
-    A ``references.bib`` is copied from the author source if present, else a minimal empty bib
-    is written so the manuscript's ``\\bibliography{references}`` resolves.
 
-    Returns True iff an author ``main.tex`` was preserved.
+    SPEC-SI-AUTHORING-001 M5 (REQ-SA-501/502): the package ``si.tex`` is AUTHORED belief --
+    SYMMETRIC to ``main.tex``. An author-supplied ``package_src/si.tex`` is copied verbatim;
+    when none is supplied a DETERMINISTIC, tool-agnostic authored-SI skeleton is emitted (NEVER
+    the record dump -- that relocated to ``06_provenance/record.tex``). A ``references.bib`` is
+    copied from the author source if present, else a minimal empty bib is written so the
+    manuscript's ``\\bibliography{references}`` resolves.
+
+    Returns ``(main_tex_authored, si_tex_authored)``.
     """
     author_src = workspace_dir / "package_src"
     author_main = author_src / _MAIN_TEX
+    author_si = author_src / _SI_TEX
     author_bib = author_src / _REFERENCES_BIB
 
     main_dest = manuscript_dir / _MAIN_TEX
+    si_dest = manuscript_dir / _SI_TEX
     bib_dest = manuscript_dir / _REFERENCES_BIB
 
     if author_bib.is_file():
@@ -416,13 +438,48 @@ def _ensure_manuscript(
 
     if author_main.is_file():
         shutil.copyfile(author_main, main_dest)
-        return True
+        main_authored = True
+    else:
+        main_dest.write_text(
+            _skeleton_main_tex(workspace_dir, manuscript_dir.parent, runs, pkgreqs),
+            encoding="utf-8",
+        )
+        main_authored = False
 
-    main_dest.write_text(
-        _skeleton_main_tex(workspace_dir, manuscript_dir.parent, runs, pkgreqs),
-        encoding="utf-8",
+    if author_si.is_file():
+        shutil.copyfile(author_si, si_dest)
+        si_authored = True
+    else:
+        si_dest.write_text(_skeleton_si_tex(), encoding="utf-8")
+        si_authored = False
+
+    return main_authored, si_authored
+
+
+def _skeleton_si_tex() -> str:
+    """A DETERMINISTIC, tool-agnostic AUTHORED-SI skeleton (M5, REQ-SA-502).
+
+    The package ``si.tex`` is authored belief (the overflow of ``main.tex``), NOT the record
+    dump (which relocated to ``06_provenance/record.tex``). When no author SI is supplied, this
+    thin, gate-checkable skeleton occupies the slot: it names the science, asserts no value
+    (no ``\\evval``), references no toolchain, and the Wave-2 writer replaces it. It is the
+    package analogue of the per-run authored-SI default skeleton (a thin/absent SI is valid).
+    """
+    return (
+        r"\documentclass{article}"
+        "\n" r"\usepackage[margin=1in]{geometry}"
+        "\n" r"\usepackage{amsmath}"
+        "\n" r"\usepackage{graphicx}"
+        "\n" r"\title{Supplementary Information (skeleton)}"
+        "\n" r"\author{~}\date{}"
+        "\n" r"\begin{document}\maketitle"
+        "\n" r"\section{Supplementary notes}"
+        "\n" "% (skeleton) author the supplementary material as the overflow of the main "
+        "manuscript;\n% the deterministic record is the package's record artifact "
+        "(06_provenance/record.tex),\n% not this authored Supplementary Information."
+        "\n" r"\end{document}"
+        "\n"
     )
-    return False
 
 
 def _skeleton_main_tex(
@@ -719,7 +776,7 @@ def _write_readme(
     lines.append("| `03_figures/` | per-run communication figures + generators |")
     lines.append("| `04_scripts/` | the field-agnostic package builders + each run's official scripts |")
     lines.append("| `05_inputs/` | copyright-respecting pointers to inputs |")
-    lines.append("| `06_provenance/` | `run_index.csv`, per-run verify logs |")
+    lines.append("| `06_provenance/` | `run_index.csv`, per-run verify logs, `record.tex` (deterministic record) |")
     lines.append("")
     lines.append("## Reproduce")
     lines.append("")
@@ -728,7 +785,7 @@ def _write_readme(
     lines.append("```")
     lines.append("for d in runs/*/; do sci-adk verify \"$d\"; done   # every run -> reproduced")
     lines.append("python3 package/04_scripts/build_record_index.py    # -> run_index.csv, claims_all.csv")
-    lines.append("python3 package/04_scripts/make_si.py               # -> 01_manuscript/si.tex")
+    lines.append("python3 package/04_scripts/make_si.py               # -> 06_provenance/record.tex")
     lines.append("python3 package/04_scripts/check_package.py         # ref/label + cites + tool-vocab -> PASS")
     lines.append("```")
     lines.append("")

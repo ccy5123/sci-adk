@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Assemble the package Supporting Information (01_manuscript/si.tex) from the frozen record.
+"""Assemble the package's deterministic RECORD artifact (06_provenance/record.tex).
 
 Field-agnostic: every run, hypothesis, status, recorded point statistic and pre-registered
 comparison/threshold, and the record digest (via a read-only audit) are pulled straight from
 ``runs/<id>/`` -- NOTHING about the science is hardcoded. The run list is DISCOVERED from
 ``runs/`` (sorted by id), so the same script serves any workspace and any field.
 
-No new belief: the SI is the deterministic record dump; it asserts no value the record does
-not already hold. Prose names the science, not the toolchain.
+No new belief: this is the deterministic record dump; it asserts no value the record does not
+already hold. SPEC-SI-AUTHORING-001 M5 (REQ-SA-505/506): the dump is the package RECORD and is
+written to ``06_provenance/record.tex`` (the provenance floor, symmetric to the per-run
+``runs/<id>/record.tex``), NOT to ``01_manuscript/si.tex`` -- that slot is now the AUTHORED
+package SI (a sibling of the authored ``main.tex``). The record is presented as the record/
+provenance, not as a "Supporting Information" sibling of the manuscript. Because it lives outside
+the scanned ``01_manuscript/`` dir it is EXEMPT from the package tool-vocab gate BY CONSTRUCTION
+(REQ-SA-507), so it may legitimately name provenance (capability/docker/environment).
 
 Narrative grouping (optional): if ``package/narrative.json`` is present, it supplies
 author-controlled metadata that groups the runs into the paper's narrative -- a JSON object::
@@ -29,7 +35,7 @@ replacement for any hardcoded cycle map.
 
 Self-contained: paths are resolved from this file's location
 (package/04_scripts/make_si.py -> workspace root), so ``python3 04_scripts/make_si.py`` run
-from the package regenerates 01_manuscript/si.tex against the workspace record.
+from the package regenerates 06_provenance/record.tex against the workspace record.
 """
 import glob
 import json
@@ -40,7 +46,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))   # package/04_scripts
 PKG = os.path.dirname(HERE)                          # package
 WS = os.path.dirname(PKG)                            # workspace root
 RUNS = os.path.join(WS, "runs")
-OUT = os.path.join(PKG, "01_manuscript", "si.tex")
+# SPEC-SI-AUTHORING-001 M5 (REQ-SA-505): the record artifact relocates to the provenance floor.
+OUT = os.path.join(PKG, "06_provenance", "record.tex")
 NARRATIVE = os.path.join(PKG, "narrative.json")
 
 BASIS = re.compile(r"'point'=([-\d.eE]+)\s*(<=|>=|<|>|==)\s*([-\d.eE]+)")
@@ -150,8 +157,8 @@ def build():
         claim_blocks[rid] = cs
         total_claims += len(cs)
 
-    title = narrative.get("title") or r"Supporting Information"
-    author = narrative.get("author") or r"~"
+    title = narrative.get("title") or r"Deterministic record"
+    author = narrative.get("author") or r"sci-adk (deterministic record dump)"
 
     L = []
     L.append(r"\documentclass[10pt]{article}")
@@ -162,10 +169,12 @@ def build():
     L.append(r"\author{" + esc(author) + r"}\date{}")
     L.append(r"\begin{document}\maketitle")
     L.append(r"\section{Overview}")
-    # The SI prose names the SCIENCE, not the toolchain (the package gate checks si.tex
-    # tool-agnostic too): "outcome" not "verdict", "deterministic archive" not "append-only".
+    # M5 (REQ-SA-506): this is the package RECORD, presented as the record/provenance -- not as
+    # a "Supporting Information" sibling of the manuscript (that slot is the authored si.tex).
+    # The record lives in 06_provenance/ and is EXEMPT from the tool-vocab gate by construction
+    # (REQ-SA-507), but the prose still reads as the science.
     L.append(
-        r"This Supporting Information is the deterministic archive behind the main paper. "
+        r"This is the deterministic record behind the main paper. "
         r"Each run fixed a pre-registered protocol (its hypotheses and the acceptance "
         r"criterion for each) in advance, ran a deterministic analysis that recorded its "
         r"result (null and negative results included), and reached a per-hypothesis outcome "
@@ -226,6 +235,21 @@ def build():
         r"(\texttt{06\_provenance/run\_index.csv}); see the package \texttt{README.md} for "
         r"one-line reproduction of the whole record."
     )
+
+    # M5 (REQ-SA-506a, F2): the "Data & code availability" statement lives in the RECORD body --
+    # the AUTHORITATIVE source the deposit-completeness check reads (NOT the README). It is
+    # record prose (names where the data/code are deposited); it asserts no measured value (no
+    # \evval), so it is number-audit-clean and inside the exempt record artifact (REQ-SA-507).
+    L.append(r"\section{Data \& code availability}")
+    L.append(
+        r"The data and code behind every recorded result are deposited in this package: the "
+        r"per-run inputs, official scripts, and figures are in \texttt{04\_scripts/} and "
+        r"\texttt{03\_figures/}; the master per-Claim table is "
+        r"\texttt{02\_data/claims\_all.csv}; and the full read-only reproduction trail "
+        r"(per-run digests and audit logs) is in \texttt{06\_provenance/}. Deposit this "
+        r"package to a public archive and cite its identifier for permanent availability."
+    )
+
     L.append(r"\end{document}")
 
     text = "\n".join(L) + "\n"

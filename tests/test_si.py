@@ -203,10 +203,15 @@ class TestStandaloneDocument:
         # The preamble must be present so it compiles alone.
         assert r"\usepackage[utf8]{inputenc}" in si
 
-    def test_title_is_supporting_information_plus_spec_title(self):
+    def test_title_reads_as_the_record_not_supporting_information(self):
+        # SPEC-SI-AUTHORING-001 REQ-SA-203 (AC-B3): the renderer's identity wording is
+        # re-named from "Supporting Information" to the RECORD -- the artifact is the
+        # deposit's record, not an SI sibling of the paper.
         spec, claims, evidence = _basic_record()
         si = render_si_latex(spec, claims, evidence)
-        assert "Supporting Information" in si
+        assert "Supporting Information" not in si
+        # The spec id still anchors the title (the record-of-record identity).
+        assert spec.id in si
 
     def test_self_contained_no_external_file_ref(self):
         """``si.tex`` uploads alone: no \\includegraphics / \\input / external file

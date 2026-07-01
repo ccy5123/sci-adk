@@ -392,13 +392,16 @@ def test_verify_no_paper_is_consistent(tmp_path):
 
 
 def test_verify_seeded_skeletal_paper_is_consistent(tmp_path):
-    # The real compiler-rendered draft.tex + si.tex (no figures, no broken refs) MUST be
-    # internally consistent -- the gate does not false-fail on a clean skeleton.
+    # The real compiler-rendered draft.tex (no figures, no broken refs) MUST be internally
+    # consistent -- the gate does not false-fail on a clean skeleton. SPEC-SI-AUTHORING-001
+    # M1: the compiler no longer emits paper/si.tex (the dump moved to the deposit
+    # record.tex; the si.tex slot is freed for the authored overflow path, M3), so only
+    # draft.tex is present here.
     spec = _numeric_spec("v-skeleton", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))  # compiler writes paper/
     _freeze_minimal_pubreqs(run_dir)  # M1: a draft.tex is conclusion-bearing -> needs a contract
     report = verify_run(run_dir)
-    assert set(report.paper_consistency) == {"draft.tex", "si.tex"}
+    assert set(report.paper_consistency) == {"draft.tex"}
     assert report.paper_consistent is True
     assert report.passed is True
 
@@ -549,23 +552,86 @@ def test_verify_tool_vocabulary_leak_in_paper_fails_gate(tmp_path):
     assert report.passed is False
 
 
-def test_verify_tool_vocabulary_in_si_is_exempt(tmp_path):
-    # The SI is the record dump and legitimately uses sci-adk vocabulary -- it is NOT
-    # gated. A clean draft.tex + a vocabulary-rich si.tex still passes the tool gate.
-    spec = _numeric_spec("v-si-exempt", value=0.9)
+# SPEC-SI-AUTHORING-001 REQ-SA-204 (AC-B4) INVERTS the prior si.tex exemption: under the
+# authoring flow si.tex is a SUBMISSION belief document, so the per-run tool-vocab gate is
+# EXTENDED to scan it. This test documents the GREEN behavior (previously si.tex was exempt).
+def test_verify_tool_vocabulary_in_si_now_flags(tmp_path):
+    # AC-B4 GREEN: the authored si.tex is a submission document -> the per-run tool-vocab
+    # gate scans it. A vocabulary-rich si.tex now FAILS the tool gate (was exempt before
+    # SPEC-SI-AUTHORING-001).
+    spec = _numeric_spec("v-si-scanned", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
     # M1: a draft.tex is conclusion-bearing -> needs a frozen contract AND every quantitative
-    # token must trace to the record. This test targets the SI tool-vocab exemption, so the
-    # draft prose carries no unbacked literal (the point estimate 0.95 IS recorded).
+    # token must trace to the record. The draft prose carries no unbacked literal (0.95 IS
+    # recorded) and no tool vocabulary; the LEAK is in si.tex.
     _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The point estimate is 0.95.")
     _write_paper(run_dir, "si.tex",
                  r"\label{tab:s1} Table~\ref{tab:s1}. The append-only Evidence record; "
-                 r"frozen Spec; engine-derived verdicts; result.point.")
+                 r"frozen Spec; engine-derived verdicts.")
     _freeze_minimal_pubreqs(run_dir)
     report = verify_run(run_dir)
-    assert report.paper_tool_clean is True   # the SI's vocabulary is exempt
-    assert report.paper_tool_vocab == []
-    assert report.passed is True
+    assert report.paper_tool_clean is False   # the SI is now scanned as a submission doc
+    assert "frozen spec" in report.paper_tool_vocab
+    assert "verdicts" in report.paper_tool_vocab
+    assert report.passed is False
+
+
+def test_verify_tool_vocab_extension_to_si_is_observable(tmp_path):
+    # AC-B4 (REQ-SA-204): the RED->GREEN transition made OBSERVABLE on the per-run gate.
+    # The SAME si.tex with a forbidden tool noun is the input to the per-run tool-vocab
+    # checker directly: the pre-change checker (draft.tex only) does NOT flag it; the
+    # post-change checker DOES. We assert the post-change behavior at the seam
+    # (_check_paper_tool_vocab), and demonstrate the prior gap by scanning draft.tex alone.
+    from sci_adk.loop.verify import _check_paper_tool_vocab
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    spec = _numeric_spec("v-si-transition", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    # A clean draft.tex (no tool vocabulary) but a leaking si.tex.
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The point estimate is 0.95.")
+    _write_paper(run_dir, "si.tex",
+                 r"\label{tab:s1} frozen Spec; engine-derived verdicts.")
+
+    # RED (documents the closed gap): scanning ONLY draft.tex does not see the si.tex leak.
+    draft_only = check_paper_tool_vocabulary(
+        (run_dir / "paper" / "draft.tex").read_text(encoding="utf-8")
+    )
+    assert "frozen spec" not in draft_only
+    assert "verdicts" not in draft_only
+
+    # GREEN: the EXTENDED per-run gate scans si.tex too -> the leak is now flagged.
+    flagged = _check_paper_tool_vocab(run_dir)
+    assert "frozen spec" in flagged
+    assert "verdicts" in flagged
+
+
+def test_verify_record_tex_is_exempt_while_si_tex_flags(tmp_path):
+    # AC-B6 (REQ-SA-206) -- the boundary-inversion guard (R5): the SAME tool-vocabulary
+    # token FLAGS in si.tex (submission) but PASSES in record.tex (the exempt deposit
+    # record). record.tex legitimately names capability:/docker:/environment: provenance.
+    spec = _numeric_spec("v-record-exempt", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+
+    leak = (r"frozen Spec; engine-derived verdicts; "
+            r"capability:python; docker:run; environment:base.")
+
+    # Case 1: the leak lives in record.tex (the deposit record) -> NOT flagged (exempt).
+    # The compiler already wrote the real record.tex; overwrite it with the leak text to
+    # prove the per-run tool-vocab gate never scans the deposit record artifact.
+    from sci_adk.loop.compiler import deposit_record_path
+    deposit_record_path(run_dir).write_text(leak, encoding="utf-8")
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The point estimate is 0.95.")
+    _freeze_minimal_pubreqs(run_dir)
+    report_exempt = verify_run(run_dir)
+    assert report_exempt.paper_tool_clean is True   # record.tex is exempt
+    assert report_exempt.paper_tool_vocab == []
+
+    # Case 2: the SAME token in si.tex (submission) -> FLAGGED (the boundary, not inverted).
+    _write_paper(run_dir, "si.tex", r"\label{tab:s1} " + leak)
+    report_flagged = verify_run(run_dir)
+    assert report_flagged.paper_tool_clean is False
+    assert "frozen spec" in report_flagged.paper_tool_vocab
+    assert "verdicts" in report_flagged.paper_tool_vocab
 
 
 def test_verify_paper_check_is_read_only(tmp_path):

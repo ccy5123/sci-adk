@@ -127,7 +127,10 @@ def test_operational_layer_install_then_verb_chain_to_passing_verify(tmp_path):
     # render: compile the paper artifacts from the recorded spec/evidence/claims.
     assert main(["render", str(run_dir)]) == 0
     assert (run_dir / "paper" / "draft.tex").exists()
-    assert (run_dir / "paper" / "si.tex").exists()
+    # SPEC-SI-AUTHORING-001 M1: the deterministic dump is the deposit record.tex (the
+    # paper/si.tex slot is freed for the authored overflow path).
+    from sci_adk.loop.compiler import deposit_record_path
+    assert deposit_record_path(run_dir).exists()
 
     # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): a rendered draft.tex is a
     # conclusion-bearing artifact, so freezing a publishing contract is now a completion step

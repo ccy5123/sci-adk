@@ -103,8 +103,10 @@ def test_compile_with_experiment_produces_claims_and_checkpoints(tmp_path):
     assert r"\section{Pending agent judgments}" in paper
     assert r"\section{Evidence}" not in paper
     assert r"\section{Hypotheses and findings}" not in paper
-    assert result.si_path is not None and result.si_path.exists()
-    si = result.si_path.read_text(encoding="utf-8")
+    # SPEC-SI-AUTHORING-001 M1: the deterministic dump is relocated to the deposit
+    # record.tex (result.record_path); the paper/si.tex slot is freed.
+    assert result.record_path is not None and result.record_path.exists()
+    si = result.record_path.read_text(encoding="utf-8")
     assert r"\section{Evidence record}" in si
 
 
@@ -130,10 +132,10 @@ def test_compile_without_experiment_still_emits_spec_and_draft(tmp_path):
 def test_si_records_status_when_claims_exist(tmp_path):
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-status", experiment=_fake_experiment)
-    # qualitative + no judge -> PROPOSED (inconclusive), recorded in the SI (the record),
-    # not the belief-narrative paper.
-    assert result.si_path is not None
-    si = result.si_path.read_text(encoding="utf-8")
+    # qualitative + no judge -> PROPOSED (inconclusive), recorded in the deposit record
+    # (result.record_path, SPEC-SI-AUTHORING-001 M1), not the belief-narrative paper.
+    assert result.record_path is not None
+    si = result.record_path.read_text(encoding="utf-8")
     assert "Status: proposed" in si
 
 
@@ -221,15 +223,21 @@ def _f3_evidence(spec_id: str, eid: str, code_ref):
 
 
 def _render_with_evidence(tmp_path, spec, evidence):
-    """init-spec (lay down the run dir) then stage_render with in-memory evidence."""
+    """init-spec (lay down the run dir) then stage_render with in-memory evidence.
+
+    SPEC-SI-AUTHORING-001 M4: stage_render now returns
+    ``(paper_path, si_path, record_path, figure_consistency)``. The F3 reproduction-bundle
+    content lives in the DETERMINISTIC record dump, which M1 relocated to the deposit
+    ``record.tex`` -- so these tests read ``record_path`` (the dump), not the authored
+    ``si_path`` (which is None here: no AuthoredSI is supplied)."""
     compiler = ResearchCompiler(workspace_dir=tmp_path)
     compiler.stage_init_spec(spec=spec)
-    # derive claims from the same evidence so the SI/paper are well-formed.
+    # derive claims from the same evidence so the record dump/paper are well-formed.
     claims, *_ = compiler.stage_derive_claim(spec, evidence=evidence)
-    paper_path, si_path, _fc = compiler.stage_render(
+    paper_path, _si_path, record_path, _fc = compiler.stage_render(
         spec, evidence=evidence, claims=claims
     )
-    return compiler, paper_path, si_path
+    return compiler, paper_path, record_path
 
 
 def test_f3_no_code_ref_paper_dir_byte_identical(tmp_path):
@@ -297,13 +305,14 @@ def test_f3_resolvable_script_inlined_colocated_and_driven(tmp_path):
 
     evidence = [_f3_evidence(spec.id, "ev-1", script_rel)]
     claims, *_ = compiler.stage_derive_claim(spec, evidence=evidence)
-    paper_path, si_path, _fc = compiler.stage_render(
+    # M4: 4-tuple; the F3 reproduction content lives in the deposit record dump (record_path).
+    paper_path, _si_path, record_path, _fc = compiler.stage_render(
         spec, evidence=evidence, claims=claims
     )
     paper_dir = paper_path.parent
 
-    # SI: inlined body + listings package.
-    si = si_path.read_text(encoding="utf-8")
+    # Record dump: inlined body + listings package.
+    si = record_path.read_text(encoding="utf-8")
     assert r"\section{Reproduction code}" in si
     assert r"\usepackage{listings}" in si
     assert r"\begin{lstlisting}" in si

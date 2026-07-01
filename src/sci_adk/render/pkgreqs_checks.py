@@ -64,6 +64,25 @@ PACKAGE_FOLDERS: tuple[str, ...] = (
 # The two root index files every package must carry (design §2 [2]).
 _ROOT_FILES: tuple[str, ...] = ("MANIFEST.md", "README.md")
 
+# SPEC-SI-AUTHORING-001 M5 (REQ-SA-505): the package's deterministic record artifact relocates
+# OUT of 01_manuscript/si.tex into the provenance floor as 06_provenance/record.tex -- symmetric
+# to the per-run runs/<id>/record.tex. This is the SINGLE SOURCE both the assembler (make_si.py's
+# OUT, wired via package.py) and the package deposit-completeness check (REQ-SA-508) reference,
+# so the package record/belief boundary cannot drift. It also makes the record EXEMPT from the
+# package tool-vocab gate BY CONSTRUCTION (the gate reads only 01_manuscript/, REQ-SA-507).
+PACKAGE_RECORD_NAME: str = "record.tex"
+_PACKAGE_RECORD_FOLDER: str = "06_provenance"
+
+
+def package_record_path(package_dir: Path) -> Path:
+    """The package's relocated deterministic record artifact (``06_provenance/record.tex``).
+
+    The package analogue of :func:`sci_adk.loop.compiler.deposit_record_path` (REQ-SA-505/508):
+    one source of truth for the relocation target that both the assembler writes and the package
+    deposit-completeness check reads, so the package record/belief boundary cannot drift.
+    """
+    return package_dir / _PACKAGE_RECORD_FOLDER / PACKAGE_RECORD_NAME
+
 
 def layout_problems(package_dir: Path) -> List[str]:
     """Every missing canonical folder / root file (design §3 layout).
@@ -459,8 +478,61 @@ def readme_submission_readiness_problems(readme: str) -> List[str]:
     ]
 
 
+# -- Deposit-completeness (SPEC-SI-AUTHORING-001 M2, Pillar C) ----------------
+
+# The "Data & code availability" statement marker (design §5 / spec REQ-SA-301). Matched
+# tolerantly (case-insensitive, "and"-or-"&", any whitespace) so a hand-authored variant in
+# the deposit's record text still counts -- the SAME presence-only spirit as
+# ``_SUBMISSION_READINESS_RE`` above. Presence-only: it confirms the statement EXISTS, never
+# that it is correct (record vs belief -- this gate does not judge belief content).
+#
+# KEEP IN SYNC with the authoritative producers of the statement (REQ-SA-506a): the package
+# record renderer emits `\section{Data \& code availability}` (make_si.py), and the per-run
+# record renderer's availability prose likewise carries this header. This pattern MUST keep
+# matching those header strings -- changing a producer's wording without widening this regex
+# would silently break the deposit-completeness gate.
+_DATA_AVAILABILITY_RE = re.compile(
+    r"data\s*(?:&|\\&|and)\s*code\s*availability", re.IGNORECASE
+)
+
+
+def deposit_completeness_problems(record_path: Path) -> List[str]:
+    """Problem lines iff the deposit lacks the record artifact and/or its availability stmt.
+
+    PURE + deterministic + presence-only, modeled on
+    :func:`readme_submission_readiness_problems` (REQ-SA-301/304). Returns ``[]`` when the
+    deposit carries BOTH (a) the retained record artifact at ``record_path`` AND (b) a
+    "Data & code availability" statement (detected by presence in the record artifact's
+    text), else one problem line per missing element (REQ-SA-302/303, named separately --
+    EC-5).
+
+    ``record_path`` is supplied already-resolved by the caller (``verify`` resolves it via
+    ``loop.compiler.deposit_record_path`` -- the M1 single source of truth, F4). This keeps
+    the checker on the render/kernel seam: ``render/`` imports ``sci_adk.core`` + sibling
+    render helpers ONLY, never ``loop/`` (which would cycle, since ``loop.compiler`` imports
+    ``render``). The checker reads the record file's TEXT, never an LLM, never the network --
+    same inputs -> same result.
+    """
+    if not record_path.is_file():
+        # AC-C2 / EC-5: the deposit's retained record artifact is absent -> name THAT element
+        # (one line). The availability statement lives IN the record artifact, so with no
+        # record there is nothing to carry it; naming the absent record is the single, honest
+        # missing element (EC-5's "vice versa" -- availability without record -- cannot arise).
+        return [
+            f"deposit: missing the retained record artifact ({record_path.name})"
+        ]
+    if not _DATA_AVAILABILITY_RE.search(record_path.read_text(encoding="utf-8")):
+        # AC-C3: the record artifact exists but states no availability statement -> name it.
+        return [
+            "deposit: missing a \"Data & code availability\" statement in the record artifact"
+        ]
+    return []
+
+
 __all__ = [
     "PACKAGE_FOLDERS",
+    "PACKAGE_RECORD_NAME",
+    "package_record_path",
     "layout_problems",
     "cited_keys",
     "bib_keys",
@@ -477,4 +549,5 @@ __all__ = [
     "body_word_range_problems",
     "figure_presence_problems",
     "readme_submission_readiness_problems",
+    "deposit_completeness_problems",
 ]
