@@ -1031,6 +1031,20 @@ def _check_paper_requirements(
         si_bib = si_bib_path.read_text(encoding="utf-8") if si_bib_path.is_file() else ""
         problems.extend(cite_resolution_problems(si_tex_path.read_text(encoding="utf-8"), si_bib))
 
+    # SPEC-SI-AUTHORING-001 M6 hardening: BOTH bib files must be brace-balanced (integrity). The
+    # cite gates prove citations RESOLVE; this fail-loud gate proves the .bib actually COMPILES
+    # -- a brace-unbalanced entry is a hard LaTeX error the cite gate misses (bib_keys reads
+    # only the first line). BOTH references.bib (main) AND references_SI.bib (SI) are validated
+    # (the user's "_SI도 따로 있기에 둘 다 검정" requirement), naming the offending file. A MISSING
+    # bib is NOT a failure (thin/absent SI, no-pool run stay clean, REQ-SA-606/615); only a
+    # PRESENT-but-malformed bib fails. REUSE the existing _braces_balanced helper (no new balancer).
+    for _bib_name in ("references.bib", "references_SI.bib"):
+        _bib_file = run_dir / "paper" / _bib_name
+        if _bib_file.is_file() and not _braces_balanced(
+            _bib_file.read_text(encoding="utf-8")
+        ):
+            problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
+
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
 
@@ -1270,6 +1284,18 @@ def _check_package_requirements(
         if si_bib_path.is_file():
             si_bib = si_bib_path.read_text(encoding="utf-8")
         problems.extend(cite_resolution_problems(si_tex, si_bib))
+
+    # SPEC-SI-AUTHORING-001 M6 hardening: BOTH package bib files must be brace-balanced. Symmetric
+    # to the per-run gate -- the cite gates prove citations RESOLVE, this fail-loud gate proves the
+    # .bib actually COMPILES (a brace-unbalanced entry is a hard LaTeX error the cite gate misses).
+    # BOTH 01_manuscript/references.bib (main) AND references_SI.bib (SI) are validated (둘 다 검정),
+    # naming the offending file; a MISSING bib is not a failure. REUSE _braces_balanced.
+    for _bib_name in ("references.bib", _REFERENCES_SI_BIB):
+        _bib_file = manuscript_dir / _bib_name
+        if _bib_file.is_file() and not _braces_balanced(
+            _bib_file.read_text(encoding="utf-8")
+        ):
+            problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
 
     # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. SPEC-SI-AUTHORING-001 M5
     #    (REQ-SA-507): the package si.tex is now AUTHORED belief (a sibling of main.tex), so the

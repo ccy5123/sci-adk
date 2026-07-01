@@ -126,26 +126,54 @@ def bib_keys(bib: str) -> List[str]:
     return sorted({k.strip() for k in _BIB_ENTRY_RE.findall(bib)})
 
 
+def _entry_close_index(bib: str, open_brace: int) -> int:
+    """The index just PAST the ``}`` that closes the entry opened at ``open_brace``.
+
+    ``open_brace`` is the index of the ``{`` after the entry type (``@article{`` here). Scans
+    forward tracking ``{`` / ``}`` nesting depth (depth 1 immediately after the entry-open
+    brace) and returns the index one past the matching close brace -- the TRUE end of the
+    entry, brace-depth aware. If the braces never balance (a malformed pool entry), returns
+    ``len(bib)`` (the entry runs to EOF -- fail-loud content is preserved for the integrity
+    gate to catch, never silently truncated). PURE.
+    """
+    depth = 1
+    i = open_brace + 1
+    n = len(bib)
+    while i < n and depth > 0:
+        ch = bib[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        i += 1
+    return i
+
+
 def bib_subset(bib: str, keep: Sequence[str]) -> str:
     """The ``bib`` entries whose key is in ``keep``, in source order (SI subset, M6).
 
-    PURE + deterministic, no ``bibtexparser`` -- a line-based slice using the SAME
-    ``_BIB_ENTRY_RE`` header regex the rest of this module uses. Splits ``bib`` on entry
-    headers (``@type{KEY,``), keeps a chunk iff its key is in ``keep``, and re-joins them in
-    their original order. Text before the first ``@entry`` (comments / preamble) is dropped
-    -- the result is the concatenation of the kept entries only, so ``bib_keys(bib_subset(
-    bib, keep)) == sorted(set(keep) & set(bib_keys(bib)))``. Used to build the cited-only
-    ``references_SI.bib`` from the run's ONE literature pool (REQ-SA-604/605): no LLM, no
-    network, a pure set filter over the already-acquired pool.
+    PURE + deterministic, no ``bibtexparser`` -- regex/line-based, house style (see
+    ``citation_keys.py``). For each entry header (``@type{KEY,``, via ``_BIB_ENTRY_RE``) whose
+    key is in ``keep``, the entry spans from its ``@`` to the TRUE matching close brace, found
+    by BRACE-DEPTH-AWARE scanning (:func:`_entry_close_index`) -- NOT the naive "next header =
+    entry end", which truncated an entry whose field value embeds a ``@word{...}``-shaped token
+    (e.g. ``note = {... @inbook{X, y} ...}``). Kept entries are re-joined in their original
+    order. Text before the first ``@entry`` (comments / preamble) is dropped -- the result is
+    the concatenation of the kept entries only, so ``bib_keys(bib_subset(bib, keep)) ==
+    sorted(set(keep) & set(bib_keys(bib)))``, and an empty result -> ``""``. Used to build the
+    cited-only ``references_SI.bib`` from the run's ONE literature pool (REQ-SA-604/605): no
+    LLM, no network, a pure set filter over the already-acquired pool.
     """
     wanted = set(keep)
-    matches = list(_BIB_ENTRY_RE.finditer(bib))
     kept: List[str] = []
-    for i, m in enumerate(matches):
+    for m in _BIB_ENTRY_RE.finditer(bib):
         key = m.group(1).strip()
         if key not in wanted:
             continue
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(bib)
+        # m spans "@type{KEY," -- the entry-open brace is the "{" the header matched. Locate it
+        # from the match start so the depth scan begins at the right brace.
+        open_brace = bib.index("{", m.start())
+        end = _entry_close_index(bib, open_brace)
         kept.append(bib[m.start() : end].rstrip())
     return ("\n".join(kept) + "\n") if kept else ""
 

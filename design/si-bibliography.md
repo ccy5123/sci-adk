@@ -176,9 +176,31 @@ change WHAT was decided.
   - No `zref-xr` / cross-document coupling (already dropped, design §6).
   - No domain/study specialization.
 
+## 6. Hardening (2026-07-01)
+
+Two robustness fixes to the M6 bib path, TDD (reproduction-first). Neither re-opens the four
+decisions; both harden their mechanism.
+
+- **Brace-depth-aware `bib_subset`.** The subset builder (`render/pkgreqs_checks.py`) used a
+  naive "next `@header` = entry end" slice, so a pool entry whose field value embeds a
+  `@word{...}`-shaped token (e.g. `note = {... @inbook{X, y} ...}`) was TRUNCATED at that fake
+  header — emitting a brace-unbalanced, field-losing entry (a lost `year = {...}`, an
+  unbalanced brace) while the cite gate falsely read clean (`bib_keys` reads only the first
+  line). Fixed by scanning `{`/`}` nesting depth from the entry-open brace to the TRUE matching
+  close (`_entry_close_index`), still regex/line-based, no `bibtexparser` (house style). Contract
+  preserved: `bib_keys(bib_subset(bib, keep)) == sorted(set(keep) & set(bib_keys(bib)))`, empty
+  → `""`. Real-world trigger is LOW (paperforge/doi.org minimal bib), but the gate blind-spot
+  was real.
+- **Dual-bib integrity gate.** `sci-adk verify` now validates the brace-balance of BOTH
+  `references.bib` (main) AND `references_SI.bib` (SI) — per-run (`paper/`) and package
+  (`01_manuscript/`) — reusing the existing `_braces_balanced` helper (the .tex compile-integrity
+  balancer). A PRESENT-but-brace-unbalanced bib FAILS, naming the file; a MISSING bib is not a
+  failure (thin/absent SI, no-pool run stay clean per REQ-SA-606/615). The user's requirement:
+  "references는 _SI도 따로 있기에 둘 다 검정해야함" — both bibs are validated, not just cite-resolution.
+
 ---
 
-Version: 1.1.0
+Version: 1.2.0
 Status: DECIDED (2026-07-01)
 History:
 - v1.0.0 (2026-07-01): the four confirmed decisions (cited-only subset, both paths, SI cite gate,
@@ -187,6 +209,10 @@ History:
   pass on SPEC M6 (D1 author-supplied-verbatim vs generated-skeleton bibliography ownership; D2
   cited keys read from the SI SOURCE before the final render, no circularity; D6 no-cite/no-pool →
   NO `references_SI.bib` file). The four decisions are UNCHANGED; §2a only pins their mechanism.
+- v1.2.0 (2026-07-01): §6 hardening — brace-depth-aware `bib_subset` (fixes truncation on an
+  embedded `@word{...}` token in a field value) + dual-bib brace-integrity verify gate over BOTH
+  `references.bib` and `references_SI.bib` (per-run + package). Mechanism hardening only; the four
+  decisions are UNCHANGED.
 Decomposed by: SPEC-SI-AUTHORING-001 M6 (REQ-SA-6xx), revised in SPEC v0.3.1.
 Extends: design/si-belief-record-split.md (v0.4, FROZEN — single source for the SI split)
 Related: design/paper-figures-and-si.md, design/paper-publishing-requirements.md,
