@@ -92,6 +92,19 @@ Record the search date with the decision. When a search surfaces URLs, return a
 `Sources:` list so the orchestrator can cite them — but the canonical record is the verb
 output, not the prose. Never record `found_nothing` for a search you did not actually run.
 
+### Acquisition halt (a searched DOI had no OA PDF)
+
+`prior-work --searched` and `novelty --searched` acquire the given DOIs. When a DOI
+has no downloadable Open-Access PDF, the acquirer HALTS: the verb prints
+`halt (human input needed):` + the missed DOI(s) to STDERR. The halt is SOFT — the
+exit code is still `0` and the decision is already recorded — so watch STDERR, not the
+exit code. Do NOT proceed silently: the orchestrator surfaces the missed-paper list to
+the user via `AskUserQuestion`, offering (a) provide the PDF now → `sci-adk
+add-literature` (the manual-ingest verb; the workspace CLAUDE.md
+"User-provided literature" rule owns the bibkey), or (b) skip this paper → record the
+miss as a null and continue. A missed acquisition is a recorded null, never a
+skipped-over gap.
+
 ### MCP fallback (do not let a missing MCP block the search)
 
 If the academic-search MCP is unavailable, detect it immediately and fall back to

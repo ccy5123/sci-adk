@@ -91,6 +91,17 @@ against the draft hypothesis text, as of a recorded search date:
 Record at this trigger moment (pre-registration), never retrofitted. Return a
 `Sources:` list of surfaced URLs.
 
+**Acquisition halt (some DOI had no OA PDF).** When `prior-work --searched` or
+`novelty --searched` prints `halt (human input needed):` on stderr (a searched DOI
+had no downloadable Open-Access PDF), the exit code is still `0` and the decision is
+already recorded — but do NOT silently proceed. The orchestrator surfaces the missed
+paper list to the user via `AskUserQuestion`, offering: (a) provide the PDF now → the
+manual-ingest path (`sci-adk add-literature`, see the workspace CLAUDE.md
+"User-provided literature" rule for the verb + bibkey ownership), or (b) skip this
+paper → record the miss as a null and continue. This is how the kernel's
+`AcquisitionHalt` reliably reaches the human instead of depending on the agent
+noticing stderr.
+
 **Pass 2 — freeze (manager-prereg, 2nd call).** Review the literature evidence. Set
 `novelty_result` / `novelty_method` ONLY where a matching `found_nothing` search is
 on record (never auto-carry one kind's result to the other). Each flag gets a

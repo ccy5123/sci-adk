@@ -26,14 +26,24 @@ experiments -> append-only Evidence -> sci-adk surfaces checkpoints/halts ->
 author verdicts in-session -> `sci-adk resolve` -> `sci-adk verify` (the gate).
 Record prior-work / novelty / contested decisions at their trigger moments.
 
-**User-provided literature.** When you cannot fetch a paper via paperforge (no
-Open-Access copy, or the user hands you the PDF directly) and the user provides the
-document, immediately read it for the first-author surname (or institutional name) +
-year + whether it is supplementary information (SI), then run `sci-adk add-literature
-<run_dir> --pdf <path> --author "<Surname>" --year <YYYY> [--si]`. The verb OWNS the
-canonical bibkey (`<Surname><Year>`; arrival-order UPPERCASE `A/B` for DOI-less
-collisions; `_SI` for supplementary) and saves the PDF to
-`runs/<spec.id>/literature/pdfs/` — never hand-craft the filename.
+**User-provided literature (two directions).** Both a system-detected miss and a
+user-offered PDF converge on the same manual-ingest verb:
+
+- *Reactive* — the user hands you a PDF (no Open-Access copy, or they simply have
+  it). Immediately read it for the first-author surname (or institutional name) +
+  year + whether it is supplementary information (SI), then run `sci-adk
+  add-literature <run_dir> --pdf <path> --author "<Surname>" --year <YYYY> [--si]`.
+  The verb OWNS the canonical bibkey (`<Surname><Year>`; arrival-order UPPERCASE
+  `A/B` for DOI-less collisions; `_SI` for supplementary) and saves the PDF to
+  `runs/<spec.id>/literature/pdfs/` — never hand-craft the filename.
+- *Proactive* — a prior-work / novelty search hits a paper it cannot fetch. When
+  `sci-adk prior-work --searched ...` or `sci-adk novelty --searched ...` prints
+  `halt (human input needed):` on STDERR (a searched DOI had no downloadable OA PDF;
+  the exit code is still `0` and the decision is recorded), do NOT silently proceed.
+  Surface the missed-paper list via `AskUserQuestion`, offering: (a) provide the PDF
+  now → the reactive `add-literature` path above, or (b) skip this paper → record the
+  miss as a null and continue. This carries the kernel's `AcquisitionHalt` to the
+  human instead of relying on the agent noticing stderr.
 
 **Cannot-do.**
 - Never state belief outside the engine (no conclusion that has not passed `verify`).
