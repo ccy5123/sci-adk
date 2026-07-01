@@ -69,6 +69,7 @@ from sci_adk.render.figures import (
 )
 from sci_adk.render.authored_si import render_authored_si_latex
 from sci_adk.render.paper import render_paper_latex
+from sci_adk.render.pkgreqs_checks import bib_subset, cited_keys
 from sci_adk.render.prose import AuthoredSI, PaperProse, SIProse
 from sci_adk.render.reproduction import (
     ReproListing,
@@ -540,8 +541,11 @@ class ResearchCompiler:
 
         The MAIN figures (``figures``) appear ONLY in the paper's Results; the SI carries
         only ``si_figures`` (supplementary, default none) -- so a main figure is never
-        duplicated across the two documents (design feedback 5.2). The co-located
-        ``references.bib`` is wired into BOTH documents (the SI's ``\\citep`` resolved too).
+        duplicated across the two documents (design feedback 5.2). Each document has its OWN
+        independent bibliography (SPEC-SI-AUTHORING-001 M6): ``draft.tex`` wires the full
+        co-located ``references.bib`` (the pool), the authored ``si.tex`` wires a cited-only
+        ``references_SI.bib`` subset of that same pool (REQ-SA-604/607) -- never a shared
+        ``\\bibliography``.
 
         Loads Evidence, Claims, and the judge checkpoints from disk when not supplied
         (the verb path); the chained ``compile`` passes the in-memory values
@@ -622,7 +626,20 @@ class ResearchCompiler:
         # end-to-end wiring point that fills ② alongside ① (above) and ③ (below).
         si_path: Optional[Path] = None
         if si is not None:
-            si_tex = render_authored_si_latex(si, spec, claims_list, evidence_list)
+            # SPEC-SI-AUTHORING-001 M6 (REQ-SA-604/605/606): the authored si.tex gets its OWN
+            # cited-only references_SI.bib -- a SUBSET of the run's ONE literature pool, NOT a
+            # separate acquisition. D2 ordering (no circularity): the cited keys are read from
+            # the authored SI SOURCE (the AuthoredSI section bodies) BEFORE the render -- valid
+            # because \cite survives the _slot pipeline verbatim, so source cited keys == rendered
+            # cited keys. Then filter the pool to those keys, co-locate the subset, and pass its
+            # path to the SINGLE render. D6 ABSENCE: no pool OR no cited keys -> write NO file and
+            # pass no bib_path (mirrors the main paper's missing-pool handling), so si.tex emits
+            # no \bibliography. A cited key absent from the pool is NOT silently dropped -- it
+            # cannot be in the subset, so the SI cite gate (verify) surfaces it.
+            si_bib_path = self._colocate_si_bib(run_dir, paper_dir, si)
+            si_tex = render_authored_si_latex(
+                si, spec, claims_list, evidence_list, bib_path=si_bib_path
+            )
             if si_tex is not None:
                 si_path = paper_dir / "si.tex"
                 si_path.write_text(si_tex, encoding="utf-8")
@@ -831,6 +848,39 @@ class ResearchCompiler:
             return None
         dest = paper_dir / "references.bib"
         shutil.copyfile(src, dest)
+        return str(dest)
+
+    @classmethod
+    def _colocate_si_bib(
+        cls, run_dir: Path, paper_dir: Path, si: AuthoredSI
+    ) -> Optional[str]:
+        """Build + co-locate the cited-only ``paper/references_SI.bib`` (M6, REQ-SA-604/606).
+
+        The authored SI's OWN bibliography, SYMMETRIC to :meth:`_colocate_bib` for the main
+        paper but with a SUBSET filter: the pool entries whose key is CITED in the SI. D2
+        ordering (no ``bib_path``<->``cited_keys`` circularity): the cited keys are read from
+        the authored SI SOURCE (the ``AuthoredSI`` section bodies) here, BEFORE the render --
+        valid because ``\\cite`` survives the ``_slot`` pipeline verbatim, so the source cited
+        keys equal the rendered cited keys. The pool is the SAME single source
+        ``_locate_bib_path`` finds. D6 ABSENCE: no pool OR no cited keys -> write NO file and
+        return ``None`` (no ``bib_path`` -> ``si.tex`` emits no ``\\bibliography``, mirroring
+        the main paper's missing-pool handling). The subset is a PURE set op (no LLM/network):
+        it never contains a key absent from the pool, so a dangling SI cite is left for the
+        verify gate to surface, never silently dropped. Returns the co-located path (stem
+        ``references_SI``) or ``None``.
+        """
+        src = cls._locate_bib_path(run_dir)
+        if src is None:
+            return None
+        keys = cited_keys("\n".join(s.body for s in si.sections if s.body))
+        if not keys:
+            return None
+        pool = Path(src).read_text(encoding="utf-8")
+        subset = bib_subset(pool, keys)
+        if not subset:
+            return None
+        dest = paper_dir / "references_SI.bib"
+        dest.write_text(subset, encoding="utf-8")
         return str(dest)
 
     def _colocate_figures(

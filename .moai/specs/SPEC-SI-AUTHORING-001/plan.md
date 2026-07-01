@@ -19,6 +19,13 @@ construction, and REUSE the M2 deposit-completeness checker. M5 reinforces the a
 work is record-side relocation + a checker REUSE (no new checker); the package gate already audits
 `si.tex`, so the belief side stays characterization.
 
+M6 (added in v0.3.0) is a small, BELIEF-SIDE apparatus change: the authored `si.tex` gets its own
+`references_SI.bib`, symmetric to `main.tex`/`references.bib`, so a `\citep` in the SI resolves
+instead of `[?]`. It reuses existing pure helpers end to end — bib wiring mirrors `paper.py`, the
+cited-only subset is a set operation over `cited_keys`/`bib_keys`, and the SI cite gate REUSES
+`cite_resolution_problems` (no new checker, no LLM at bib selection). The four decisions are frozen
+in `design/si-bibliography.md`; M6 does not re-decide the FROZEN SI split.
+
 ## Technical approach
 
 ### Authored `si.tex` path (Pillar A) — reuse, do not re-implement
@@ -118,6 +125,53 @@ M1–M4 are implemented (per-run path, suite green at 1422). M5 mirrors them on 
 - **Package writer (workflow).** Update `science-workflow-package` step 3 so the writer authors
   `package_src/si.tex` (REQ-SA-512); drop the "si.tex where the record dump is augmented" framing.
 
+### SI bibliography (Pillar F, M6) — the authored `si.tex` gets its own `references_SI.bib`
+
+M1–M5 made `si.tex` authored belief; M6 closes the citation apparatus gap. The measured gap:
+the authored-SI renderer (`authored_si.py:113`) loads `natbib` (`authored_si.py:192`) but takes
+no `bib_path` and emits no `\bibliography` (`authored_si.py:244`), and the compiler calls it with
+no bib (`compiler.py:625`) — so a `\citep` in `si.tex` renders `[?]`. The fix is symmetric to
+`main.tex`/`references.bib` and reuses existing pure helpers throughout:
+
+- **Renderer bib wiring (mirrors `paper.py`).** Add an optional `bib_path` to
+  `render_authored_si_latex`; **Where** supplied, emit `\bibliographystyle{plainnat}` +
+  `\bibliography{<stem>}` before `\end{document}` (the exact pattern at `paper.py:831-834` and
+  `si.py:540-543`); **When** absent, emit nothing (the `paper.py:835` no-bib branch). The renderer
+  stays PURE (caller supplies the path) and FAIL-LOUD, unchanged, and determinism is preserved
+  (REQ-SA-601 optional-Where + REQ-SA-601a PURE/FAIL-LOUD + REQ-SA-602/603).
+- **Cited-only subset build (reuse `cited_keys`/`bib_keys`; pinned ordering, D2).** At the
+  compiler's authored-SI render (`compiler.py:625`), extract the cited-key set from the
+  `AuthoredSI` SOURCE bodies (`prose.py:187,219`) via `cited_keys` (`pkgreqs_checks.py:113`)
+  BEFORE the final render — valid because `\cite` survives the `_slot` pipeline verbatim
+  (`authored_si.py:157-177`), so the source cited keys equal the rendered cited keys (no
+  `bib_path`↔`cited_keys` circularity). Filter the ONE literature pool (`_locate_bib_path`,
+  `compiler.py:814`) to those keys, write the subset to `paper/references_SI.bib` via a
+  co-location helper symmetric to `_colocate_bib` (`compiler.py:818`), then pass its path to the
+  SINGLE final render. Pure set operation — NO LLM, no new acquisition (REQ-SA-604/605). No pool /
+  no SI citations → write NO `references_SI.bib` file (D6 ABSENCE) and pass no `bib_path`
+  (REQ-SA-606, mirrors `compiler.py:830-831`). Correct the stale `compiler.py:544` comment so the
+  false phrase "wired into BOTH documents" is gone (REQ-SA-607, grep-asserted). The main paper's
+  `references.bib` co-location is untouched (independent bibs).
+- **Package symmetry (two authoring cases, D1).** In `_ensure_manuscript` (`package.py:400-456`)
+  add `01_manuscript/references_SI.bib`: preserve `package_src/references_SI.bib` verbatim if
+  present (symmetric to `references.bib`, `package.py:431-432`), else the cited-only subset of the
+  package bib by the package SI's cited-key set. Add `_REFERENCES_SI_BIB = "references_SI.bib"`
+  beside `_REFERENCES_BIB` (`package.py:72`). The `\bibliography{references_SI}` line has TWO
+  distinct owners: (a) an author-supplied `package_src/si.tex` is copied VERBATIM
+  (`package.py:449-451`), so the AUTHOR owns the line and the assembler ONLY lands the bib beside
+  it — it MUST NOT inject wiring into the copied file (REQ-SA-608a); (b) the assembler-authored
+  skeleton (`_skeleton_si_tex`, `package.py:459-482`) is wired by the assembler IFF it cites
+  anything, else it omits the line and writes no `references_SI.bib` (REQ-SA-608b/610). A
+  missing/wrong author bibliography is surfaced by the SI cite gate (REQ-SA-613), not repaired.
+- **SI cite-resolution gate (reuse `cite_resolution_problems`).** Add, additively, a cite gate for
+  `si.tex` vs `references_SI.bib`, parallel to the existing `main.tex` gate — per-run at the
+  `verify.py:1012-1018` site (load `paper/references_SI.bib`, run
+  `cite_resolution_problems(si_tex, si_bib)` alongside the `draft.tex` gate) and package at the
+  `verify.py:1242` site (load `01_manuscript/references_SI.bib`, run the same over the package
+  `si.tex`). No new checker (REQ-SA-611/612/613/614); vacuously clean for a citation-free SI
+  (REQ-SA-615). This is the ONLY missing per-document check — `si.tex` is already number-audited /
+  compile-checked / tool-vocab-scanned / value-fidelity-scanned.
+
 ## Milestones (priority-ordered)
 
 ### Milestone M1 (Priority High) — Record artifact relocation + rename + tool-vocab extension
@@ -197,6 +251,38 @@ with package characterization).
   `package_requirements_clean` stays green on a real package exercising authored `main.tex` +
   authored `si.tex` + `06_provenance/record.tex`; suite green.
 
+### Milestone M6 (Priority Medium) — SI bibliography (`references_SI.bib`) for the authored `si.tex`
+
+Realizes Pillar F. M1–M5 are implemented (per-run + package authored-SI, suite green). M6 gives
+the authored `si.tex` its OWN bibliography, symmetric to `main.tex`/`references.bib`, so a `\citep`
+in the SI resolves instead of `[?]`. All new code reuses existing pure helpers (bib wiring mirrors
+`paper.py`; subset = `cited_keys`/`bib_keys`; SI gate = `cite_resolution_problems`). No re-decision
+of the FROZEN SI split — the four decisions are frozen in `design/si-bibliography.md`. Sub-steps
+are priority-ordered within M6 (renderer wiring first, then the per-run subset build + gate, then
+the package symmetry).
+
+- REQ-SA-601, REQ-SA-601a, REQ-SA-602, REQ-SA-603, REQ-SA-604, REQ-SA-605, REQ-SA-606,
+  REQ-SA-607, REQ-SA-608, REQ-SA-608a, REQ-SA-608b, REQ-SA-609, REQ-SA-610, REQ-SA-611,
+  REQ-SA-612, REQ-SA-613, REQ-SA-614, REQ-SA-615, REQ-SA-616, REQ-SA-617
+- Exit: `render_authored_si_latex` (`authored_si.py:113`) accepts `bib_path`, emits
+  `\bibliography{references_SI}` when supplied / nothing when absent, and stays PURE/FAIL-LOUD
+  (byte-determinism preserved, other slots unchanged); the compiler (`compiler.py:625`) extracts
+  cited keys from the `AuthoredSI` SOURCE bodies BEFORE the final render (D2 ordering, no
+  circularity), builds + co-locates the cited-only `paper/references_SI.bib` from the ONE pool
+  (`compiler.py:814`) via `cited_keys`/`bib_keys` (deterministic, no LLM), writes NO file when
+  there are no citations / no pool (D6), passes the bib path to the SINGLE final render, and the
+  stale `compiler.py:544` "wired into BOTH documents" phrase is grep-asserted gone (D3); the package
+  path adds `01_manuscript/references_SI.bib` (`_REFERENCES_SI_BIB` constant added) and handles BOTH
+  the author-supplied-verbatim case (bib landed beside the copied file, NO wiring injection —
+  REQ-SA-608a) and the generated-skeleton case (assembler wires `\bibliography` iff the skeleton
+  cites — REQ-SA-608b); the SI cite-resolution gate is wired additively at the `verify.py:1012-1018`
+  (per-run) and `verify.py:1242` (package) sites, reusing `cite_resolution_problems` — a dangling
+  `si.tex` cite FAILS (RED→GREEN) and a citation-free SI is vacuously clean; the two documents' bibs
+  are independent and the main paper bib is unchanged; M6 is domain-neutral; the AC-F10
+  scope-discipline "no OTHER computation changed" clause is confirmed by human diff-review
+  (REVIEW-GATED); `sci-adk verify` exits 0 on a real run whose authored `si.tex` cites resolved
+  keys; suite green.
+
 ## Risks
 
 - **R1 — Adding belief-side gate logic beyond the one authorized extension.** Most of the gate
@@ -264,12 +350,47 @@ with package characterization).
   `06_provenance/record.tex` with the availability statement in its body); Run migrates the
   fixtures as part of M5 rather than treating the RED as a regression.
 
+### M6 risks
+
+- **R12 — Wiring the SI bib to the FULL pool instead of the cited-only subset.** The easy path is
+  to point `si.tex` at the same `references.bib` the main paper uses; that violates self-containment
+  (the SI's printed reference list would carry the main paper's uncited-in-SI entries) and the
+  cited-only decision. Mitigation: REQ-SA-604/609 mandate the cited-only subset via
+  `cited_keys(si_tex)`; AC-F4/F7 assert `bib_keys(references_SI.bib) == cited_keys(si_tex) ∩ pool`
+  (uncited entry absent).
+- **R13 — Fabricating a bib when the pool or citations are absent.** A naive build could write an
+  empty-but-present `references_SI.bib` and still emit `\bibliography`, or (worse) attempt to
+  acquire a missing citation. Mitigation: REQ-SA-605/606 forbid acquisition and (D6) require the
+  no-pool/no-cite path to write NO `references_SI.bib` file at all and pass no `bib_path` (no
+  `\bibliography`), mirroring the main paper's missing-pool handling (`compiler.py:830-831`); AC-F5
+  asserts `not (paper/references_SI.bib).exists()`.
+- **R14 — SI cite gate accidentally checking `si.tex` against the wrong bib.** The gate must read
+  the SI bib (`paper/references_SI.bib` per-run, `01_manuscript/references_SI.bib` package), never
+  the main `references.bib`. Mitigation (D8): the SI cite gate reads `references_SI.bib` (the
+  cited-only subset), never `references.bib`; because a key cited in `si.tex` but absent from the
+  pool is therefore absent from `references_SI.bib`, the gate FAILS on it — a main-bib-only key
+  cannot mask a dangling SI cite (the SI bib does not contain main-only keys). REQ-SA-612/613 name
+  the exact SI bib path per path; AC-F8 asserts a `si.tex` cite absent from `references_SI.bib`
+  FAILS per-run and package.
+- **R15 — Introducing a new checker or an LLM at bib-selection.** The temptation is a bespoke SI
+  bib builder or an LLM to pick "relevant" references. Mitigation: REQ-SA-605 (deterministic set
+  op, no LLM) + REQ-SA-611/616 (REUSE `cite_resolution_problems`, no new checker); AC-F10 asserts
+  the gate is the existing checker and no new SI acquisition/pool is added.
+- **R16 — Regressing the existing `main.tex` bib or the deposit `record.tex` bib.** The SI bib must
+  be strictly additive. Mitigation: REQ-SA-607/616 forbid touching `_colocate_bib` /
+  `paper.py` bib emission / `si.py:540-543`; AC-F6 asserts the main paper bib is byte-unchanged and
+  the two bibs are independent.
+
 ## Out of scope (this plan)
 
 - `main.tex` / `render_paper_latex` (unchanged); the package `main.tex` authoring + skeleton logic
   (M5 touches the package `si.tex` slot, the dump destination, and the additive deposit check only).
+  M6 leaves the main paper's `references.bib` wiring and `_colocate_bib` untouched.
 - The JOSS tool paper `paper/paper.md` (untouched).
 - Any change to what `sci-adk verify` computes over `runs/` + the record artifact, or what the
-  package gate computes per-document (M5 only changes that the package `si.tex` is now authored).
+  package gate computes per-document (M5 only changes that the package `si.tex` is now authored; M6
+  only ADDS a cite-resolution check for `si.tex`, parallel to the existing `main.tex` one).
 - `zref-xr` / `xr` cross-document compile coupling (dropped in design §6).
+- A separate SI literature-acquisition pool (M6's `references_SI.bib` is a cited-only subset of the
+  ONE per-run pool), and the deposit `record.tex`'s own bib wiring (`si.py:540-543`, unchanged).
 - The per-run path (M1–M4), which is already implemented and stays intact.

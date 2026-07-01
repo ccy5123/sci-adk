@@ -131,6 +131,9 @@ _PAPER_DOCS: tuple[str, ...] = ("draft.tex", "si.tex")
 _PACKAGE_MAIN: str = "main.tex"
 _PACKAGE_SI: str = "si.tex"
 _PACKAGE_DOCS: tuple[str, ...] = (_PACKAGE_MAIN, _PACKAGE_SI)
+# The authored package si.tex's OWN bibliography (SPEC-SI-AUTHORING-001 M6): a cited-only
+# subset of the package pool the SI cite-resolution gate resolves si.tex's \cite* against.
+_REFERENCES_SI_BIB: str = "references_SI.bib"
 
 # Per-hypothesis audit results. Strings (not an enum) keep the report trivially
 # printable/serializable; the set is closed and small.
@@ -1017,6 +1020,17 @@ def _check_paper_requirements(
     problems.extend(bib_latex_safety_problems(bib))
     warnings.extend(unpublished_citation_warnings(draft_tex, bib))
 
+    # SPEC-SI-AUTHORING-001 M6 (REQ-SA-611/612/614): the authored si.tex has its OWN
+    # references_SI.bib -- ADD the parallel cite-resolution gate for it, REUSING the same
+    # pure cite_resolution_problems checker. Every \cite* key in si.tex must resolve in
+    # references_SI.bib; a dangling SI cite FAILS naming the key. A thin/absent SI or a
+    # citation-free one is vacuously clean (no keys -> no problems, REQ-SA-615).
+    si_tex_path = run_dir / "paper" / "si.tex"
+    if si_tex_path.is_file():
+        si_bib_path = run_dir / "paper" / "references_SI.bib"
+        si_bib = si_bib_path.read_text(encoding="utf-8") if si_bib_path.is_file() else ""
+        problems.extend(cite_resolution_problems(si_tex_path.read_text(encoding="utf-8"), si_bib))
+
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
 
@@ -1244,6 +1258,18 @@ def _check_package_requirements(
         problems.extend(citation_disambiguation_problems(main_tex, bib))
         problems.extend(bib_latex_safety_problems(bib))
         warnings.extend(unpublished_citation_warnings(main_tex, bib))
+
+    # SPEC-SI-AUTHORING-001 M6 (REQ-SA-613/614): the authored package si.tex has its OWN
+    # 01_manuscript/references_SI.bib -- ADD the parallel cite-resolution gate, REUSING the
+    # same pure cite_resolution_problems checker. Every \cite* key in si.tex must resolve in
+    # references_SI.bib; a dangling package SI cite FAILS naming the key. A thin/citation-free
+    # SI is vacuously clean (REQ-SA-615). Independent of main.tex's references.bib.
+    if si_tex:
+        si_bib = ""
+        si_bib_path = manuscript_dir / _REFERENCES_SI_BIB
+        if si_bib_path.is_file():
+            si_bib = si_bib_path.read_text(encoding="utf-8")
+        problems.extend(cite_resolution_problems(si_tex, si_bib))
 
     # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. SPEC-SI-AUTHORING-001 M5
     #    (REQ-SA-507): the package si.tex is now AUTHORED belief (a sibling of main.tex), so the

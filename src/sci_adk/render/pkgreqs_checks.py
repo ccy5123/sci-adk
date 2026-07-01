@@ -42,7 +42,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from sci_adk.render.pubreqs_checks import word_count
 
@@ -124,6 +124,30 @@ def cited_keys(tex: str) -> List[str]:
 def bib_keys(bib: str) -> List[str]:
     """Every distinct entry key defined in a BibTeX ``bib`` string (sorted). PURE."""
     return sorted({k.strip() for k in _BIB_ENTRY_RE.findall(bib)})
+
+
+def bib_subset(bib: str, keep: Sequence[str]) -> str:
+    """The ``bib`` entries whose key is in ``keep``, in source order (SI subset, M6).
+
+    PURE + deterministic, no ``bibtexparser`` -- a line-based slice using the SAME
+    ``_BIB_ENTRY_RE`` header regex the rest of this module uses. Splits ``bib`` on entry
+    headers (``@type{KEY,``), keeps a chunk iff its key is in ``keep``, and re-joins them in
+    their original order. Text before the first ``@entry`` (comments / preamble) is dropped
+    -- the result is the concatenation of the kept entries only, so ``bib_keys(bib_subset(
+    bib, keep)) == sorted(set(keep) & set(bib_keys(bib)))``. Used to build the cited-only
+    ``references_SI.bib`` from the run's ONE literature pool (REQ-SA-604/605): no LLM, no
+    network, a pure set filter over the already-acquired pool.
+    """
+    wanted = set(keep)
+    matches = list(_BIB_ENTRY_RE.finditer(bib))
+    kept: List[str] = []
+    for i, m in enumerate(matches):
+        key = m.group(1).strip()
+        if key not in wanted:
+            continue
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(bib)
+        kept.append(bib[m.start() : end].rstrip())
+    return ("\n".join(kept) + "\n") if kept else ""
 
 
 def cite_resolution_problems(tex: str, bib: str) -> List[str]:

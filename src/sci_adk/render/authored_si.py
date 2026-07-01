@@ -46,6 +46,7 @@ pipeline), src/sci_adk/render/si.py (the S-numbering + figure-package convention
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 from sci_adk.core.claim import Claim
@@ -115,6 +116,7 @@ def render_authored_si_latex(
     spec: Spec,
     claims: Sequence[Claim],
     evidence: Optional[Sequence[EvidenceItem]] = None,
+    bib_path: Optional[str] = None,
 ) -> Optional[str]:
     """Render the AUTHORED ``si.tex`` (belief artifact ②) -- REUSE the prose pipeline.
 
@@ -133,6 +135,14 @@ def render_authored_si_latex(
         spec: the compiled Spec (its id is the title fallback + the document header).
         claims: the run's Claims (their statuses back ``\\status{<hyp>}`` in the prose).
         evidence: the Evidence record (``\\evval`` values resolve here); optional.
+        bib_path: optional path of the SI's co-located ``references_SI.bib`` (M6,
+            REQ-SA-601). When supplied, ``\\bibliographystyle{plainnat}`` +
+            ``\\bibliography{<stem>}`` (``<stem> = Path(bib_path).stem``) are emitted
+            before ``\\end{document}`` -- so the author's ``\\citep``/``\\cite`` resolve
+            instead of rendering ``[?]`` (symmetric to ``paper.py:831-834`` and
+            ``si.py:540-543``). ``None`` (a citation-free SI, or no pool) -> NO
+            ``\\bibliography`` line (REQ-SA-602). The renderer stays PURE: it never
+            reads the file; the caller (the compiler) builds + co-locates it.
 
     Returns:
         A STANDALONE LaTeX document string, or ``None`` when ``si`` is ``None``.
@@ -240,6 +250,16 @@ def render_authored_si_latex(
         for number, fig in order_figures_by_reference(figures, body_latex):
             lines.append(render_figure(fig, evidence, number))
             lines.append("")
+
+    # -- Bibliography (M6, REQ-SA-601/602): the SI's OWN references, symmetric to the main
+    #    paper (paper.py:831-834) and the record dump (si.py:540-543). The author's
+    #    \citep/\cite survive the _slot pipeline verbatim; a supplied bib_path attaches the
+    #    co-located references_SI.bib so they resolve. bib_path=None (a citation-free SI or
+    #    no pool) emits NOTHING -- \usepackage{natbib} above is harmless without it.
+    if bib_path is not None:
+        stem = Path(bib_path).stem
+        lines.append(r"\bibliographystyle{plainnat}")
+        lines.append(f"\\bibliography{{{stem}}}")
 
     lines.append(r"\end{document}")
     return "\n".join(lines)

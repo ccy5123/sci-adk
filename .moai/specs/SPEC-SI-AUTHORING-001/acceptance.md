@@ -292,6 +292,133 @@
 - **Then** none names or assumes a domain, venue, or study (the IEAM-P8 package is an example of the
   package PATH, not a hardcoded target).
 
+## Pillar F — SI bibliography (`references_SI.bib`) (M6)
+
+> M6 gives the authored `si.tex` its OWN bibliography, symmetric to `main.tex`/`references.bib`.
+> All tags `[BELIEF-SIDE]` (the SI bib is the authored document's citation apparatus). Tests are
+> PURE/deterministic unless marked `integration`. The four decisions are FROZEN in
+> `design/si-bibliography.md`.
+
+### AC-F1 [BELIEF-SIDE] — Authored-SI renderer emits `\bibliography` when a bib is supplied (REQ-SA-601, REQ-SA-601a)
+- **Given** an authored SI whose prose carries a `\citep{<key>}`, and a `bib_path` supplied to
+  `render_authored_si_latex`,
+- **When** the authored `si.tex` renders,
+- **Then** the emitted `si.tex` contains `\bibliographystyle{plainnat}` and
+  `\bibliography{<stem>}` (where `<stem>` is the bib path's stem, e.g. `references_SI`), before
+  `\end{document}` — so the `\citep` resolves rather than rendering `[?]`. The assertion is a
+  concrete substring check on the rendered `.tex`, symmetric to the `main.tex` bib emission
+  (`paper.py:831-834`). The renderer stays PURE (no fs access) and FAIL-LOUD on fidelity macros
+  (REQ-SA-601a) — unchanged from pre-M6.
+
+### AC-F2 [BELIEF-SIDE] — No `bib_path` → no `\bibliography` line (REQ-SA-602)
+- **Given** an authored SI and NO `bib_path` supplied,
+- **When** the authored `si.tex` renders,
+- **Then** the emitted `si.tex` contains NO `\bibliography{}` line (a citation-free SI stays
+  minimal and valid), matching `paper.py:835`'s no-bib branch. The `\usepackage{natbib}` preamble
+  line is present but harmless without a `\bibliography`.
+
+### AC-F3 [BELIEF-SIDE] — Bib wiring preserves renderer determinism + other slots (REQ-SA-603)
+- **Given** the same authored SI input + same `bib_path`,
+- **When** `render_authored_si_latex` renders twice,
+- **Then** the output is byte-identical (determinism preserved), AND every other rendered slot
+  (fidelity `\evval`/`\status` substitution, `\novelty` gate, S-numbering, figure XOR) is
+  byte-unchanged from the pre-M6 render modulo the appended bibliography lines.
+
+### AC-F4 [BELIEF-SIDE] — Per-run `references_SI.bib` is the cited-only subset of the ONE pool (REQ-SA-604/605)
+- **Given** a run whose literature pool
+  (`runs/<id>/artifacts/literature/references.bib`) has entries `{A, B, C}`, and an authored
+  `si.tex` that cites only `{A, C}`,
+- **When** the compiler renders `paper/si.tex`,
+- **Then** `paper/references_SI.bib` exists and its `bib_keys` == `{A, C}` (cited-only: `B`, the
+  uncited entry, is ABSENT). The cited-key set `{A, C}` is extracted from the `AuthoredSI` section
+  bodies BEFORE the final render (D2 ordering, `prose.py:187,219`) and intersected with the pool —
+  a pure set operation, no LLM/network. The assertion is an explicit set-equality on
+  `bib_keys(references_SI.bib)`.
+
+### AC-F5 [BELIEF-SIDE] — No pool / no SI citations → NO `references_SI.bib` written at all (REQ-SA-606)
+- **Given** a run with NO literature pool (`_locate_bib_path` → `None`), OR an authored `si.tex`
+  that cites nothing,
+- **When** the compiler renders `paper/si.tex`,
+- **Then** (D6: ABSENCE) `paper/references_SI.bib` is NOT written — the test asserts
+  `not (paper/references_SI.bib).exists()` — and no `bib_path` is passed to the renderer (so
+  `si.tex` emits no `\bibliography`, AC-F2), consistent with the main paper's missing-pool handling
+  (`compiler.py:830-831`). A cited key absent from the pool is NOT silently dropped — it cannot be
+  in `references_SI.bib`, so it surfaces in the SI cite gate (AC-F8).
+
+### AC-F6 [BELIEF-SIDE / grep-testable] — SI bib is independent of the main paper bib; stale comment absent (REQ-SA-607)
+- **Given** a run whose `main.tex` and `si.tex` cite DIFFERENT subsets of the pool,
+- **When** the compiler co-locates both bibs,
+- **Then** `paper/references.bib` (main, unchanged — the full co-located pool via `_colocate_bib`)
+  and `paper/references_SI.bib` (SI, cited-only subset) are independent files; the main paper's
+  bib co-location is byte-unchanged, AND (D3 — a grep-based, automated assertion, NOT review-only)
+  the false phrase "wired into BOTH documents" no longer appears at the `compiler.py:544` comment
+  site. The test greps that site and asserts the false phrase is absent, so M6 cannot land with a
+  green suite while the stale comment remains.
+
+### AC-F7 [BELIEF-SIDE] — Package `references_SI.bib`: two authoring cases + skeleton (REQ-SA-608/608a/608b/609/610)
+- **AC-F7a — author-supplied si.tex + author-supplied bib (D1 case a):** **Given** a workspace
+  supplying BOTH `package_src/si.tex` (with its own `\bibliography{references_SI}` line) AND
+  `package_src/references_SI.bib`, **when** `sci-adk package` assembles, **then**
+  `01_manuscript/si.tex` is the author file copied VERBATIM (`package.py:449-451`) — the assembler
+  did NOT inject or rewrite the `\bibliography` line (assert the copied file byte-equals the source)
+  — and `01_manuscript/references_SI.bib` is the author bib preserved verbatim.
+- **AC-F7b — author-supplied si.tex, no author bib (D1 case a):** **Given** an author
+  `package_src/si.tex` citing `{A, C}` but NO `package_src/references_SI.bib`, **when** the package
+  assembles, **then** `01_manuscript/references_SI.bib` is the cited-only subset `{A, C}` (no
+  uncited-in-SI entries, no duplication of `main.tex`'s references), landed BESIDE the verbatim
+  author `si.tex`; the assembler still does not touch the author file's `\bibliography` line.
+- **AC-F7c — author si.tex cites a key but its `\bibliography` is missing/wrong (D1 case a):**
+  **Given** an author `package_src/si.tex` citing `{A, C}` whose author `references_SI.bib` (or
+  `\bibliography` line) omits `C`, **when** `sci-adk verify` runs, **then** the assembler does NOT
+  silently repair the file; instead the SI cite-resolution gate (AC-F8 / REQ-SA-613) FAILS naming
+  the unresolved `C`.
+- **AC-F7d — generated skeleton si.tex (D1 case b + D7, REQ-SA-608b/610):** **Given** a workspace
+  with NO `package_src/si.tex`, so the assembler emits `_skeleton_si_tex` (`package.py:459-482`),
+  and the skeleton cites nothing, **when** the package assembles, **then** the assembler wires NO
+  `\bibliography` into the skeleton and writes NO `01_manuscript/references_SI.bib` (assert
+  `not (01_manuscript/references_SI.bib).exists()` and no `\bibliography` substring in the
+  skeleton) — a citation-free package skeleton stays valid. (Were the skeleton to cite anything,
+  the assembler — which authored it — would wire `\bibliography{references_SI}`, REQ-SA-608b.)
+
+### AC-F8 [BELIEF-SIDE — NEW gate] — SI cite-resolution gate fails a dangling `si.tex` cite, per-run + package (REQ-SA-611/612/613/614)
+- **RED gap (documents the current hole):** **Given** an authored `si.tex` citing `{A, Z}` where
+  `Z` is NOT in `references_SI.bib`, **when** the CURRENT verify runs (per-run cite-resolution
+  covers `draft.tex` only, `verify.py:1014`; package covers `main.tex` only, `verify.py:1242`),
+  **then** the dangling `si.tex` cite `Z` is NOT flagged.
+- **GREEN (after M6):** **Given** the same `si.tex` citing `{A, Z}` (`Z` absent from
+  `references_SI.bib`), **when** the EXTENDED verify runs, **then** the SI cite-resolution gate
+  (`cite_resolution_problems(si_tex, si_bib)`) FAILS and names `Z` — per-run (loading
+  `paper/references_SI.bib`) AND package (loading `01_manuscript/references_SI.bib`). The test
+  asserts the transition (pre-change: not flagged; post-change: flagged), and that the problem
+  line shape matches the `main.tex` cite gate (`pkgreqs_checks.py:141-143`).
+
+### AC-F9 [BELIEF-SIDE] — SI cite gate is vacuously clean for a thin/citation-free SI (REQ-SA-615)
+- **Given** a run/package with NO authored `si.tex` (thin/absent, REQ-SA-107) OR an `si.tex`
+  citing nothing,
+- **When** the SI cite-resolution gate runs,
+- **Then** it returns no problems (`[]`) — no `\cite*` keys means no unresolved keys — consistent
+  with `cite_resolution_problems` on empty input, on both paths.
+
+### AC-F10 [BELIEF-SIDE / REVIEW-GATED] — SI cite gate reuses the existing checker; scope discipline (REQ-SA-611/616)
+- **Given** the full M6 implementation,
+- **When** the diff to `sci-adk verify` is reviewed,
+- **Then** the SI cite gate is `cite_resolution_problems` (`pkgreqs_checks.py:129`) pointed at
+  `(si_tex, references_SI.bib)` with NO new checker written; AND no M6 change adds a separate SI
+  literature pool, alters `main.tex`/`references.bib` wiring, changes the deposit `record.tex`
+  bib, changes what verify computes over `runs/`/the record, or couples the two documents' bibs.
+- **(D3) This is a REVIEW-GATED / non-automated exit criterion** — a "diff reviewed" judgment, not
+  a runtime assertion — and it appears explicitly in the M6 Definition of Done as a review gate.
+  The binary-testable parts of scope discipline are covered by concrete tests: no new checker (the
+  gate call is `cite_resolution_problems`, asserted by AC-F8's problem-line-shape match), the stale
+  comment absence (grep, AC-F6), and the main-bib byte-invariance (AC-F6). Only the "no OTHER
+  computation changed" clause remains review-gated.
+
+### AC-F11 [BELIEF-SIDE] — M6 is domain-neutral (REQ-SA-617)
+- **Given** the M6 renderer / compiler / package / verify changes,
+- **When** the code and strings are reviewed,
+- **Then** none names or assumes a domain, venue, or study; the `references_SI.bib` wiring, subset
+  build, and SI cite gate apply to ANY run/package.
+
 ## Edge cases
 
 - **EC-1 — No SI authored (thin record).** A run with no overflow produces no `si.tex`; the
@@ -324,6 +451,23 @@
   (dump in `si.tex`) stays green under M5 once it carries the relocated `06_provenance/record.tex`
   + an availability statement; the relocation alone does not silently fail an otherwise-complete
   package beyond the additive deposit check (AC-E10, R6 mitigation).
+- **EC-9 (M6) — SI cites a subset of the main paper's references.** A run whose `main.tex` cites
+  `{A, B, C}` and `si.tex` cites `{A, C}` produces `paper/references.bib` = the full pool and
+  `paper/references_SI.bib` = `{A, C}`; both documents compile with resolved citations and each
+  document's printed reference list is scoped to what it cites (AC-F4, AC-F6).
+- **EC-10 (M6) — SI cites a reference the main paper does NOT.** A run whose `si.tex` cites a pool
+  entry `D` that `main.tex` never cites still resolves: `references_SI.bib` includes `D` (it is in
+  `cited_keys(si_tex) ∩ pool`), the SI cite gate passes, and `D` is not forced into
+  `references.bib` (independence, AC-F4/AC-F6).
+- **EC-11 (M6) — Citation-free SI.** An authored `si.tex` with no `\cite*` produces no
+  `references_SI.bib` file (D6 absence) and no `\bibliography`, and the SI cite gate is vacuously
+  clean — per-run AND package. The package-SKELETON sub-case (no author `package_src/si.tex`, D7)
+  is asserted directly by AC-F7d: `not (01_manuscript/references_SI.bib).exists()` and no
+  `\bibliography` in the generated skeleton (`package.py:459-482`). (AC-F2, AC-F5, AC-F7d, AC-F9.)
+- **EC-12 (M6) — SI cites a key absent from the pool.** An `si.tex` citing `Z` where `Z` is not in
+  the literature pool does NOT silently drop `Z`: `references_SI.bib` cannot include it (it is not
+  in the pool), and the SI cite-resolution gate FAILS naming `Z` (AC-F5, AC-F8) — the honest
+  surface for an unacquired citation.
 
 ## Quality gate criteria
 
@@ -347,6 +491,22 @@
   record/verdict change; the package tool-vocab boundary is correct (authored `si.tex` scanned,
   record exempt by construction — AC-E6); the four package per-document checks are unchanged in
   computation (AC-E7).
+- **(M6)** the authored-SI renderer emits `\bibliography{references_SI}` when a bib is supplied and
+  nothing when absent (AC-F1/F2, PURE/FAIL-LOUD preserved REQ-SA-601a, determinism AC-F3);
+  `paper/references_SI.bib` and (the non-author-supplied) `01_manuscript/references_SI.bib` are
+  cited-only subsets of the ONE literature pool, the cited keys extracted from the authored SI
+  SOURCE before the final render (D2 ordering, deterministic, no LLM — AC-F4); no citations / no
+  pool → NO `references_SI.bib` file written (D6 absence — AC-F5); the package handles BOTH the
+  author-supplied-verbatim case (assembler lands the bib beside the copied file, does not inject
+  wiring — AC-F7a/b/c) and the generated-skeleton case (assembler wires `\bibliography` iff the
+  skeleton cites — AC-F7d/EC-11); the two documents' bibliographies are independent and the main
+  paper bib is byte-unchanged (AC-F6); the stale `compiler.py:544` phrase "wired into BOTH
+  documents" is grep-asserted absent (D3, AC-F6); the SI cite-resolution gate FAILS a dangling
+  `si.tex` cite per-run AND package (AC-F8, RED→GREEN) and is vacuously clean for a citation-free SI
+  (AC-F9); the gate REUSES `cite_resolution_problems` with no new checker (AC-F10, the "no OTHER
+  computation changed" clause being a REVIEW-GATED exit criterion); M6 is domain-neutral (AC-F11);
+  `sci-adk verify` exits 0 on a real run whose authored `si.tex` cites resolved keys from
+  `references_SI.bib`.
 
 ## Definition of Done
 
@@ -377,13 +537,35 @@
       (F3); package characterization tests prove the four package per-document checks are unchanged;
       the `science-workflow-package` skill + writer author `package_src/si.tex`;
       `package_requirements_clean` stays green; suite green.
+- [ ] M6: the authored-SI renderer (`authored_si.py:113`) gains a `bib_path` parameter and emits
+      `\bibliography{references_SI}` when supplied / nothing when absent, staying PURE/FAIL-LOUD
+      (REQ-SA-601/601a, AC-F1/F2/F3); the compiler (`compiler.py:625`) extracts cited keys from the
+      `AuthoredSI` SOURCE bodies BEFORE the final render (D2 ordering, no circularity), builds +
+      co-locates the cited-only `paper/references_SI.bib` from the ONE pool (`compiler.py:814`)
+      via `cited_keys`/`bib_keys` (deterministic, no LLM — AC-F4), writes NO file when there are no
+      citations / no pool (D6 — AC-F5), and the stale `compiler.py:544` "wired into BOTH documents"
+      phrase is grep-asserted absent (D3 — AC-F6); the package path adds `01_manuscript/
+      references_SI.bib` and handles the author-supplied-verbatim case (bib landed beside the copied
+      file, NO wiring injection — REQ-SA-608a, AC-F7a/b/c) and the generated-skeleton case (assembler
+      wires `\bibliography` iff the skeleton cites — REQ-SA-608b, AC-F7d/EC-11); the SI
+      cite-resolution gate is added additively per-run (`verify.py:1012-1018` site) AND package
+      (`verify.py:1242` site), reusing `cite_resolution_problems` — dangling `si.tex` cite FAILS,
+      citation-free SI vacuously clean (AC-F8/F9); M6 is domain-neutral (AC-F11); suite green.
+- [ ] M6 REVIEW GATE (D3, non-automated): a human diff-review confirms the AC-F10 scope-discipline
+      clause — no OTHER `sci-adk verify` computation over the belief docs / `runs/` / the record is
+      altered beyond the additive SI cite gate; and the `compiler.py:544` comment now describes the
+      authored-SI bib model (the false-phrase absence is the automated half, AC-F6).
 - [ ] All acceptance scenarios (AC-A1..A7, AC-B1..B6, AC-C1..C5, AC-D1..D4, AC-E1..E5, AC-E5a,
-      AC-E6..E12) pass.
-- [ ] All edge cases (EC-1..EC-8) covered.
+      AC-E6..E12, AC-F1..F4, AC-F5, AC-F6, AC-F7a..F7d, AC-F8..F11) pass.
+- [ ] All edge cases (EC-1..EC-12) covered.
 - [ ] Exclusions honored: no new belief-side gate BEYOND the authorized per-run tool-vocab
-      extension, no new package gate logic beyond the additive package deposit check (M2 reuse), no
+      extension (M1) and the additive SI cite-resolution gate (M6, reusing `cite_resolution_problems`),
+      no new package gate logic beyond the additive package deposit check (M2 reuse), no
       `zref-xr`, no change to what verify computes over `runs/` or per-document in the package, no
-      LLM in verdict/record path, no `main.tex`/JOSS-paper change, no package exempt-list, M1–M4
-      per-run path intact, domain-neutral.
+      LLM in verdict/record path (nor at SI-bib selection), no separate SI literature pool, no change
+      to `main.tex`/`references.bib` wiring or the deposit `record.tex` bib, no `main.tex`/JOSS-paper
+      change, no package exempt-list, M1–M4 per-run path intact, domain-neutral.
 - [ ] Design source `design/si-belief-record-split.md` v0.4 unmodified (this SPEC decomposes it;
-      M5 applies §5/§9 to the package path without re-deciding it).
+      M5 applies §5/§9 to the package path without re-deciding it); the M6 SI-bibliography decision
+      is recorded in `design/si-bibliography.md` (v1.0) which EXTENDS — does not modify — the FROZEN
+      split doc.

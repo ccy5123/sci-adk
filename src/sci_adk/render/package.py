@@ -52,7 +52,7 @@ from sci_adk.loop.verify import verify_run
 # The 6 canonical package folders are defined in the pure gate module (kernel-side, no
 # verify_run dependency) so importing it here does not re-introduce a circular import; the
 # assembler and the gate share that one source of truth.
-from sci_adk.render.pkgreqs_checks import PACKAGE_FOLDERS
+from sci_adk.render.pkgreqs_checks import PACKAGE_FOLDERS, bib_subset, cited_keys
 
 # The builders shipped under templates/research-workspace/package/04_scripts/. The assembler
 # copies them into the package's 04_scripts/ (so the package is self-regenerating) AND runs
@@ -70,6 +70,9 @@ _BUILDER_NAMES: tuple[str, ...] = (
 _MAIN_TEX = "main.tex"
 _SI_TEX = "si.tex"
 _REFERENCES_BIB = "references.bib"
+# The authored package si.tex's OWN bibliography (SPEC-SI-AUTHORING-001 M6), symmetric to
+# how main.tex uses references.bib -- a cited-only subset of the package pool (REQ-SA-608).
+_REFERENCES_SI_BIB = "references_SI.bib"
 
 
 @dataclass(frozen=True)
@@ -423,10 +426,12 @@ def _ensure_manuscript(
     author_main = author_src / _MAIN_TEX
     author_si = author_src / _SI_TEX
     author_bib = author_src / _REFERENCES_BIB
+    author_si_bib = author_src / _REFERENCES_SI_BIB
 
     main_dest = manuscript_dir / _MAIN_TEX
     si_dest = manuscript_dir / _SI_TEX
     bib_dest = manuscript_dir / _REFERENCES_BIB
+    si_bib_dest = manuscript_dir / _REFERENCES_SI_BIB
 
     if author_bib.is_file():
         shutil.copyfile(author_bib, bib_dest)
@@ -452,6 +457,24 @@ def _ensure_manuscript(
     else:
         si_dest.write_text(_skeleton_si_tex(), encoding="utf-8")
         si_authored = False
+
+    # SPEC-SI-AUTHORING-001 M6: the package si.tex gets its OWN references_SI.bib, symmetric
+    # to how main.tex uses references.bib (REQ-SA-608/608a/608b/609/610). D1 two cases:
+    #   (a) author-supplied package_src/references_SI.bib -> preserved verbatim (the author
+    #       owns the \bibliography{references_SI} line inside the verbatim-copied si.tex;
+    #       the assembler ONLY lands the bib beside it, never injects wiring, REQ-SA-608a);
+    #   (b) no author SI bib -> a cited-only subset of the package pool (bib_dest) for the
+    #       keys CITED in the resulting package si.tex (author-supplied or generated
+    #       skeleton). A citation-free si.tex (the default skeleton, D7) -> NO file
+    #       (REQ-SA-610). The subset is a PURE set op over the pool -- no LLM/network.
+    if author_si_bib.is_file():
+        shutil.copyfile(author_si_bib, si_bib_dest)
+    else:
+        si_keys = cited_keys(si_dest.read_text(encoding="utf-8"))
+        if si_keys and bib_dest.is_file():
+            subset = bib_subset(bib_dest.read_text(encoding="utf-8"), si_keys)
+            if subset:
+                si_bib_dest.write_text(subset, encoding="utf-8")
 
     return main_authored, si_authored
 
