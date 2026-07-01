@@ -411,6 +411,40 @@ digitized gate, verify/hook (all green in the same run); D3 advisory-channel cho
 
 ---
 
+## 15. Registering the connector with Claude Science (local Desktop Extension)
+
+Verified live 2026-07-01 against Claude Science `operon` (`0.1.0-dev.20260630`). Claude Science runs
+local MCP servers inside a bubblewrap sandbox. Registration is UI-driven (Capabilities → Connectors →
+Custom → **+ Add connector → Local command**; the UI also offers Remote URL and Browse Directory); there
+is no CLI verb and no hand-editable server list (custom servers live in the daemon's DB). Two sandbox
+facts drive the setup:
+
+1. **The home dir is hidden from the MCP sandbox.** Grant the paths the server needs in
+   `~/.claude-science/config.toml`, then restart the daemon (`operon stop && operon serve --detached
+   --no-browser`; re-login via `operon url`):
+   ```toml
+   [sandbox]
+   user_read_paths  = ["<launcher dir>", "<user site-packages>", "<sci-adk repo>"]
+   user_write_paths = ["<workspace>/runs"]
+   ```
+2. **The sandbox does not process the user-site `.pth`,** so an editable install's `import sci_adk` fails
+   with `ModuleNotFoundError` even when the files are granted. Point the connector's **Command** at a tiny
+   launcher that sets `sys.path` explicitly before importing (machine-specific, git-ignored):
+   ```python
+   import sys
+   sys.path.insert(0, "<user site-packages>"); sys.path.insert(0, "<sci-adk>/src")
+   from sci_adk.adapter.connector_server import main; main()
+   ```
+   A non-editable, system-path install (`/usr/local`, `/opt`) needs neither workaround — the sandbox sees
+   system paths by default. The launcher is the zero-sudo, dev-friendly path.
+
+Once loaded, the connector exposes `append_evidence` / `verify` / `status`. `append_evidence` writes (and
+any out-of-sandbox host access) surface as approval cards under Customize → Permissions. Live smoke test:
+`status` → exit 0 + record snapshot; `verify` → the no-LLM audit (UNRESOLVED for an un-judged claim, plus
+the record digest); `append_evidence` with a wrong `spec_digest` → exit 2, refused, nothing written (§7.2).
+
+---
+
 Version: 0.2
 Source: fusion investigation 2026-07-01 (premises verified against source; D1/D2 resolved from measured
-Claude Science integration surface). Supersedes v0.1 DRAFT.
+Claude Science integration surface; §15 added after the live end-to-end run). Supersedes v0.1 DRAFT.

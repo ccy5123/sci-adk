@@ -257,3 +257,6 @@ dmypy.json
 
 # DVC cache (local only, not in runs/)
 .dvc/cache/
+
+# Claude Science connector launcher -- machine-specific (absolute home paths), not portable
+mcp_connector_launch.py

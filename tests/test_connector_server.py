@@ -30,20 +30,20 @@ def _spy(monkeypatch, exit_code: int = 0, prints: str = ""):
 
 def test_append_evidence_routes_and_injects_digest(monkeypatch):
     calls = _spy(monkeypatch)
-    out = connector_server.tool_append_evidence("runs/x", "e.json", "abc")
+    out = connector_server.append_evidence("runs/x", "e.json", "abc")
     assert calls == [("append-evidence", ["runs/x", "--evidence", "e.json"], "abc")]
     assert out["ok"] is True and out["exit_code"] == 0
 
 
 def test_verify_strict_flag(monkeypatch):
     calls = _spy(monkeypatch)
-    connector_server.tool_verify("runs/x", strict_science=True)
+    connector_server.verify("runs/x", strict_science=True)
     assert calls == [("verify", ["runs/x", "--strict-science"], None)]
 
 
 def test_status_routes(monkeypatch):
     calls = _spy(monkeypatch)
-    connector_server.tool_status("runs/x")
+    connector_server.status("runs/x")
     assert calls == [("status", ["runs/x", "--json"], None)]
 
 
@@ -51,7 +51,7 @@ def test_cli_stdout_is_captured_not_leaked(monkeypatch, capsys):
     """The CLI's stdout must be captured into the result, never leaked to the real
     stdout (which carries the MCP JSON-RPC protocol)."""
     _spy(monkeypatch, prints="derive-claim: ...")
-    out = connector_server.tool_verify("runs/x")
+    out = connector_server.verify("runs/x")
     assert "derive-claim: ..." in out["stdout"]
     leaked = capsys.readouterr().out
     assert "derive-claim" not in leaked, "CLI stdout leaked past the capture"
@@ -59,7 +59,7 @@ def test_cli_stdout_is_captured_not_leaked(monkeypatch, capsys):
 
 def test_verify_nonzero_exit_reports_not_ok(monkeypatch):
     _spy(monkeypatch, exit_code=2)
-    out = connector_server.tool_verify("runs/x")
+    out = connector_server.verify("runs/x")
     assert out["ok"] is False and out["exit_code"] == 2
 
 
@@ -68,7 +68,7 @@ def test_boundary_refusal_is_structured(monkeypatch):
         raise connector.ConnectorBoundaryError("nope")
 
     monkeypatch.setattr(connector, "dispatch", refuse)
-    out = connector_server.tool_append_evidence("runs/x", "e.json", "")
+    out = connector_server.append_evidence("runs/x", "e.json", "")
     assert out["ok"] is False and "nope" in out["refused"]
 
 
@@ -78,4 +78,4 @@ def test_build_server_registers_exposed_tools():
     # FastMCP exposes registered tools via list_tools() (async) or the tool manager;
     # assert the three wire tools are present by name via the tool manager registry.
     names = {t.name for t in server._tool_manager.list_tools()}
-    assert {"tool_append_evidence", "tool_verify", "tool_status"} <= names
+    assert {"append_evidence", "verify", "status"} <= names

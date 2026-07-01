@@ -41,7 +41,7 @@ def _invoke(
     }
 
 
-def tool_append_evidence(
+def append_evidence(
     run_dir: str, evidence_path: str, spec_digest: str
 ) -> dict[str, Any]:
     """Append one typed EvidenceItem (the JSON at ``evidence_path``) to the run's
@@ -55,7 +55,7 @@ def tool_append_evidence(
     )
 
 
-def tool_verify(run_dir: str, strict_science: bool = False) -> dict[str, Any]:
+def verify(run_dir: str, strict_science: bool = False) -> dict[str, Any]:
     """Read-only belief audit: re-apply the frozen rules to the recorded Evidence
     (no re-run, no LLM). Advisory only -- the binding verdict is the Stop-hook.
     ``exit_code`` 0 iff every recorded claim reproduces."""
@@ -63,7 +63,7 @@ def tool_verify(run_dir: str, strict_science: bool = False) -> dict[str, Any]:
     return _invoke("verify", args)
 
 
-def tool_status(run_dir: str) -> dict[str, Any]:
+def status(run_dir: str) -> dict[str, Any]:
     """Read-only session-state snapshot (recorded claim statuses + open decisions)
     for ``run_dir``. Cheap; safe to call every turn."""
     return _invoke("status", [run_dir, "--json"])
@@ -77,9 +77,9 @@ def build_server() -> Any:  # -> mcp.server.fastmcp.FastMCP
     from mcp.server.fastmcp import FastMCP
 
     server = FastMCP("sci-adk")
-    server.tool()(tool_append_evidence)
-    server.tool()(tool_verify)
-    server.tool()(tool_status)
+    server.tool()(append_evidence)
+    server.tool()(verify)
+    server.tool()(status)
     return server
 
 
