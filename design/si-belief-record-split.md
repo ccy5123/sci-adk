@@ -1,6 +1,8 @@
 # Authoring-Flow SI — "main and SI are both authored; the record is the deposit"
 
-> Status: AGREED (2026-07-01), design — NOT yet built. ALL open points closed; SPEC-ready.
+> Status: BUILT (2026-07-01) as SPEC-SI-AUTHORING-001 — per-run path (M1-M4) + package path
+> (M5), on branch `feat/authoring-flow-si` (not yet merged to master). Design AGREED, all open
+> points closed. See `.moai/specs/SPEC-SI-AUTHORING-001/`.
 >
 > The Supporting Information is AUTHORED (agent-written, fidelity-gated) as the natural
 > overflow of the main paper — not machine-generated as a record dump. The auditable
