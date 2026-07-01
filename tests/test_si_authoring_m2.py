@@ -99,3 +99,38 @@ def test_deposit_check_is_additive_to_record_green_audit(tmp_path):
     assert report.all_reproduced is True            # record-green audit UNCHANGED
     assert report.deposit_complete is False         # the additive deposit channel fired
     assert report.deposit_problems                  # ... and surfaced its problem line(s)
+
+
+# ---------------------------------------------------------------------------
+# AC-C4 (CLI surface) -- the deposit channel is not just a report field; `sci-adk verify`
+# actually SURFACES it to the user. A complete deposit prints the "deposit complete" line
+# on stdout; an incomplete one is surfaced on stderr as an ADVISORY that does NOT flip the
+# exit code while the record reproduces. Characterization of the per-run CLI wiring.
+# ---------------------------------------------------------------------------
+
+def test_cli_verify_surfaces_complete_deposit(tmp_path, capsys):
+    from sci_adk.cli import main
+
+    spec = _numeric_spec("m2-cli-complete", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _append_availability(run_dir)  # deposit carries record.tex + availability statement
+
+    main(["verify", str(run_dir)])
+    out = capsys.readouterr().out
+    assert "deposit complete" in out  # the user actually sees the deposit-completeness result
+
+
+def test_cli_verify_surfaces_incomplete_deposit_as_advisory(tmp_path, capsys):
+    from sci_adk.cli import main
+
+    spec = _numeric_spec("m2-cli-incomplete", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    # record.tex exists but no availability statement -> deposit INCOMPLETE. Surfaced on stderr
+    # as an ADVISORY that says "not gated" -- the user is warned. (The exit code is decided by
+    # the record-green/consistency gates, NOT this channel; its non-gating nature is pinned at
+    # the report level in test_deposit_check_is_additive_to_record_green_audit above.)
+    main(["verify", str(run_dir)])
+    err = capsys.readouterr().err
+    assert "deposit INCOMPLETE" in err
+    assert "advisory -- not gated" in err
+    assert "availability" in err.lower()  # the missing element is named

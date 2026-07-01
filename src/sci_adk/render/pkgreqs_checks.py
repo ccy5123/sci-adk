@@ -485,6 +485,12 @@ def readme_submission_readiness_problems(readme: str) -> List[str]:
 # the deposit's record text still counts -- the SAME presence-only spirit as
 # ``_SUBMISSION_READINESS_RE`` above. Presence-only: it confirms the statement EXISTS, never
 # that it is correct (record vs belief -- this gate does not judge belief content).
+#
+# KEEP IN SYNC with the authoritative producers of the statement (REQ-SA-506a): the package
+# record renderer emits `\section{Data \& code availability}` (make_si.py), and the per-run
+# record renderer's availability prose likewise carries this header. This pattern MUST keep
+# matching those header strings -- changing a producer's wording without widening this regex
+# would silently break the deposit-completeness gate.
 _DATA_AVAILABILITY_RE = re.compile(
     r"data\s*(?:&|\\&|and)\s*code\s*availability", re.IGNORECASE
 )
