@@ -324,10 +324,13 @@ agent self-corrects, sci-adk adjudicates against frozen criteria.*
 
 - **(a) sci-adk MCP connector (local Desktop Extension).** A thin local MCP server wrapping the §7.1
   exposed verbs, enforcing §7.2 spec-digest. This is the §5 adapter. Directly reuses the existing CLI.
-  *Status (2026-07-01): the SDK-free boundary core is prototyped at `src/sci_adk/adapter/connector.py`
-  (default-deny allowlist, `append-evidence` digest requirement, read-only classification), tested by
-  `tests/test_connector_boundary.py`. The MCP wire transport (stdio Desktop Extension) is the deferred
-  shell — it pulls the `mcp` dependency, which the tool-addition protocol gates on user approval.*
+  *Status (2026-07-01): BUILT. The SDK-free boundary core is at `src/sci_adk/adapter/connector.py`
+  (default-deny allowlist, `append-evidence` digest requirement, read-only classification), and the MCP
+  wire transport (stdio Desktop Extension) is at `src/sci_adk/adapter/connector_server.py` — a FastMCP
+  server exposing `append_evidence` / `verify` / `status`, capturing the CLI's stdout so it cannot corrupt
+  the JSON-RPC stream. Console entry `sci-adk-connector`; `mcp` is an optional extra
+  (`pip install -e ".[connector]"`, user-approved 2026-07-01, recorded in `design/tool-policy.md`). Tested
+  by `tests/test_connector_boundary.py` + `tests/test_connector_server.py`.*
 - **(b) `init-session` Stop-hook template.** Already exists (`stop-verify-gate.sh`); the fusion packages it
   as the one-command way to turn any Claude Science project into a gated one — *"done" requires passing
   `verify`.*

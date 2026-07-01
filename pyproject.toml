@@ -51,8 +51,19 @@ tools = [
     "paperforge @ git+https://github.com/ccy5123/paperforge.git@2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e",
 ]
 
+# Claude Science connector wire transport
+# (src/sci_adk/adapter/connector_server.py): the MCP stdio server exposing the §7
+# boundary surface as a local Desktop Extension. Optional so the base research
+# compiler stays free of the MCP dependency -- the boundary core (connector.py) is
+# dependency-free. User-approved 2026-07-01; recorded in design/tool-policy.md.
+#   pip install -e ".[connector]"
+connector = [
+    "mcp>=1.0.0",
+]
+
 [project.scripts]
 sci-adk = "sci_adk.cli:main"
+sci-adk-connector = "sci_adk.adapter.connector_server:main"
 
 [project.urls]
 Homepage = "https://github.com/ccy5123/sci-adk"
