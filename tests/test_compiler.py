@@ -346,3 +346,91 @@ def test_f3_reproduce_references_only_recorded_refs(tmp_path):
     # The recorded commit is present; an unrecorded ref must not be invented.
     assert commit in repro_text
     assert "deadbeef" not in repro_text
+
+
+# ---------------------------------------------------------------------------
+# P2 (field report): a RESOLVED (SUPPORTED/REFUTED) proof/qualitative hypothesis must NOT
+# render a "Pending agent judgments" section. Otherwise a fully-resolved run carries stale
+# pending scaffolding whose boilerplate ("verdict") + dumped finding digits trip the §10
+# tool-vocabulary and number-audit gates -- the run failing verify on its OWN auto-output.
+# ---------------------------------------------------------------------------
+
+def _qualitative_spec(spec_id: str, hyp_id: str = "hyp-q") -> Spec:
+    return Spec(
+        id=spec_id,
+        version=1,
+        raw_proposal=RawProposal(background="b", goal="g", method="m", expected_output="o"),
+        hypotheses=[
+            Hypothesis(
+                id=hyp_id, statement="the qualitative criterion holds",
+                mode=HypothesisMode.CONFIRMATORY,
+                decision_rule=DecisionRule(
+                    kind=DecisionRuleKind.QUALITATIVE,
+                    expression="the criterion holds => support",
+                ),
+                referent="formal",
+                non_circularity="the verifier checks a property not baked into the generator",
+            )
+        ],
+        method=MethodPlan(approaches=["a"], tools=[]),
+        target_claims=[TargetClaim(id="tc", statement="t", answers=hyp_id)],
+    )
+
+
+def test_stage_render_pending_section_gated_on_claim_resolution(tmp_path):
+    from sci_adk.core.claim import Claim
+
+    spec = _qualitative_spec("t-p2")
+    evidence = [
+        EvidenceItem(
+            id="ev-q", spec_id=spec.id, kind=EvidenceKind.PROOF_STEP,
+            provenance=Provenance(code_ref="fixture", data_source="generated"),
+            result=Result(type="qualitative", finding="the proof body for hyp-q"),
+            bears_on=[Bearing(target_id="hyp-q", direction=BearingDirection.SUPPORTS)],
+        )
+    ]
+    compiler = ResearchCompiler(workspace_dir=tmp_path)
+    compiler.stage_init_spec(spec=spec)
+
+    # Regression guard: with NO resolved claim the checkpoint is still pending -> section shown.
+    p_open, *_ = compiler.stage_render(spec, evidence=evidence, claims=[])
+    assert r"\section{Pending agent judgments}" in p_open.read_text(encoding="utf-8")
+
+    # P2: once the hypothesis' Claim is SUPPORTED, it is no longer pending -> NO section.
+    resolved = Claim.create_null_result_claim(
+        id="claim-hyp-q", spec_id=spec.id, answers="hyp-q",
+        statement="the criterion holds", mode=HypothesisMode.CONFIRMATORY,
+    )
+    assert resolved.is_supported()
+    p_res, *_ = compiler.stage_render(spec, evidence=evidence, claims=[resolved])
+    assert r"\section{Pending agent judgments}" not in p_res.read_text(encoding="utf-8")
+
+
+def test_stage_render_pending_not_dropped_by_supported_novelty_claim(tmp_path):
+    # P2 edge: a per-kind NOVELTY claim (id 'claim-novelty-<kind>-<hyp>') shares
+    # answers==hyp with the main claim. A SUPPORTED novelty claim must NOT mark the
+    # hypothesis resolved -- the pending checkpoint tracks the MAIN experiment claim, still
+    # PROPOSED here. The filter keys on the MAIN claim id, not Claim.answers.
+    from sci_adk.core.claim import Claim
+
+    spec = _qualitative_spec("t-p2-novelty")
+    evidence = [
+        EvidenceItem(
+            id="ev-q", spec_id=spec.id, kind=EvidenceKind.PROOF_STEP,
+            provenance=Provenance(code_ref="fixture", data_source="generated"),
+            result=Result(type="qualitative", finding="the proof body for hyp-q"),
+            bears_on=[Bearing(target_id="hyp-q", direction=BearingDirection.SUPPORTS)],
+        )
+    ]
+    compiler = ResearchCompiler(workspace_dir=tmp_path)
+    compiler.stage_init_spec(spec=spec)
+
+    novelty_supported = Claim.create_null_result_claim(
+        id="claim-novelty-result-hyp-q", spec_id=spec.id, answers="hyp-q",
+        statement="Result-novelty: the qualitative criterion holds",
+        mode=HypothesisMode.CONFIRMATORY,
+    )
+    assert novelty_supported.is_supported()
+    # The MAIN claim is absent/unresolved -> the pending section MUST remain.
+    p, *_ = compiler.stage_render(spec, evidence=evidence, claims=[novelty_supported])
+    assert r"\section{Pending agent judgments}" in p.read_text(encoding="utf-8")

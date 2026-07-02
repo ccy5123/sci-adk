@@ -573,7 +573,23 @@ class ResearchCompiler:
 
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
-        pending_dicts = [c.__dict__ for c in checkpoints_list]
+        # A hypothesis whose MAIN experiment Claim is already RESOLVED (SUPPORTED/REFUTED) is
+        # no longer "pending". Drop its checkpoint from the rendered belief paper so a
+        # fully-resolved run carries NO "Pending agent judgments" section -- whose boilerplate
+        # ("verdict") and dumped finding digits would otherwise trip the tool-vocabulary and
+        # number-audit gates on the run's OWN auto-generated scaffolding. The judge-checkpoint
+        # FILES on disk are untouched; this filters only what the paper renders as still-open.
+        # Match on the MAIN claim id (``claim-<hyp>``), NOT ``Claim.answers``: the per-kind
+        # novelty claims (``claim-novelty-<kind>-<hyp>``) share ``answers == hyp`` and must
+        # not mark a hypothesis resolved when only a novelty axis -- not the experiment claim
+        # the checkpoint tracks -- has been decided.
+        resolved_main_claim_ids = {
+            c.id for c in claims_list if c.is_supported() or c.is_refuted()
+        }
+        pending_dicts = [
+            c.__dict__ for c in checkpoints_list
+            if f"claim-{c.hypothesis_id}" not in resolved_main_claim_ids
+        ]
         cited_dois = self._gather_cited_dois(evidence_list, run_dir)
 
         paper_dir = run_dir / "paper"
