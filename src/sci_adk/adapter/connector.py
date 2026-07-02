@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from sci_adk.cli import main as _cli_main
 
 # §7.1 -- read-only (advisory) verbs.
-EXPOSED_READONLY: frozenset[str] = frozenset({"verify", "status"})
+EXPOSED_READONLY: frozenset[str] = frozenset({"verify", "status", "scan-literature"})
 
 # §7.1 -- record-write verbs the session may drive.
 EXPOSED_WRITE: frozenset[str] = frozenset(

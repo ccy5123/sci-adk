@@ -177,6 +177,19 @@ requirement). This does NOT contradict the "no periodic prompt" rule above: the 
 the workspace `CLAUDE.md` + the experiment SKILL (search the question, then record). Source:
 `docs/field-report-triage.md` (concern 2).
 
+**v0.5 (watch-folder scan, user request):** the manual-ingest verb (`add-literature`)
+handles ONE known PDF; discovery of user-dropped papers was manual. Add
+`sci-adk scan-literature <run_dir> [--dir …]` — a READ-ONLY, deterministic, no-LLM scan of
+the watch folder(s) (`--dir` overrides; else `[literature] watch_dirs` in the config; else
+`~/Downloads`) that lists the `*.pdf` files NOT already in `runs/<id>/literature/pdfs/`.
+De-dup is by CONTENT HASH (sha256), not filename — the store's copy preserves the source
+bytes, so a filename-renamed-to-bibkey copy still matches; no ledger file is needed (the
+store IS the ledger). NOT a watcher/daemon (the tool policy forbids a background service):
+a scan run on demand + skill wiring. The agent then reads each candidate, judges whether it
+is a real paper (Downloads holds non-papers), confirms via `AskUserQuestion`, and ingests
+the confirmed ones through `add-literature`. Behavioral wiring: workspace `CLAUDE.md`.
+Source: user request (2026-07-02).
+
 ### When found literature touches a frozen element -> Spec amendment (F7)
 
 Recording the *decision* is not enough. If newly found prior work means a
