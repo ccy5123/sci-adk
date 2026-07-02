@@ -31,6 +31,11 @@ RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-ini
     | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.elan/bin:${PATH}"
 
+# Bake the stable toolchain INTO the image. elan is lazy (it only records the default and
+# downloads Lean on first use), so without this every `docker run --rm ... lean` would
+# re-download the toolchain. Forcing `lean --version` at build time caches it in the layer.
+RUN lean --version
+
 # OPTIONAL (recommended for real use): a Mathlib-enabled Lake project pre-built so `import
 # Mathlib` resolves without rebuilding it per proof. Uncomment + pin a release:
 #   RUN lake +stable new mathlib_env math && cd mathlib_env \

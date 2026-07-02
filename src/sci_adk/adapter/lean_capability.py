@@ -100,10 +100,18 @@ def lean_experiment(
             (ws / task.filename).write_text(task.lean_source, encoding="utf-8")
             res = ex.execute_command(["lean", task.filename])
             rc = int(res.get("returncode", 1))
+            out = ((res.get("stdout") or "") + "\n" + (res.get("stderr") or "")).strip()
             prov = res.get("provenance") or {}
             image_id = prov.get("image_id") or prov.get("image_name") or image
 
-            if rc == 0:
+            # IMPORTANT: `lean <file>` exits 0 EVEN ON ERRORS (it prints an `error:`
+            # diagnostic but does not fail the process), and a `sorry` hole compiles with
+            # only a warning. So the exit code alone is NOT trustworthy -- a proof is
+            # genuinely machine-verified iff the checker exited cleanly AND emitted no error
+            # diagnostic AND no `sorry`. (Empirically a clean proof prints nothing.)
+            verified = rc == 0 and "error:" not in out and "sorry" not in out
+
+            if verified:
                 items.append(
                     EvidenceItem(
                         id=f"ev-lean-{i}",
@@ -112,18 +120,25 @@ def lean_experiment(
                         provenance=Provenance(
                             code_ref=task.filename,
                             data_source="generated",
-                            environment=f"lean4 checker (image={image_id}); exit 0",
+                            environment=f"lean4 checker (image={image_id}); verified, no diagnostics",
                         ),
                         result=Result(
                             type="qualitative",
-                            finding=f"lean4 verified {task.filename} (checker exit 0)",
+                            finding=f"lean4 verified {task.filename} (exit 0, no error/sorry diagnostics)",
                         ),
                         bears_on=[Bearing(target_id=task.hypothesis_id,
                                           direction=BearingDirection.SUPPORTS)],
                     )
                 )
             else:
-                stderr = (res.get("stderr") or "").strip()
+                if rc != 0:
+                    reason = f"checker exit {rc}"
+                elif "error:" in out:
+                    reason = "error diagnostics (checker exits 0 on errors)"
+                elif "sorry" in out:
+                    reason = "the proof uses `sorry` (an admitted hole, not a proof)"
+                else:
+                    reason = "not verified"
                 items.append(
                     EvidenceItem(
                         id=f"ev-lean-{i}",
@@ -132,13 +147,13 @@ def lean_experiment(
                         provenance=Provenance(
                             code_ref=task.filename,
                             data_source="generated",
-                            environment=f"lean4 checker (image={image_id}); exit {rc}",
+                            environment=f"lean4 checker (image={image_id}); {reason}",
                         ),
                         result=Result(
                             type="qualitative",
-                            finding=(f"lean4 did NOT verify {task.filename} (checker exit "
-                                     f"{rc}); a failed compile is not a counterexample -- "
-                                     f"the proof attempt did not verify. stderr: {stderr[:500]}"),
+                            finding=(f"lean4 did NOT verify {task.filename} ({reason}); a "
+                                     f"failed check is not a counterexample -- the proof "
+                                     f"attempt did not verify. output: {out[:500]}"),
                         ),
                         # NEUTRAL: an un-verified attempt neither supports nor refutes -> the
                         # claim stays inconclusive/PROPOSED (only a COUNTEREXAMPLE refutes).

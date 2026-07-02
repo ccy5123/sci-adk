@@ -78,16 +78,30 @@ def test_lean_pass_emits_formal_proof_supports(tmp_path):
     assert (tmp_path / "proof.lean").read_text() == "theorem t : True := trivial"
 
 
-def test_lean_fail_emits_neutral_proof_step(tmp_path):
-    fake = _FakeLean(returncode=1, stderr="error: unsolved goals")
-    spec = _proof_spec("lean-fail")
-    task = LeanProofTask(hypothesis_id=_HYP, lean_source="theorem t : False := sorry")
+def test_lean_error_exit0_is_not_verified(tmp_path):
+    # REAL Lean behavior: `lean <file>` exits 0 EVEN on an error (it prints an `error:`
+    # diagnostic). The capability must NOT trust exit code alone -> an `error:` in the
+    # output means NOT verified (a NEUTRAL PROOF_STEP, not a FORMAL_PROOF).
+    fake = _FakeLean(returncode=0, stderr="proof.lean:1:24: error: unsolved goals")
+    spec = _proof_spec("lean-err")
+    task = LeanProofTask(hypothesis_id=_HYP, lean_source="theorem t : False := by trivial")
     items = lean_experiment([task], executor=fake)(spec, tmp_path)
 
     assert len(items) == 1
-    assert items[0].kind is EvidenceKind.PROOF_STEP     # NOT a counterexample
+    assert items[0].kind is EvidenceKind.PROOF_STEP     # NOT a FORMAL_PROOF, NOT a counterexample
     assert items[0].bears_on[0].direction is BearingDirection.NEUTRAL
     assert "did NOT verify" in (items[0].result.finding or "")
+
+
+def test_lean_sorry_is_not_verified(tmp_path):
+    # A `sorry` hole compiles with only a warning (exit 0). It is NOT a proof -> not verified.
+    fake = _FakeLean(returncode=0, stderr="proof.lean:1:8: warning: declaration uses `sorry`")
+    spec = _proof_spec("lean-sorry")
+    task = LeanProofTask(hypothesis_id=_HYP, lean_source="theorem t : True := by sorry")
+    items = lean_experiment([task], executor=fake)(spec, tmp_path)
+
+    assert items[0].kind is EvidenceKind.PROOF_STEP
+    assert "sorry" in (items[0].result.finding or "").lower()
 
 
 def test_lean_pass_end_to_end_binds_supported_without_judge(tmp_path):
@@ -105,9 +119,9 @@ def test_lean_pass_end_to_end_binds_supported_without_judge(tmp_path):
 def test_lean_fail_end_to_end_stays_proposed(tmp_path):
     # A failed check does not support and does not refute -> the claim stays PROPOSED
     # (inconclusive), never falsely SUPPORTED or REFUTED.
-    fake = _FakeLean(returncode=1, stderr="error")
+    fake = _FakeLean(returncode=0, stderr="proof.lean:1:0: error: unsolved goals")
     spec = _proof_spec("lean-e2e-fail")
-    task = LeanProofTask(hypothesis_id=_HYP, lean_source="theorem t : False := sorry")
+    task = LeanProofTask(hypothesis_id=_HYP, lean_source="theorem t : False := by trivial")
     result = ResearchCompiler(workspace_dir=tmp_path).compile(
         "", spec=spec, experiment=lean_experiment([task], executor=fake))
     claim = {c.answers: c for c in result.claims}[_HYP]
