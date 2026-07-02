@@ -95,6 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
              "yields an autonomous injectivity verdict",
     )
     run.add_argument(
+        "--enforce-prior-work", action="store_true",
+        help="refuse to run experiments until the Spec-anchor prior-work DECISION is "
+             "recorded (search FIRST, or record a skip-with-reason). For the autonomous "
+             "'start research' flow. Does NOT force a search -- a recorded skip clears it. "
+             "The run dir + spec are laid down before the halt so you can record and re-run.",
+    )
+    run.add_argument(
         "--prose", default=None, metavar="PATH",
         help="optional JSON file mapping {abstract, introduction, discussion} -> text; "
              "agent-authored narrative injected verbatim into the LaTeX draft as "
@@ -204,6 +211,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="searched path only: proceed with DEGRADED Open-Access acquisition when "
              "no contact email is set (default: refuse and halt). By default the "
              "searched path requires a contact email (arg/config/$UNPAYWALL_EMAIL)",
+    )
+
+    inquiry = sub.add_parser(
+        "inquiry",
+        help="record a mid-research emergent-question literature decision (the ad-hoc "
+             "'wait, has anyone measured X?' moment): searched -> LITERATURE + "
+             "INQUIRY_DECISION, or skipped -> a recorded null. Not a gate; a record.",
+    )
+    inquiry.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    inquiry.add_argument(
+        "--question", required=True,
+        help="the emergent question that arose mid-research (the record of WHAT prompted "
+             "the search; required, non-blank)",
+    )
+    _inq_group = inquiry.add_mutually_exclusive_group(required=True)
+    _inq_group.add_argument(
+        "--searched", nargs="+", metavar="DOI",
+        help="the question WAS searched: acquire these DOIs (discovery via the agent's "
+             "web_search is upstream) -> a LITERATURE EvidenceItem",
+    )
+    _inq_group.add_argument(
+        "--skip", action="store_true",
+        help="the question was NOT searched: record an INQUIRY_DECISION null "
+             "(requires --reason)",
+    )
+    inquiry.add_argument(
+        "--reason", default=None,
+        help="why the emergent question was not searched (required with --skip)",
+    )
+    inquiry.add_argument(
+        "--target-id", default=None,
+        help="optional Hypothesis/Claim id the question relates to (searched path)",
+    )
+    inquiry.add_argument(
+        "--allow-no-email", action="store_true",
+        help="searched path only: proceed with DEGRADED Open-Access acquisition when "
+             "no contact email is set (default: refuse and halt)",
     )
 
     novelty = sub.add_parser(
@@ -863,14 +907,23 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # written. Surface it as a friendly non-zero exit -- never a raw traceback and
     # never a "compiled ... supported" success line for an ungrounded result.
     from sci_adk.core.validity import ValidityHalt
+    from sci_adk.loop.prior_work import PriorWorkHalt
 
     try:
         result = compiler.compile(
             proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
-            prose=prose, si_prose=si_prose, si=si, figures=figures)
+            prose=prose, si_prose=si_prose, si=si, figures=figures,
+            enforce_prior_work=getattr(args, "enforce_prior_work", False))
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
         return 2
+    except PriorWorkHalt as e:
+        # The orchestrated "start research" path enforces the Spec-anchor prior-work
+        # decision: search first, or record a skip-with-reason, then re-run. Surfaced as a
+        # halt-and-ask (human input needed), not an error -- mirrors the AcquisitionHalt
+        # convention (exit 0). The run dir + spec are already laid down for the decision.
+        print(f"halt (human input needed): {e.feedback()}", file=sys.stderr)
+        return 0
 
     print(f"compiled Spec '{result.spec.id}' -> {result.run_dir}")
     print(f"  evidence: {len(result.evidence)} | claims: {len(result.claims)}")
@@ -1722,6 +1775,68 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_inquiry(args: argparse.Namespace) -> int:
+    """Record a mid-research emergent-question literature decision into the Evidence log.
+
+    The ad-hoc counterpart to ``prior-work``: when a NEW question arises DURING research,
+    ``--searched`` drives the existing acquirer (a LITERATURE item), ``--skip`` records an
+    INQUIRY_DECISION null with the reason. Not a gate -- a record (the design rejects a
+    periodic literature prompt; this fires on the agent's judgment).
+    """
+    run_dir = Path(args.run_dir)
+    spec_path = run_dir / "spec.json"
+    if not spec_path.exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
+    workspace = run_dir.parent.parent
+
+    from sci_adk.loop.inquiry import record_inquiry_searched, record_inquiry_skip
+
+    if args.skip:
+        if not args.reason or not args.reason.strip():
+            print("error: --skip requires a non-empty --reason (a skipped emergent "
+                  "search is a recorded null; the record must say why)", file=sys.stderr)
+            return 2
+        try:
+            item = record_inquiry_skip(
+                spec, workspace, question=args.question, reason=args.reason)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(f"recorded inquiry decision (skipped) for Spec '{spec.id}' "
+              f"-> {item.kind.value} evidence {item.id}")
+        print(f"  question: {args.question.strip()}")
+        print(f"  reason: {args.reason.strip()}")
+        return 0
+
+    from sci_adk.config import ConfigHalt
+
+    try:
+        outcome = record_inquiry_searched(
+            spec, workspace, question=args.question, dois=args.searched,
+            target_id=args.target_id, allow_no_email=args.allow_no_email)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except ConfigHalt as e:
+        print(f"error: {e}", file=sys.stderr)
+        print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
+              file=sys.stderr)
+        return 2
+    ev = outcome.evidence
+    print(f"recorded inquiry decision (searched) for Spec '{spec.id}' "
+          f"-> {ev.kind.value} evidence {ev.id}")
+    print(f"  question: {args.question.strip()}")
+    print(f"  acquired: {len(outcome.result.succeeded)} | "
+          f"failed: {len(outcome.result.failed)}")
+    if outcome.should_halt:
+        print("  halt (human input needed):", file=sys.stderr)
+        print(outcome.halt.feedback(), file=sys.stderr)
+    return 0
+
+
 def _cmd_novelty(args: argparse.Namespace) -> int:
     """Record a novelty/priority discovery decision for one {hypothesis, kind} (the High
     trigger, 2-kind) into the log.
@@ -1949,6 +2064,8 @@ def main(argv=None) -> int:
         return _cmd_verify(args)
     if args.command == "prior-work":
         return _cmd_prior_work(args)
+    if args.command == "inquiry":
+        return _cmd_inquiry(args)
     if args.command == "novelty":
         return _cmd_novelty(args)
     if args.command == "contested":

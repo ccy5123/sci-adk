@@ -66,6 +66,16 @@ class EvidenceKind(str, Enum):
     PRIOR_WORK_DECISION = "prior_work_decision"
     NOVELTY_DECISION = "novelty_decision"
     CONTESTED_RECORD = "contested_record"
+    # @MX:NOTE: [AUTO] mid-research emergent-question literature decision
+    #   (design/literature-acquisition.md, field-report concern 2): when a NEW question
+    #   arises DURING research ("wait, has anyone measured X?"), the agent records the
+    #   discovery decision -- searched (-> LITERATURE artifact) or skipped-with-reason (a
+    #   recorded null). Like the other decision kinds it carries bears_on=[] and never
+    #   enters the DecisionEngine; it is a process meta-record, NOT generating code, so it
+    #   is excluded from the reproduction-bundle requirement (verify._NON_REPRODUCIBLE_KINDS).
+    #   Distinct from PRIOR_WORK_DECISION (Spec-anchor, per Spec) and NOVELTY_DECISION
+    #   (per hypothesis x kind): an inquiry is ad-hoc, agent-raised, free-text.
+    INQUIRY_DECISION = "inquiry_decision"
     DIGITIZED = "digitized"
     # @MX:NOTE: [AUTO] figure-digitization (design/figure-digitization.md §2): a value
     #   recovered from a published FIGURE (last-resort fidelity; author-raw and

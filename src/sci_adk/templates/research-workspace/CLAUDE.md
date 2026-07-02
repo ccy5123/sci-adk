@@ -26,6 +26,17 @@ experiments -> append-only Evidence -> sci-adk surfaces checkpoints/halts ->
 author verdicts in-session -> `sci-adk resolve` -> `sci-adk verify` (the gate).
 Record prior-work / novelty / contested decisions at their trigger moments.
 
+**Emergent questions mid-research.** Work like a researcher: when a genuine NEW
+question surfaces DURING the run — "wait, has anyone already measured / proven /
+refuted this?" — do not let it pass silently. Search it (your `web_search` / the
+academic-search tool), then RECORD the decision so it lives in the record like every
+other decision: `sci-adk inquiry <run_dir> --question "<the question>" --searched
+<dois...>` (→ a LITERATURE item + an INQUIRY_DECISION), or `--skip --reason "..."`
+when you judge it out of scope (a recorded null). This is agent-judgment, not a
+periodic prompt — raise it when the question is real. A searched inquiry that hits an
+unfetchable paper prints `halt (human input needed):` and takes the same
+provide-PDF-or-skip path as the Proactive case below.
+
 **User-provided literature (two directions).** Both a system-detected miss and a
 user-offered PDF converge on the same manual-ingest verb:
 

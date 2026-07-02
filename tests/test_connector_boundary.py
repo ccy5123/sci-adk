@@ -100,7 +100,7 @@ def test_readonly_verbs_exposed(tool: str) -> None:
     assert calls == [[tool, "runs/x"]]
 
 
-@pytest.mark.parametrize("tool", ["prior-work", "novelty", "contested"])
+@pytest.mark.parametrize("tool", ["prior-work", "novelty", "contested", "inquiry"])
 def test_write_verbs_exposed_without_digest(tool: str) -> None:
     calls, runner = _spy()
     result = dispatch(tool, ["runs/x", "--skip", "--reason", "r"], _runner=runner)

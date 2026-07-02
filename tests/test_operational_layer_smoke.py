@@ -147,6 +147,12 @@ def test_operational_layer_install_then_verb_chain_to_passing_verify(tmp_path):
     _pr = _pr.model_copy(update={"digest": _pubreqs_digest(_pr)})
     (run_dir / "pubreqs.json").write_text(_pr.model_dump_json(indent=2), encoding="utf-8")
 
+    # A conclusion-bearing run must record its prior-work DECISION for verify to pass (the
+    # autonomous flow: search-or-skip). This smoke test records a skip-with-reason so the
+    # full verb chain reaches a passing verify.
+    from sci_adk.loop.prior_work import record_prior_work_skip
+    record_prior_work_skip(spec, tmp_path, reason="smoke test: prior-work not under test")
+
     # ---- Act 3: the verify gate -- the SAME verdict the Stop hook enforces. ----
     # verify_run is the kernel function behind the ``verify`` verb: re-derive belief from
     # the recorded run (no re-run, no LLM) and confirm it follows from the record AND the

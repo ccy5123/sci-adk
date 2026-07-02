@@ -480,6 +480,12 @@ def _freeze_minimal_pubreqs(run_dir: Path) -> None:
     )
     pr = pr.model_copy(update={"digest": _pubreqs_digest(pr)})
     (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+    # A conclusion-bearing run must also carry a recorded prior-work DECISION (verify gate);
+    # this test targets the novelty gate, so record a skip-with-reason.
+    from sci_adk.core.spec import Spec as _Spec
+    from sci_adk.loop.prior_work import record_prior_work_skip as _rec_pw_skip
+    _spec_obj = _Spec.model_validate_json((run_dir / "spec.json").read_text(encoding="utf-8"))
+    _rec_pw_skip(_spec_obj, run_dir.parent.parent, reason="test fixture: other gate under test")
 
 
 class TestVerifyNoveltyGate:

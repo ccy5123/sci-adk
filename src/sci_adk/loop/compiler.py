@@ -51,7 +51,11 @@ from sci_adk.loop.literature_triggers import (
     novelty_open,
     novelty_reason_from_decisions,
 )
-from sci_adk.loop.prior_work import prior_work_checkpoint
+from sci_adk.loop.prior_work import (
+    PriorWorkHalt,
+    prior_work_checkpoint,
+    prior_work_open,
+)
 from sci_adk.loop.verdict import (
     CheckpointModel,
     ContestedCheckpoint,
@@ -196,6 +200,7 @@ class ResearchCompiler:
         si: Optional[AuthoredSI] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
         si_figures: Optional[Sequence[AnyFigure]] = None,
+        enforce_prior_work: bool = False,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -265,6 +270,16 @@ class ResearchCompiler:
         spec = self.stage_init_spec(
             spec=spec, proposal_text=proposal_text, spec_id=spec_id
         )
+
+        # Proactive prior-work enforcement (opt-in; the orchestrated "start research" path
+        # -- the `run` verb -- sets this). The raw library/primitive default is False so
+        # direct compile()/test callers are unaffected. When on and no prior-work DECISION
+        # is recorded yet, refuse to run experiments: the researcher searches (or records a
+        # skip-with-reason) FIRST. stage_init_spec has already laid down the run dir + spec,
+        # so the human can record the decision and re-run. Not a search mandate -- a decision
+        # mandate (design/literature-acquisition.md: the discovery decision must be recorded).
+        if enforce_prior_work and prior_work_open(spec, self.workspace_dir):
+            raise PriorWorkHalt(spec.id, self.workspace_dir / "runs" / spec.id)
 
         # `run` threads the experiment's evidence in memory, but `stage_execute` returns it
         # in the CANONICAL (sorted-by-filename) order -- the SAME order the standalone
@@ -573,7 +588,23 @@ class ResearchCompiler:
 
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
-        pending_dicts = [c.__dict__ for c in checkpoints_list]
+        # A hypothesis whose MAIN experiment Claim is already RESOLVED (SUPPORTED/REFUTED) is
+        # no longer "pending". Drop its checkpoint from the rendered belief paper so a
+        # fully-resolved run carries NO "Pending agent judgments" section -- whose boilerplate
+        # ("verdict") and dumped finding digits would otherwise trip the tool-vocabulary and
+        # number-audit gates on the run's OWN auto-generated scaffolding. The judge-checkpoint
+        # FILES on disk are untouched; this filters only what the paper renders as still-open.
+        # Match on the MAIN claim id (``claim-<hyp>``), NOT ``Claim.answers``: the per-kind
+        # novelty claims (``claim-novelty-<kind>-<hyp>``) share ``answers == hyp`` and must
+        # not mark a hypothesis resolved when only a novelty axis -- not the experiment claim
+        # the checkpoint tracks -- has been decided.
+        resolved_main_claim_ids = {
+            c.id for c in claims_list if c.is_supported() or c.is_refuted()
+        }
+        pending_dicts = [
+            c.__dict__ for c in checkpoints_list
+            if f"claim-{c.hypothesis_id}" not in resolved_main_claim_ids
+        ]
         cited_dois = self._gather_cited_dois(evidence_list, run_dir)
 
         paper_dir = run_dir / "paper"

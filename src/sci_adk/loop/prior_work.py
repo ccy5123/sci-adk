@@ -67,6 +67,36 @@ _PROMPT = (
 _CLOSING_KINDS = (EvidenceKind.PRIOR_WORK_DECISION,)
 
 
+class PriorWorkHalt(Exception):
+    """Raised when a run must record its prior-work decision before it may proceed.
+
+    The PROACTIVE counterpart to the advisory :class:`PriorWorkCheckpoint`: when
+    enforcement is on (the orchestrated "start research" path), the compile refuses to
+    run experiments while :func:`prior_work_open` -- the researcher searches (or records
+    a skip-with-reason) FIRST. It does NOT force a search: recording a skip-with-reason
+    clears it. This keeps the design principle intact ("the discovery decision must be in
+    the record", design/literature-acquisition.md) while making the Spec-anchor check
+    un-skippable in the autonomous flow. Mirrors the ``AcquisitionHalt`` hand-back:
+    surfaced by the orchestrator, never a raw traceback.
+    """
+
+    def __init__(self, spec_id: str, run_dir: Path) -> None:
+        self.spec_id = spec_id
+        self.run_dir = run_dir
+        super().__init__(self.feedback())
+
+    def feedback(self) -> str:
+        """The actionable message the orchestrator surfaces to the human."""
+        return (
+            f"prior-work decision not recorded for Spec '{self.spec_id}'. Before running "
+            f"experiments, record the prior-art decision:\n"
+            f"  sci-adk prior-work {self.run_dir} --searched <dois...>\n"
+            f"  sci-adk prior-work {self.run_dir} --skip --reason \"...\"\n"
+            f"(searching is not forced -- a recorded skip-with-reason clears this; "
+            f"design/literature-acquisition.md: the discovery decision must be in the record)."
+        )
+
+
 def prior_work_checkpoint(spec: Spec, prompt: str = _PROMPT) -> PriorWorkCheckpoint:
     """Build the Spec-time recording-type checkpoint for ``spec``.
 
@@ -261,6 +291,7 @@ def _write_prior_work_decision(
 
 
 __all__ = [
+    "PriorWorkHalt",
     "prior_work_checkpoint",
     "prior_work_open",
     "record_prior_work_skip",
