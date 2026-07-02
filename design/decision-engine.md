@@ -555,6 +555,21 @@ Phases are ordered by dependency; no time estimates (per project convention).
   `inconclusive` (never fabricated, D8). The live Claude-backed `Judge` adapter
   (`ClaudeJudge`) is **deferred** — the runtime Claude-invocation is a separate
   infra decision; tests inject a fake `Judge`.
+- **Phase D3b — Machine-checked proofs (FORMAL_PROOF), Decision 4 EXTENSION [IMPLEMENTED
+  2026-07-02].** Decision 4's §0 human spot-check exists because the proof judge is an
+  *LLM* (which misjudges proofs). A proof machine-checked by a TRUSTED EXTERNAL CHECKER
+  (Lean 4 + Mathlib) is different: its kernel result is a mechanical RECORD fact, not a
+  belief. So a new `EvidenceKind.FORMAL_PROOF` (the dual of `COUNTEREXAMPLE`) is DECISIVE
+  supports in `_eval_proof` — no LLM-judge, no §0 human spot-check — and `verify` re-derives
+  it from the record (re-run the checker) with no LLM. Order: the counterexample check runs
+  FIRST, so a contradictory record (both a machine proof AND a counterexample) safety-refutes.
+  This does NOT weaken §0 (an LLM "verified" still routes to a human); it adds a stronger,
+  autonomous path for mechanically-checked proofs — the machine-checked resolution of the
+  PROOF→SUPPORTED gap the field report (P1) raised. Adapter seam: `adapter/lean_capability.py`
+  (`LeanProofTask` + `lean_experiment`, executor-injectable; PASS→FORMAL_PROOF, FAIL→a
+  NEUTRAL PROOF_STEP — a failed compile is not a counterexample). Checker image recipe:
+  `environments/lean-base/Dockerfile` (RECIPE only — Lean+Mathlib is multi-GB, built by the
+  user, not in CI).
 - **Phase D4 — Updater delegation.** Refactor `ClaimUpdater._evaluate_hypothesis`
   to delegate (§4), including load-or-create + non-monotone `update_status`
   (Decision 8). Remove dead `total_weight` (§5 item 3).

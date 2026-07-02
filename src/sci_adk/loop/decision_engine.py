@@ -456,6 +456,10 @@ class DecisionEngine:
 
         - A COUNTEREXAMPLE in the record refutes decisively -- no judge needed,
           and not outvoted by supportive runs (Decision 7 proof asymmetry).
+        - A machine-checked FORMAL_PROOF (a trusted external checker, e.g. Lean 4)
+          supports decisively -- the dual of the counterexample; no judge and no §0
+          human spot-check (that guards an LLM "verified", not a mechanical proof).
+          Checked after the counterexample so a contradictory record safety-refutes.
         - Otherwise route to the judge, which MUST attempt a counterexample
           search. A judge-found counterexample -> refutes (a decisive safety
           refutation, EXEMPT from the trail gate). A confident "verified" verdict
@@ -473,6 +477,20 @@ class DecisionEngine:
                 ConfidenceLevel.STRONG,
                 f"{rule.kind.value} rule: counterexample in the record is "
                 f"decisive (refutes), per proof asymmetry",
+            )
+        # A machine-checked FORMAL_PROOF is decisive SUPPORTS -- the dual of the decisive
+        # counterexample above. A trusted external checker (e.g. Lean 4) verified the proof,
+        # so it is a RECORD fact, not a belief: no LLM-judge and no §0 human spot-check (which
+        # guards an LLM "verified", NOT a mechanical proof). Checked AFTER the counterexample
+        # so a contradictory record (both present) safety-refutes. verify re-derives this from
+        # the recorded FORMAL_PROOF with no LLM.
+        if self._has_formal_proof(results):
+            return self._graded_verdict(
+                BearingDirection.SUPPORTS,
+                ConfidenceLevel.STRONG,
+                f"{rule.kind.value} rule: a machine-checked FORMAL_PROOF in the record is "
+                f"decisive (supports) -- a trusted external checker verified it (not an LLM), "
+                f"so no human spot-check is required",
             )
         if self._judge is None:
             return self._inconclusive(
@@ -801,6 +819,17 @@ class DecisionEngine:
     def _has_counterexample(results: EvidenceForHypothesis) -> bool:
         """True if any bearing item is a COUNTEREXAMPLE (decisive for proofs)."""
         return any(item.kind == EvidenceKind.COUNTEREXAMPLE
+                   for item, _ in results.pairs)
+
+    @staticmethod
+    def _has_formal_proof(results: EvidenceForHypothesis) -> bool:
+        """True if any bearing item is a machine-checked FORMAL_PROOF (decisive supports).
+
+        The dual of :meth:`_has_counterexample`: a proof verified by a trusted external
+        checker (e.g. Lean 4) is a mechanical RECORD fact, so it binds SUPPORTED without an
+        LLM-judge or the §0 human spot-check.
+        """
+        return any(item.kind == EvidenceKind.FORMAL_PROOF
                    for item, _ in results.pairs)
 
     @staticmethod

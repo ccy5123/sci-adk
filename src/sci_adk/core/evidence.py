@@ -60,6 +60,16 @@ class EvidenceKind(str, Enum):
 
     EXPERIMENT_RUN = "experiment_run"
     PROOF_STEP = "proof_step"
+    # @MX:NOTE: [AUTO] a proof MACHINE-CHECKED by a trusted external checker (e.g. Lean 4 +
+    #   Mathlib): the dual of COUNTEREXAMPLE. A COUNTEREXAMPLE refutes a proof decisively; a
+    #   FORMAL_PROOF supports it decisively -- the checker's kernel result is a RECORD fact
+    #   (mechanical, monotone), so the DecisionEngine binds SUPPORTED without an LLM-judge or
+    #   the §0 human spot-check (that guards an LLM "verified", NOT a mechanical proof; see
+    #   decision_engine._eval_proof). Carries real execution provenance (checker id + the
+    #   proof source as code_ref) so it stays reproducible (re-run the checker). Distinct from
+    #   PROOF_STEP (an ATTEMPT/derivation text an agent judges) -- FORMAL_PROOF is a PASS from
+    #   a checker, not a judgement.
+    FORMAL_PROOF = "formal_proof"
     LITERATURE = "literature"
     COUNTEREXAMPLE = "counterexample"
     OBSERVATION = "observation"
