@@ -95,6 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
              "yields an autonomous injectivity verdict",
     )
     run.add_argument(
+        "--enforce-prior-work", action="store_true",
+        help="refuse to run experiments until the Spec-anchor prior-work DECISION is "
+             "recorded (search FIRST, or record a skip-with-reason). For the autonomous "
+             "'start research' flow. Does NOT force a search -- a recorded skip clears it. "
+             "The run dir + spec are laid down before the halt so you can record and re-run.",
+    )
+    run.add_argument(
         "--prose", default=None, metavar="PATH",
         help="optional JSON file mapping {abstract, introduction, discussion} -> text; "
              "agent-authored narrative injected verbatim into the LaTeX draft as "
@@ -863,14 +870,23 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # written. Surface it as a friendly non-zero exit -- never a raw traceback and
     # never a "compiled ... supported" success line for an ungrounded result.
     from sci_adk.core.validity import ValidityHalt
+    from sci_adk.loop.prior_work import PriorWorkHalt
 
     try:
         result = compiler.compile(
             proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
-            prose=prose, si_prose=si_prose, si=si, figures=figures)
+            prose=prose, si_prose=si_prose, si=si, figures=figures,
+            enforce_prior_work=getattr(args, "enforce_prior_work", False))
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
         return 2
+    except PriorWorkHalt as e:
+        # The orchestrated "start research" path enforces the Spec-anchor prior-work
+        # decision: search first, or record a skip-with-reason, then re-run. Surfaced as a
+        # halt-and-ask (human input needed), not an error -- mirrors the AcquisitionHalt
+        # convention (exit 0). The run dir + spec are already laid down for the decision.
+        print(f"halt (human input needed): {e.feedback()}", file=sys.stderr)
+        return 0
 
     print(f"compiled Spec '{result.spec.id}' -> {result.run_dir}")
     print(f"  evidence: {len(result.evidence)} | claims: {len(result.claims)}")

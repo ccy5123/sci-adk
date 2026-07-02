@@ -70,6 +70,7 @@ from sci_adk.core.validity import (
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.compiler import deposit_record_path
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
+from sci_adk.loop.prior_work import prior_work_open
 from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
 from sci_adk.render.consistency import (
@@ -456,6 +457,23 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     paper_requirements_problems, paper_advisory = _check_paper_requirements(
         run_dir, evidence, list(recorded_claims.values()), spec
     )
+
+    # Prior-work decision gate: a conclusion-bearing run (draft.tex present) must carry a
+    # recorded prior-work DECISION -- searched or skipped-with-reason. This enforces the
+    # design's own principle ("the discovery decision must be in the record",
+    # design/literature-acquisition.md) at the publication surface; it does NOT force a
+    # search (a recorded skip clears it). Reuses the conclusion-bearing scoping (draft.tex
+    # present) so pre-paper exploratory runs stay unaffected.
+    if (run_dir / "paper" / "draft.tex").is_file() and prior_work_open(
+        spec, run_dir.parent.parent
+    ):
+        paper_requirements_problems = [
+            *paper_requirements_problems,
+            "prior-work decision not recorded: run `sci-adk prior-work <run-dir> "
+            '--searched <dois...>` or `--skip --reason "..."` before publishing '
+            "(design/literature-acquisition.md: the discovery decision must be in the record).",
+        ]
+
     paper_requirements_clean = not paper_requirements_problems
 
     # Deposit-completeness gate (SPEC-SI-AUTHORING-001 M2, Pillar C): the ONE new RECORD-side

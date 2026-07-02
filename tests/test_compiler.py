@@ -434,3 +434,37 @@ def test_stage_render_pending_not_dropped_by_supported_novelty_claim(tmp_path):
     # The MAIN claim is absent/unresolved -> the pending section MUST remain.
     p, *_ = compiler.stage_render(spec, evidence=evidence, claims=[novelty_supported])
     assert r"\section{Pending agent judgments}" in p.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Proactive prior-work enforcement: the orchestrated "start research" path refuses to run
+# experiments until the Spec-anchor prior-work DECISION is recorded (search-or-skip). The
+# raw library primitive default is unchanged (no enforcement) so direct callers/tests are
+# unaffected. It forces a DECISION, not a search (a recorded skip-with-reason clears it).
+# ---------------------------------------------------------------------------
+
+def test_compile_enforce_prior_work_halts_until_recorded(tmp_path):
+    import pytest
+
+    from sci_adk.loop.prior_work import PriorWorkHalt, record_prior_work_skip
+
+    spec = _f3_spec("t-pw-enforce")
+    compiler = ResearchCompiler(workspace_dir=tmp_path)
+
+    # enforce on + no prior-work decision -> halt BEFORE experiments. The run dir + spec are
+    # already laid down (stage_init_spec ran), so the human can record the decision.
+    with pytest.raises(PriorWorkHalt):
+        compiler.compile("", spec=spec, enforce_prior_work=True)
+    assert (tmp_path / "runs" / "t-pw-enforce" / "spec.json").is_file()
+
+    # Record a skip-with-reason -> the halt clears; the same enforced compile now proceeds.
+    record_prior_work_skip(spec, tmp_path, reason="covered by an upstream review")
+    result = compiler.compile("", spec=spec, enforce_prior_work=True)
+    assert result.spec.id == "t-pw-enforce"
+
+
+def test_compile_default_does_not_enforce_prior_work(tmp_path):
+    # The raw primitive default is unchanged: no flag -> no halt, even with prior-work open.
+    spec = _f3_spec("t-pw-default")
+    result = ResearchCompiler(workspace_dir=tmp_path).compile("", spec=spec)  # no raise
+    assert result.spec.id == "t-pw-default"

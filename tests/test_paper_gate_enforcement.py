@@ -110,6 +110,10 @@ def _draft(run_dir: Path, body: str) -> None:
 def _freeze_pubreqs(run_dir: Path, **kw) -> None:
     pubreqs = PubReqs(spec_id="spec-x", digest="fixture-digest", **kw)
     (run_dir / "pubreqs.json").write_text(pubreqs.model_dump_json(), encoding="utf-8")
+    # A conclusion-bearing run must also carry a recorded prior-work DECISION (verify gate);
+    # these tests target OTHER gates, so record a skip-with-reason.
+    from sci_adk.loop.prior_work import record_prior_work_skip as _rec_pw_skip
+    _rec_pw_skip(_spec(), run_dir.parent.parent, reason="test fixture: other gate under test")
 
 
 # ===========================================================================

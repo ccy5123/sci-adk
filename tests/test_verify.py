@@ -374,6 +374,12 @@ def _freeze_minimal_pubreqs(run_dir: Path) -> None:
     )
     pr = pr.model_copy(update={"digest": _pubreqs_digest(pr)})
     (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+    # A conclusion-bearing run must also carry a recorded prior-work DECISION (the verify
+    # prior-work gate); these tests target OTHER gates, so record a skip-with-reason.
+    from sci_adk.core.spec import Spec as _Spec
+    from sci_adk.loop.prior_work import record_prior_work_skip as _rec_pw_skip
+    _spec = _Spec.model_validate_json((run_dir / "spec.json").read_text(encoding="utf-8"))
+    _rec_pw_skip(_spec, run_dir.parent.parent, reason="test fixture: other gate under test")
 
 
 def test_verify_no_paper_is_consistent(tmp_path):
@@ -681,12 +687,28 @@ from sci_adk.core.pubreqs import DEFAULT_REQUIRED_SECTIONS, PubReqs  # noqa: E40
 from sci_adk.provenance import pubreqs_digest  # noqa: E402
 
 
-def _write_pubreqs(run_dir: Path, **kwargs) -> PubReqs:
-    """Freeze a pubreqs.json at the RUN ROOT (with its digest), like `pubreqs freeze`."""
+def _write_pubreqs(run_dir: Path, *, record_prior_work: bool = True, **kwargs) -> PubReqs:
+    """Freeze a pubreqs.json at the RUN ROOT (with its digest), like `pubreqs freeze`.
+
+    A conclusion-bearing run must ALSO carry a recorded prior-work DECISION (the verify
+    prior-work gate). By default this helper records a skip-with-reason so the existing
+    publishing tests exercise the OTHER requirements without tripping that gate; pass
+    ``record_prior_work=False`` to leave it open and test the prior-work gate itself.
+    """
     kwargs.setdefault("spec_id", run_dir.name)
     pr = PubReqs(**kwargs)
     pr = pr.model_copy(update={"digest": pubreqs_digest(pr)})
     (run_dir / "pubreqs.json").write_text(pr.model_dump_json(indent=2), encoding="utf-8")
+    if record_prior_work:
+        from sci_adk.core.spec import Spec as _Spec
+        from sci_adk.loop.prior_work import record_prior_work_skip
+        spec = _Spec.model_validate_json(
+            (run_dir / "spec.json").read_text(encoding="utf-8")
+        )
+        record_prior_work_skip(
+            spec, run_dir.parent.parent,
+            reason="test fixture: prior-work decision not under test here",
+        )
     return pr
 
 
@@ -893,6 +915,51 @@ def test_verify_reproduction_bundle_missing_reproduce_py_fails(tmp_path):
     assert report.paper_requirements_clean is False
     assert any("reproduce.py is missing" in p for p in report.paper_requirements_problems)
     assert report.passed is False
+
+
+def test_verify_conclusion_bearing_requires_prior_work_decision(tmp_path):
+    # A conclusion-bearing run (draft.tex + frozen pubreqs) must carry a recorded prior-work
+    # DECISION. Without it the publishing gate fails LOUD + actionable, EVEN THOUGH the claim
+    # reproduces. Recording a skip-with-reason clears it -- searching is NOT forced.
+    from sci_adk.loop.prior_work import record_prior_work_skip
+
+    spec = _numeric_spec("v-pw-gate", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\begin{abstract}x\end{abstract}"
+                 r"\section{Introduction}a\section{Methods}b"
+                 r"\section{Results}c\section{Discussion}d")
+    _write_pubreqs(run_dir,
+                   required_sections=["Abstract", "Introduction", "Methods",
+                                      "Results", "Discussion"],
+                   figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=False,
+                   record_prior_work=False)  # leave the prior-work decision OPEN
+    report = verify_run(run_dir)
+    assert report.all_reproduced is True                 # claim signal unchanged
+    assert report.paper_requirements_clean is False
+    assert any("prior-work decision not recorded" in p
+               for p in report.paper_requirements_problems)
+    assert report.passed is False
+
+    # Record the decision (a skip-with-reason) -> the gate clears.
+    record_prior_work_skip(spec, tmp_path, reason="established baseline; no new prior art")
+    report2 = verify_run(run_dir)
+    assert report2.paper_requirements_clean is True
+    assert report2.passed is True
+
+
+def test_verify_pre_paper_run_not_gated_on_prior_work(tmp_path):
+    # A run with NO draft.tex is not conclusion-bearing -> the prior-work gate does NOT fire
+    # (exploratory runs stay unaffected; the gate reuses the conclusion-bearing scoping).
+    import shutil
+    spec = _numeric_spec("v-pw-prepaper", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    shutil.rmtree(run_dir / "paper")  # not conclusion-bearing
+    report = verify_run(run_dir)
+    assert not any("prior-work decision not recorded" in p
+                   for p in report.paper_requirements_problems)
+    assert report.passed is True
 
 
 def test_verify_reproduction_bundle_driver_omits_recorded_ref_fails(tmp_path):

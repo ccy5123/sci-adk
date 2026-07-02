@@ -145,6 +145,25 @@ run-HALT into a revisable rule-derived claim + a non-HALT compile-time checkpoin
 (A->B-replace). The paper-render (Low) trigger stays deferred (weakest and latest;
 related-work completeness, not claim validity).
 
+**v0.5 (enforcement, field-report follow-up):** the Spec-anchor decision was recorded but
+never *enforced* -- a run could reach a passing `verify` (and an autonomous flow could run
+experiments) with the prior-work decision still open, so an external run "started research"
+with no literature check and nothing caught it. v0.5 makes the anchor un-skippable WITHOUT
+reversing the "record the decision, do not force a search" principle (a skip-with-reason
+still clears it):
+- **verify gate (always on):** a conclusion-bearing run (a rendered `paper/draft.tex`) whose
+  prior-work decision is still open FAILS `paper_requirements_clean` -- you cannot publish
+  without the decision in the record. Pre-paper exploratory runs are unaffected (reuses the
+  conclusion-bearing scoping).
+- **experiment-start halt (opt-in):** `compile(enforce_prior_work=True)` (the orchestrated
+  "start research" path -- `sci-adk run --enforce-prior-work`) raises `PriorWorkHalt` BEFORE
+  running experiments while the decision is open. The run dir + Spec are already laid down, so
+  the human records the decision (`sci-adk prior-work <run> --searched … | --skip --reason …`)
+  and re-runs -- search FIRST, like a researcher. The raw `compile()` default is unchanged
+  (`enforce_prior_work=False`) so library/primitive callers are not forced.
+This still forces a DECISION, never a search (E2: a skip is a recorded null). Source:
+`docs/field-report-triage.md` (concern 1).
+
 ### When found literature touches a frozen element -> Spec amendment (F7)
 
 Recording the *decision* is not enough. If newly found prior work means a

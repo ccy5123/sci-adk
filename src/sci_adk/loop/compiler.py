@@ -51,7 +51,11 @@ from sci_adk.loop.literature_triggers import (
     novelty_open,
     novelty_reason_from_decisions,
 )
-from sci_adk.loop.prior_work import prior_work_checkpoint
+from sci_adk.loop.prior_work import (
+    PriorWorkHalt,
+    prior_work_checkpoint,
+    prior_work_open,
+)
 from sci_adk.loop.verdict import (
     CheckpointModel,
     ContestedCheckpoint,
@@ -196,6 +200,7 @@ class ResearchCompiler:
         si: Optional[AuthoredSI] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
         si_figures: Optional[Sequence[AnyFigure]] = None,
+        enforce_prior_work: bool = False,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -265,6 +270,16 @@ class ResearchCompiler:
         spec = self.stage_init_spec(
             spec=spec, proposal_text=proposal_text, spec_id=spec_id
         )
+
+        # Proactive prior-work enforcement (opt-in; the orchestrated "start research" path
+        # -- the `run` verb -- sets this). The raw library/primitive default is False so
+        # direct compile()/test callers are unaffected. When on and no prior-work DECISION
+        # is recorded yet, refuse to run experiments: the researcher searches (or records a
+        # skip-with-reason) FIRST. stage_init_spec has already laid down the run dir + spec,
+        # so the human can record the decision and re-run. Not a search mandate -- a decision
+        # mandate (design/literature-acquisition.md: the discovery decision must be recorded).
+        if enforce_prior_work and prior_work_open(spec, self.workspace_dir):
+            raise PriorWorkHalt(spec.id, self.workspace_dir / "runs" / spec.id)
 
         # `run` threads the experiment's evidence in memory, but `stage_execute` returns it
         # in the CANONICAL (sorted-by-filename) order -- the SAME order the standalone
