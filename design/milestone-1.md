@@ -1,8 +1,8 @@
 # Milestone 1: Minimal Viable T-1
 
-> Status: CONFIRMED (Session 2 approved, 2026-06-04)
+> Status: IMPLEMENTED (delivered on master; end-to-end T-1 compiles, suite green). Approved Session 2, 2026-06-04.
 > Reference: Session 1 handoff (Deliverable #4) + Session 2 confirmation
-> Last Updated: 2026-06-04
+> Last Updated: 2026-06-04 (approved); superseded by shipped implementation on master
 
 ## Goal
 
@@ -250,7 +250,7 @@ interval - "effect-size 95% CI excludes 0 => support; includes 0 => null"
 
 ---
 
-Version: 1.0 (CONFIRMED)
-Status: Approved for implementation
+Version: 1.0 (IMPLEMENTED)
+Status: Delivered on master (historical milestone record)
 Source: Session 1 handoff Deliverable #4 + Session 2 confirmation
 Confirmed: 2026-06-04
