@@ -912,6 +912,42 @@ def test_verify_reproduction_bundle_driver_omits_recorded_ref_fails(tmp_path):
     assert report.passed is False
 
 
+def test_verify_reproduction_bundle_ignores_prior_work_decision_ref(tmp_path):
+    # P3 (field report): honestly recording prior work AFTER the paper was rendered appends a
+    # PRIOR_WORK_DECISION item whose code_ref is a process-DECISION pointer
+    # ("prior_work:searched"), NOT generating code. The reproduction-bundle gate must NOT
+    # require the already-rendered reproduce.py to reference it (that ref did not exist at
+    # render time) -- else the tool breaks verify for every run the moment the user complies
+    # with its own prior-art prompt. Reproduction is about the GENERATING code only.
+    from sci_adk.loop.verify import _reproduction_bundle_problems
+
+    spec = _numeric_spec("v-repro-priorwork", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    reproduce = run_dir / "paper" / "reproduce.py"
+    assert reproduce.is_file()
+    # The driver was rendered from the generating ref only; it never carries the decision ref.
+    assert "prior_work:searched" not in reproduce.read_text(encoding="utf-8")
+
+    evidence = [
+        EvidenceItem(
+            id="ev-num", spec_id=spec.id, kind=EvidenceKind.EXPERIMENT_RUN,
+            provenance=Provenance(code_ref="fixture", data_source="generated"),
+            result=Result(type="quantitative", point=0.95),
+            bears_on=[Bearing(target_id="hyp-n", direction=BearingDirection.SUPPORTS)],
+        ),
+        EvidenceItem(
+            id="evi-pw-decision-1", spec_id=spec.id,
+            kind=EvidenceKind.PRIOR_WORK_DECISION,
+            provenance=Provenance(code_ref="prior_work:searched"),
+            result=Result(type="qualitative", finding="searched: DOIs=[10.x/y]"),
+            bears_on=[],
+        ),
+    ]
+    # The generating ref ('fixture') is still required and present; the decision pointer is
+    # excluded from the requirement, so the honest post-hoc record does NOT break the gate.
+    assert _reproduction_bundle_problems(run_dir, evidence) == []
+
+
 def test_verify_advisory_and_max_pages_are_never_gated(tmp_path):
     # advisory + max_pages are surfaced but NEVER fail the gate: a run that satisfies every
     # GATED requirement passes even with an advisory note and a max_pages set.

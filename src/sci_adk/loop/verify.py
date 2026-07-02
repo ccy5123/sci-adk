@@ -1051,6 +1051,21 @@ def _check_paper_requirements(
     return problems, warnings
 
 
+# Process/decision meta-records carry a decision pointer in ``code_ref`` (e.g.
+# ``prior_work:searched``), NOT generating code to reproduce, and hold ``bears_on=[]``.
+# They must never enter the reproduction-bundle requirement: reproduction is about the
+# GENERATING code, and requiring an already-rendered ``reproduce.py`` to reference a
+# decision ref recorded AFTER render would break verify the moment a user honestly records
+# prior work / novelty / a contested decision (the field-report P3 trap).
+_NON_REPRODUCIBLE_KINDS = frozenset(
+    {
+        EvidenceKind.PRIOR_WORK_DECISION,
+        EvidenceKind.NOVELTY_DECISION,
+        EvidenceKind.CONTESTED_RECORD,
+    }
+)
+
+
 def _reproduction_bundle_problems(
     run_dir: Path, evidence: List[EvidenceItem]
 ) -> List[str]:
@@ -1097,7 +1112,8 @@ def _reproduction_bundle_problems(
         {
             ref
             for ev in evidence
-            if (ref := (ev.provenance.code_ref or "").strip())
+            if ev.kind not in _NON_REPRODUCIBLE_KINDS
+            and (ref := (ev.provenance.code_ref or "").strip())
         }
     )
 
