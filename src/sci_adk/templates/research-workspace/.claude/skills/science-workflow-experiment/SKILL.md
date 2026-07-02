@@ -49,6 +49,11 @@ load `Skill("science-foundation-rigor")`; this skill is the HOW.
   suppressing a null is the most common way a research record lies.
 - **No post-hoc bearing**: `bears_on[]` was fixed at pre-registration; transcribe it,
   never invent it (anti-HARKing).
+- **Follow emergent questions**: when a genuine NEW question surfaces mid-experiment
+  ("has anyone already measured / refuted this?"), search it and RECORD the decision —
+  `sci-adk inquiry <run_dir> --question "<q>" --searched <dois...>` (→ LITERATURE +
+  INQUIRY_DECISION) or `--skip --reason "..."` (a recorded null). Agent-judgment, not a
+  periodic prompt; the emergent discovery decision belongs in the record like every other.
 
 ## Implementation Guide (5 minutes)
 

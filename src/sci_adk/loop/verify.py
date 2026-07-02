@@ -1080,6 +1080,7 @@ _NON_REPRODUCIBLE_KINDS = frozenset(
         EvidenceKind.PRIOR_WORK_DECISION,
         EvidenceKind.NOVELTY_DECISION,
         EvidenceKind.CONTESTED_RECORD,
+        EvidenceKind.INQUIRY_DECISION,
     }
 )
 

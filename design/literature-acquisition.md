@@ -135,6 +135,7 @@ a decision, not a belief; it asserts no support/refute direction.
 | **Spec creation** (prior-art) | before any result exists | pre-registration canonical; zero post-hoc risk -- the cleanest, most important check ("has this been done?") | **Primary anchor** | implemented |
 | Before a **novelty / priority** claim | when asserting "new / first" | underwrites the *validity* of the claim | High | implemented (v0.4: B-replace -- a revisable claim, not a HALT) |
 | Claim -> **contested** | after evidence conflicts | here the rigor is **recording, not searching**: a timestamp so literature that arrived *after* the conflict stays visible (anti post-hoc-rationalization -- no hunting for favorable papers once the result is known) | Medium | implemented |
+| **Emergent question** (mid-research) | when a NEW question arises DURING the run | researcher-like on-demand discovery -- the ad-hoc "wait, has anyone done this?" moment; keeps the record honest about what was considered mid-stream | On-demand (agent-raised) | implemented (v0.5, `INQUIRY_DECISION` + `sci-adk inquiry`) |
 | Before **paper render** | at output | related-work *completeness*, not claim validity -- weakest and latest | Low | deferred |
 
 **Minimal, highest-value first bite (shipped):** the **Spec-time prior-art check + a
@@ -163,6 +164,18 @@ still clears it):
   (`enforce_prior_work=False`) so library/primitive callers are not forced.
 This still forces a DECISION, never a search (E2: a skip is a recorded null). Source:
 `docs/field-report-triage.md` (concern 1).
+
+**v0.5 (emergent-question trigger, field-report concern 2):** the triggers above all fire
+at *fixed* moments (Spec creation, a novelty claim, a contested claim). A real researcher
+also stops MID-stream -- "wait, has anyone measured X?" -- and that emergent moment had no
+recording rail. v0.5 adds the **emergent-question trigger**: `EvidenceKind.INQUIRY_DECISION`
++ `sci-adk inquiry <run> --question "<q>" (--searched <dois> | --skip --reason …)`. It is a
+*recording-type* decision (searched -> LITERATURE + INQUIRY_DECISION; skipped -> a recorded
+null), the same family as the others (`bears_on=[]`, excluded from the reproduction-bundle
+requirement). This does NOT contradict the "no periodic prompt" rule above: the inquiry is
+**agent-raised on judgment**, not a per-loop flag. The autonomous behavioral wiring lives in
+the workspace `CLAUDE.md` + the experiment SKILL (search the question, then record). Source:
+`docs/field-report-triage.md` (concern 2).
 
 ### When found literature touches a frozen element -> Spec amendment (F7)
 

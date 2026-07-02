@@ -32,7 +32,7 @@ EXPOSED_READONLY: frozenset[str] = frozenset({"verify", "status"})
 
 # §7.1 -- record-write verbs the session may drive.
 EXPOSED_WRITE: frozenset[str] = frozenset(
-    {"append-evidence", "prior-work", "novelty", "contested"}
+    {"append-evidence", "prior-work", "novelty", "contested", "inquiry"}
 )
 
 # The full exposed surface. Default-deny: anything not here is refused.
