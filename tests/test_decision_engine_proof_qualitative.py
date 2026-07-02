@@ -152,6 +152,29 @@ def test_proof_counterexample_in_record_is_decisive_without_a_judge():
     assert "counterexample" in v.confidence.basis.lower()
 
 
+def test_proof_formal_proof_in_record_is_decisive_supports_without_a_judge():
+    # The dual of the counterexample: a machine-checked FORMAL_PROOF supports decisively --
+    # no judge, no human spot-check (the §0 override guards an LLM "verified", not a
+    # mechanical proof from a trusted checker like Lean).
+    engine = DecisionEngine()  # no judge on purpose
+    v = engine.evaluate(
+        PROOF_RULE, _results(_ev(kind=EvidenceKind.FORMAL_PROOF, finding="lean: ok")))
+    assert v.direction == BearingDirection.SUPPORTS
+    assert v.confidence.level == ConfidenceLevel.STRONG
+    assert "formal_proof" in v.confidence.basis.lower() or "checker" in v.confidence.basis.lower()
+
+
+def test_proof_counterexample_beats_formal_proof_when_both_present():
+    # A contradictory record (both a machine proof AND a counterexample) safety-refutes:
+    # the counterexample is checked first.
+    engine = DecisionEngine()
+    v = engine.evaluate(PROOF_RULE, _results(
+        _ev(kind=EvidenceKind.FORMAL_PROOF, finding="lean: ok"),
+        _ev(kind=EvidenceKind.COUNTEREXAMPLE, finding="cx"),
+    ))
+    assert v.direction == BearingDirection.REFUTES
+
+
 def test_proof_judge_found_counterexample_refutes():
     jv = JudgeVerdict(BearingDirection.REFUTES, ConfidenceLevel.STRONG,
                       "found a counterexample", counterexample=True)

@@ -132,6 +132,21 @@ def _proof_experiment(hyp_id: str = "hyp-p"):
     return experiment
 
 
+def _formal_proof_experiment(hyp_id: str = "hyp-p"):
+    """A machine-checked FORMAL_PROOF (e.g. a Lean pass) bearing SUPPORTS on the proof hyp."""
+    def experiment(s, w):
+        return [
+            EvidenceItem(
+                id="ev-formal", spec_id=s.id, kind=EvidenceKind.FORMAL_PROOF,
+                provenance=Provenance(code_ref="proof.lean", data_source="generated"),
+                result=Result(type="qualitative",
+                              finding="lean4+mathlib: theorem verified (checker exit 0)"),
+                bears_on=[Bearing(target_id=hyp_id, direction=BearingDirection.SUPPORTS)],
+            )
+        ]
+    return experiment
+
+
 def _seed(workspace: Path, spec: Spec, experiment) -> Path:
     run_dir = workspace / "runs" / spec.id
     run_checkpoint_loop(run_dir=run_dir, spec=spec, experiment=experiment, workspace_dir=workspace)
@@ -181,6 +196,21 @@ def test_verify_numeric_claim_reproduced(tmp_path):
 
 
 # -- (b) non-numeric claim re-derived from the recorded trail (reproduced) ----
+
+def test_verify_formal_proof_supports_reproduces_without_a_judge(tmp_path):
+    # A machine-checked FORMAL_PROOF makes a PROOF-rule claim SUPPORTED decisively -- no
+    # verdict/judge and no human spot-check. verify re-derives SUPPORTED from the recorded
+    # FORMAL_PROOF with no LLM (the whole point: a mechanical proof is a reproducible record
+    # fact). This is the machine-checked resolution of the PROOF->SUPPORTED path.
+    spec = _proof_spec("v-formal")
+    run_dir = _seed(tmp_path, spec, _formal_proof_experiment())
+    report = verify_run(run_dir)
+    by_hyp = {o.hypothesis_id: o for o in report.outcomes}
+    assert by_hyp["hyp-p"].recorded_status == ClaimStatus.SUPPORTED
+    assert by_hyp["hyp-p"].rederived_status == ClaimStatus.SUPPORTED
+    assert by_hyp["hyp-p"].result == "REPRODUCED"
+    assert report.all_reproduced is True
+
 
 def test_verify_nonnumeric_claim_reproduced_from_recorded_trail(tmp_path):
     run_dir = _resolve_proof(tmp_path, "v-proof")
