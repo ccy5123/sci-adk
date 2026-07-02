@@ -213,7 +213,7 @@ sci-adk/
 
 ## Session Handoff Protocol
 
-Source: `design/session-1-handoff.md`
+Source: `design/handoffs/session-1-handoff.md`
 
 ### New Session Startup
 

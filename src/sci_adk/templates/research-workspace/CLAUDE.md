@@ -82,8 +82,10 @@ Enforcement lives in the harness, not in memory (a prompt decays; a hook does no
   this protocol + the current run's `sci-adk status` every turn.
 - The **`science-orchestrator` output style**
   (`.claude/output-styles/science-orchestrator/`) is the always-on persona.
-- A **`/sci` command** is the planned single entry point (forthcoming). Until it
-  ships, drive sessions directly under the persona contract.
+- The **`/sci` command** (`.claude/skills/sci/`) is the single entry point — it
+  routes `plan` / `experiment` / `publish` / `package` / `verify` / `status` /
+  `replicate` (or a natural-language intent) to the research workers and gates every
+  conclusion through `sci-adk verify`. Prefer it over ad-hoc freeform work.
 
 Both hooks degrade to no-op if `sci-adk` is not on PATH (a missing tool never
 bricks a session).
@@ -102,6 +104,10 @@ gates) — is a **separate repo**. Do not confuse them:
 
 ## Start here
 
-Drive a session under the loop above for a proposal or research goal. See the
-`science-orchestrator` output style for the full persona contract. (The `/sci`
-entry-point command is forthcoming; until it ships, start sessions directly.)
+Start with **`/sci plan "<your proposal or hypothesis>"`** to author and freeze a
+Spec, then **`/sci experiment <SPEC-id>`** to record evidence and derive claims, and
+**`/sci publish`** / **`/sci package`** to render the write-up FROM the record (never
+hand-write a manuscript — the paper is rendered from the Evidence log). A bare
+**`/sci`** runs the autonomous `plan → experiment → publish` pipeline, confirming at
+each stage transition. See the `science-orchestrator` output style for the full
+persona contract.

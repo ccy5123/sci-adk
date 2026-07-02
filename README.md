@@ -308,7 +308,7 @@ sci-adk/
 │   ├── milestone-3.md        # Milestone 3 roadmap
 │   ├── directory-structure.md
 │   ├── constitution.md       # sci-adk identity and session rules
-│   └── session-6-handoff.md  # Latest session handoff
+│   └── handoffs/             # Per-session handoff logs (session-1..10, ...)
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
 ├── tests/                    # Engineering-layer tests (1369 passing)

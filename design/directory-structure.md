@@ -36,7 +36,7 @@ sci-adk/
 │   ├── abstractions.md           #   Spec / Evidence / Claim (v0.1 confirmed)
 │   ├── tool-policy.md            #   sci-adk runtime tool policy (authoritative)
 │   ├── directory-structure.md    #   this file
-│   └── session-1-handoff.md      #   handoff prompt for the next session
+│   └── handoffs/                 #   per-session handoff prompts (session-1..10, ...)
 │
 ├── src/sci_adk/                  # [COMPILER SOURCE] the compiler itself (Python)
 │   ├── core/                     #   spec.py / evidence.py / claim.py (+ invariants)

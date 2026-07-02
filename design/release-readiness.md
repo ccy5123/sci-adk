@@ -51,7 +51,7 @@ out** of the 1.0 claim (the de-emphasized "player" half, T-1 only).
 | A1b | A 2nd domain plugs into the **Experiment** adapter-registry (`ExperimentFn`/`--capability`) with no kernel edit | `[SCOPED OUT]` | only the T-1 capability is registered (`src/sci_adk/adapter/registry.py` + `t1_capability.py`); IEAM-P8 used the sanctioned operational/borrow path (A5), not the registry. De-emphasized player half — not advertised in the 1.0 claim, not a blocker — `design/g-a-a3-decision.md` §3 |
 | A2 | All in-repo runs are not a single domain family | `[OPEN]` (cosmetic) | in-repo `runs/` = `t-1`, `t1-demo`, `t1-godel` — all T-1; the 2nd-domain validation is **external** (IEAM-P8). An in-repo T-2 run would close this cosmetically but adds no new validation beyond A1a |
 | A3 | Decide whether IEAM-P8 (ecotoxicology) satisfies A1 | `[DONE]` | Resolved: discharges A1a (verification generality), not A1b (experiment seam) — full record in `design/g-a-a3-decision.md` |
-| A4 | If A1b is pursued, define what an in-repo T-2 adapter requires (`t2_*` provider + registry entry + `checkpoint_loop` path) | `[OPEN]` (optional) | needed only to validate A1b; under the A3 verdict A1b is scoped out, so A4 is future/optional, not a 1.0 blocker — T-2 (p-adic similarity) is research-gated, `design/session-5-handoff.md:85` |
+| A4 | If A1b is pursued, define what an in-repo T-2 adapter requires (`t2_*` provider + registry entry + `checkpoint_loop` path) | `[OPEN]` (optional) | needed only to validate A1b; under the A3 verdict A1b is scoped out, so A4 is future/optional, not a 1.0 blocker — T-2 (p-adic similarity) is research-gated, `design/handoffs/session-5-handoff.md:85` |
 
 Note: the paper's 2nd case study (G-B B3) is a **separate question** from A1b. IEAM-P8
 serves as the cross-domain **verification** evidence (A1a); the methods paper's primary
@@ -176,4 +176,4 @@ Version: 0.1.0 (PLANNING RECORD)
 Created: 2026-06-26
 Related: `design/adoption-roadmap.md` (Stage 0 / generalization gate),
 `design/sci-adk-productization-plan.md` (identity, deferred external release),
-`design/session-5-handoff.md` (T-2 plan).
+`design/handoffs/session-5-handoff.md` (T-2 plan).
