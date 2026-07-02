@@ -1,9 +1,12 @@
 # sci-adk Milestone-3 — From "pipeline works (toy)" to "actually usable"
 
-> Status: PLANNED (2026-06-16). Roadmap for the next session(s). Milestone-2
-> (DecisionEngine D0-D5) + the usable CLI compiler core are done and on `master`
-> (commits c691732..f5dda82, pushed). This document is the next-session entry
-> point: read it, then start at §4.
+> Status: SUPERSEDED (historical roadmap authored 2026-06-16; kept as a record).
+> Tier 2 (paper prose, citations, LaTeX, figures) was delivered by the later
+> render-reframe + publishing (F1/F2/F3) + package + SI work; Tier 1.2/1.3 by
+> `sci-adk resolve` + DecisionEngine D0-D5. Tier 1.1 (real experiment code-gen for
+> arbitrary proposals = the A1b adapter seam) was explicitly scoped OUT of 1.0 — see
+> `design/g-a-a3-decision.md`. The live roadmap is now `design/release-readiness.md`
+> + `design/joss-eligibility-plan.md`.
 
 ---
 
@@ -156,6 +159,6 @@ of truth and is hardened to compile on Overleaf's default **pdflatex** as-is:
 
 ---
 
-Version: 1.0 (PLANNED)
+Version: 1.0 (SUPERSEDED)
 Source: gap analysis after the usable-compiler bundle (2026-06-16)
-Last Updated: 2026-06-16
+Last Updated: 2026-07-02 (relabeled SUPERSEDED; Tier 2 shipped, Tier 1.1 scoped out of 1.0)
