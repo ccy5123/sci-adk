@@ -37,6 +37,17 @@ periodic prompt — raise it when the question is real. A searched inquiry that 
 unfetchable paper prints `halt (human input needed):` and takes the same
 provide-PDF-or-skip path as the Proactive case below.
 
+**Watch-folder scan (dropped PDFs).** The user may also just drop papers into a folder
+(default `~/Downloads`, or `[literature] watch_dirs` in `~/.config/sci-adk/config.toml`).
+At literature-work moments (Spec-time prior-art, a novelty/contested trigger, an emergent
+inquiry, or the start of a session), run `sci-adk scan-literature <run_dir>` (read-only;
+content-hash dedup against the store) to LIST new candidate PDFs not yet ingested. Then,
+for EACH candidate: read it, judge whether it is actually a paper (Downloads holds
+non-papers — receipts, statements — so do NOT ingest blindly), and for the real papers
+confirm via `AskUserQuestion` before running the reactive `add-literature` path below.
+`scan-literature` never moves or ingests — it only surfaces; ingestion is the confirmed
+`add-literature` step.
+
 **User-provided literature (two directions).** Both a system-detected miss and a
 user-offered PDF converge on the same manual-ingest verb:
 

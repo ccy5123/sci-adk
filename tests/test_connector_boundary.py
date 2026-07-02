@@ -91,7 +91,7 @@ def test_append_evidence_injects_digest() -> None:
 # -- read-only + write verbs exposed -----------------------------------------
 
 
-@pytest.mark.parametrize("tool", ["verify", "status"])
+@pytest.mark.parametrize("tool", ["verify", "status", "scan-literature"])
 def test_readonly_verbs_exposed(tool: str) -> None:
     calls, runner = _spy()
     result = dispatch(tool, ["runs/x"], _runner=runner)

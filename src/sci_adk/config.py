@@ -52,6 +52,38 @@ def _config_root(config_root: Optional[Path]) -> Path:
     return Path.home() / ".config"
 
 
+# The default watch folder for user-dropped PDFs (design/literature-acquisition.md):
+# where `scan-literature` looks when no `[literature] watch_dirs` is configured and no
+# `--dir` is passed. `~` is expanded by the reader.
+_DEFAULT_WATCH_DIRS: tuple[str, ...] = ("~/Downloads",)
+
+
+def watch_dirs(config_root: Optional[Path] = None) -> list[Path]:
+    """Return the configured literature watch folders (default ``~/Downloads``).
+
+    Reads ``[literature] watch_dirs`` (a list of strings) from the config file; when the
+    key is absent, malformed, or the file is missing, falls back to ``_DEFAULT_WATCH_DIRS``.
+    ``~`` is expanded. Read-only, stdlib-only, no LLM -- mirrors ``_read_config_email``.
+    """
+    dirs: Optional[list[str]] = None
+    path = _config_root(config_root) / _CONFIG_RELPATH
+    if path.exists():
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError):
+            data = {}
+        lit = data.get("literature")
+        if isinstance(lit, dict):
+            raw = lit.get("watch_dirs")
+            if isinstance(raw, list):
+                cleaned = [d.strip() for d in raw if isinstance(d, str) and d.strip()]
+                if cleaned:
+                    dirs = cleaned
+    if dirs is None:
+        dirs = list(_DEFAULT_WATCH_DIRS)
+    return [Path(d).expanduser() for d in dirs]
+
+
 def _read_config_email(config_root: Optional[Path]) -> Optional[str]:
     """Return the ``[contact] email`` from the config file, or None if absent/blank."""
     path = _config_root(config_root) / _CONFIG_RELPATH

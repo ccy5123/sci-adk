@@ -350,6 +350,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="this file is supplementary information (-> a _SI key)",
     )
 
+    scan_lit = sub.add_parser(
+        "scan-literature",
+        help="scan the watch folder(s) (default ~/Downloads, or [literature] watch_dirs "
+             "in config, or --dir) for PDFs NOT yet in the run's literature store, and "
+             "list them as new candidates to ingest. Read-only; content-hash dedup; no LLM. "
+             "The agent then reads each candidate and runs add-literature.",
+    )
+    scan_lit.add_argument("run_dir", help="path to a runs/<spec.id>/ dir")
+    scan_lit.add_argument(
+        "--dir", action="append", default=None, metavar="PATH",
+        help="watch folder to scan (repeatable); overrides the configured watch_dirs. "
+             "Default when omitted: [literature] watch_dirs, else ~/Downloads",
+    )
+
     status = sub.add_parser(
         "status",
         help="terse, read-only session-state snapshot of a run dir (recorded claim "
@@ -2036,6 +2050,42 @@ def _cmd_add_literature(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_scan_literature(args: argparse.Namespace) -> int:
+    """List watch-folder PDFs not yet in the run's literature store (new candidates).
+
+    Read-only + deterministic + no LLM: scans the watch dir(s) -- ``--dir`` overrides, else
+    the configured ``[literature] watch_dirs``, else ``~/Downloads`` -- and reports each
+    ``*.pdf`` whose content is NOT already in ``runs/<id>/literature/pdfs/`` (sha256 dedup).
+    The agent then reads each candidate, judges whether it is a real paper, and runs
+    ``add-literature`` with the author/year (+ ``--si``). This verb never moves or ingests.
+    """
+    from sci_adk.config import watch_dirs as _configured_watch_dirs
+    from sci_adk.search.literature_scan import scan_new_pdfs
+
+    run_dir = Path(args.run_dir)
+    if not (run_dir / "spec.json").exists():
+        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        return 2
+
+    dirs = [Path(d).expanduser() for d in args.dir] if args.dir else _configured_watch_dirs()
+    pdfs_dir = run_dir / "literature" / "pdfs"
+    candidates = scan_new_pdfs(pdfs_dir, dirs)
+
+    scanned = ", ".join(str(d) for d in dirs)
+    if not candidates:
+        print(f"scan-literature: no new PDFs in watch folder(s) [{scanned}] "
+              f"(all already in {pdfs_dir} or none present)")
+        return 0
+
+    print(f"scan-literature: {len(candidates)} new candidate PDF(s) in [{scanned}] "
+          f"(not yet in {pdfs_dir}):")
+    for p in candidates:
+        print(f"  - {p}")
+    print("  next: for each real paper, read it for first-author surname + year (+ SI), "
+          "then run `sci-adk add-literature <run_dir> --pdf <path> --author ... --year ...`")
+    return 0
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
@@ -2072,6 +2122,8 @@ def main(argv=None) -> int:
         return _cmd_contested(args)
     if args.command == "add-literature":
         return _cmd_add_literature(args)
+    if args.command == "scan-literature":
+        return _cmd_scan_literature(args)
     if args.command == "status":
         return _cmd_status(args)
     if args.command == "init-session":
