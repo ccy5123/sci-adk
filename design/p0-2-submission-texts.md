@@ -1,5 +1,11 @@
 # P0-2 — Ready-to-post submission texts
 
+> **[SUPERSEDED 2026-08-05] Do not post these.** The pyOpenSci presubmission inquiry
+> below was posted and declined (out of scope + insufficient human-stewardship
+> evidence relative to AI-generated content), and the author has dropped the
+> publication-submission path entirely. Kept as a record. See
+> `p0-2-outreach-plan.md` and `joss-eligibility-plan.md` banners.
+>
 > Finalized copy for the pyOpenSci presubmission keystone and the repo "feedback
 > wanted" issue. Operationalizes `p0-2-outreach-plan.md` §5 templates with the
 > session decisions locked in: **affiliation = Independent Researcher**, **release =

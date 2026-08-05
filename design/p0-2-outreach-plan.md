@@ -1,6 +1,17 @@
 # P0-2 Engagement / Outreach Execution Plan
 
-> Operationalizes `joss-eligibility-plan.md` Part C (P0-2: external use / community
+> **[ABANDONED 2026-08-05] Keystone dead; plan dropped.** The pyOpenSci presubmission
+> inquiry (§1, §5 Template 1) was posted and **declined**: out of scope (they review
+> reusable scientific Python *packages*; sci-adk is a CLI workflow/verification
+> harness) and insufficient evidence of human design/review/long-term stewardship
+> given the extent of AI-generated code and documentation. The §1 "scope caveat"
+> called this risk correctly, and the presubmission format kept the cost low.
+> With the keystone gone the pyOpenSci→JOSS fast-track is gone too, and the author
+> has **dropped the publication-submission path entirely** (no JOSS, no arXiv), so
+> the amplification layer (§2) and pre-flight gates (§4) are not being executed
+> either. Kept as a record of the attempt. See `joss-eligibility-plan.md` banner.
+>
+> Original purpose: Operationalizes `joss-eligibility-plan.md` Part C (P0-2: external use / community
 > engagement) and Part D (JOSS-first, arXiv deferred). Goal: get sci-adk genuinely
 > used and critiqued by other people, leaving public traces — the one action that
 > unblocks JOSS's solo-author screen. Target community (chosen): research-software /
@@ -188,4 +199,5 @@ these non-negotiable for a public post.
 Version: 1.0
 Source: sci-adk session 11 (2026-06-30). Channels verified via web (pyOpenSci open peer
 review + JOSS partnership confirmed). Companion to `joss-eligibility-plan.md` Part C/D.
-Status: Active — keystone = pyOpenSci presubmission inquiry.
+Status: **ABANDONED 2026-08-05** — pyOpenSci declined the presubmission inquiry
+(scope + AI-stewardship); author dropped the submission path. Historical record only.

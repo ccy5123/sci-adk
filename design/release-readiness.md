@@ -60,6 +60,15 @@ discharge the G-A keystone.
 
 ## 4. G-B — Methods paper
 
+> **[2026-08-05] Submission path dropped.** pyOpenSci declined the presubmission
+> inquiry (out of scope for their package review + insufficient human-stewardship
+> evidence given the extent of AI-generated content), and the author has abandoned
+> the publication-submission path entirely — no pyOpenSci, no JOSS, no arXiv. G-B is
+> therefore **no longer a release gate**: `paper/paper.md` and the methods drafts stay
+> in the repo as documentation, and B5's "DOI cross-reference at JOSS acceptance" will
+> not happen. See `joss-eligibility-plan.md` / `p0-2-outreach-plan.md` banners. The
+> table below is retained as the record of what was built.
+
 Publication plan reframed 2026-06-26 (session 9): the G-B paper is a **JOSS
 software/methods paper about the sci-adk tool** (venue = JOSS, hard no-APC
 constraint; SoftwareX USD 1560 / Patterns ruled out). This is distinct from the

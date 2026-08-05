@@ -1,6 +1,18 @@
 # JOSS Eligibility Plan (repo track to submission)
 
-> Purpose: track the **repo-side** gate to JOSS submission. The manuscript
+> **[ABANDONED 2026-08-05] The submission path is dropped entirely.** pyOpenSci
+> declined the presubmission inquiry on two grounds: (1) out of scope — their review
+> covers reusable scientific Python *packages*, not a CLI workflow/verification
+> harness; (2) insufficient evidence of human design, review, and long-term
+> stewardship relative to the extent of AI-generated code and documentation. Reason
+> (1) does not transfer to JOSS (broader scope), but reason (2) does, and it is the
+> same gap as P0-2 below — observed from outside. The pyOpenSci→JOSS fast-track
+> on-ramp is gone with it. **Author decision: stop pursuing publication venues
+> (pyOpenSci, JOSS, arXiv).** This document is kept as a record of the attempt, not
+> as an active track. `paper/paper.md`, `paper/methods-arxiv.md/.tex` and
+> `paper/paper.bib` remain in the repo as documentation; nothing is deleted.
+>
+> Purpose (historical): track the **repo-side** gate to JOSS submission. The manuscript
 > (`paper/paper.md`) reached review-passing shape over review rounds 1-3; what
 > now determines accept/reject is no longer the manuscript but two time-gated
 > repository properties JOSS screens for. This document is the single source for
@@ -168,4 +180,5 @@ Version: 1.1
 Source: sci-adk session 10 — first-review triage (manuscript passed; repo gate
 identified). Measured 2026-06-30. Part D added session 11 (2026-06-30): JOSS-first /
 arXiv-deferred submission-path strategy after community-consensus review.
-Status: Active until JOSS submission (~2026-12).
+Status: **ABANDONED 2026-08-05** (pyOpenSci declined; author dropped the submission
+path entirely). Historical record only — do not reuse as an active plan.
