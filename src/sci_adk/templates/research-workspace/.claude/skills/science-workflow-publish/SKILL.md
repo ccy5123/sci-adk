@@ -71,48 +71,64 @@ gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
   kernel carries no domain plotting code, so any domain-specific figure tool produces
   the image file outside the kernel and you reference it.
 
-### State conclusions as an ARGUMENT, not as a status report
+### State conclusions as an ARGUMENT, and declare them beside the paper
 
 You are writing a PAPER — an argument addressed to a skeptical peer. It is not a prose
-rendering of the record. The reproduction document already exists (the SI record dump);
-do not write a second one.
+rendering of the record. The reproduction document already exists; do not write a second
+one.
 
 So a conclusion is never stated as a bookkeeping value. `H2 is supported` tells a reader
 nothing: not what was found, how large it was, under what conditions, or how much to
-believe it. Write the sentence YOU would defend at a seminar, and declare which recorded
-status you wrote it to ::
-
-    \finding{<hypothesis-id>}{<status>}{<your argued sentence>}
-
-The engine checks the declaration against the record and renders ONLY your sentence — the
-reader never meets the words `proposed` / `supported` / `contested` / `refuted`.
+believe it. Write the sentence you would defend at a seminar.
 
 ```
 NO   H2 is \status{h2}. H1 is \status{h1}.
-YES  \finding{h2}{supported}{The model reproduces the observed values across all nine
-     sites, with no parameter refitted.}
-     \finding{h1}{refuted}{The elasticity relation was mis-stated and does not hold at
-     these concentrations.}
+YES  The model reproduces the observed values across all nine sites, with no parameter
+     refitted. The elasticity relation, by contrast, was mis-stated and does not hold at
+     these concentrations.
 ```
 
-Two HARD gates back this:
+**What is submitted is the `.tex` SOURCE**, not just the PDF — reviewers, editors,
+co-authors on Overleaf, and publisher typesetting all read it. So the manuscript carries
+NO markup a reviewer would not recognize. The binding to the record lives in a side file
+that is never submitted, `runs/<id>/declarations.json`:
 
-- **The declaration must still match the record.** Belief is revisable — new evidence can
-  move a status. When it does, the sentence and the argument built around it were written
-  for the old verdict, so `verify` FAILS and you rewrite the passage. A revision costs a
+```json
+{"spec_id": "<id>", "declarations": [
+  {"hypothesis_id": "h2", "status": "supported",
+   "sentence": "The model reproduces the observed values across all nine sites, with no parameter refitted."},
+  {"hypothesis_id": "h1", "status": "refuted",
+   "sentence": "The elasticity relation, by contrast, was mis-stated and does not hold at these concentrations."}
+]}
+```
+
+Copy each sentence VERBATIM from the manuscript. Line wrapping is fine (whitespace is
+normalized); anything else must match exactly.
+
+Three HARD checks in `verify`, none of which reads meaning:
+
+- **The declared status must still match the record.** Belief is revisable. When new
+  evidence moves a status, the sentence and the argument built around it were written for
+  the old verdict, so `verify` FAILS and you rewrite the passage. A revision costs a
   rewrite, never a silent word swap.
-- **Every decided hypothesis must be argued.** Once `draft.tex` argues one hypothesis this
-  way, a hypothesis that has a derived Claim but no `\finding` is a result the paper
-  silently omits, and `verify` fails. This is the floor made structural.
+- **The declared sentence must still be in the manuscript.** If you rewrite it, the
+  declaration has detached from what it described — re-declare it as it now reads.
+- **Every decided hypothesis must be declared.** Once the list exists, a hypothesis with a
+  derived Claim and no declaration is a result the paper silently omits. This is the floor,
+  made structural: a rule against overstating, alone, is satisfied by saying nothing.
 
-Keep the sentence flat: no `\cite` / `\ref` and no braces inside the third argument — put
-them outside the span. `\status` still resolves for cases where a bare recorded value is
-genuinely what the sentence needs, but a CONCLUSION belongs in `\finding`.
+What these do NOT check is whether your sentence overstates the status it declares. That
+is a judgement, and no gate makes it — an independent reviewer does, and its finding goes
+to a human.
 
-Everything else about the manuscript follows from the same principle: it is tool-agnostic
-science. `verify` scans the submission documents for toolchain vocabulary; when it flags a
-term, rewrite the passage rather than swapping a synonym — a sentence built in the
-record's shape stays wrong after a find-and-replace.
+Numbers need no markup either: `verify` audits every quantitative token in the manuscript
+against the recorded values, so a plain `1.6` is bound exactly as tightly as a macro would
+bind it.
+
+Everything else follows from the same principle: the manuscript is tool-agnostic science.
+`verify` scans it for toolchain vocabulary; when it flags a term, rewrite the passage
+rather than swapping a synonym — a sentence built in the record's shape stays wrong after
+a find-and-replace.
 
 ### Render
 

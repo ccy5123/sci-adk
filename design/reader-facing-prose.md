@@ -1,9 +1,13 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **DESIGN AGREED, NOT BUILT (2026-08-31, v0.4)**. §1-§7 are the diagnosis; §8
-> corrects two errors in it; §9 is a first answer that was implemented on branch
-> `feat/verdict-markup` and then SUPERSEDED — it fails at the submission boundary; **§11
-> is the current architecture**. The branch is left intact, unmerged, pending a decision.
+> Status: **§11.3 BUILT (2026-08-31, v0.5)** on branch `feat/declaration-list`; §11.1 (the
+> two-document reassignment) and §11.4 (the advisory reviewer) are NOT built. §1-§7 are the
+> diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
+> then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
+>
+> The `\finding` markup of §9 is REMOVED on this branch (the declaration list quotes the
+> sentence, so an in-document marker adds nothing — §11.5). Its commit is preserved at the
+> untouched `feat/verdict-markup` ref.
 >
 > v0.2 supersedes v0.1's framing. v0.1 diagnosed "the protocol specifies no reader" and
 > proposed readability remedies. That was one level too shallow: the missing reader is a
@@ -425,6 +429,26 @@ If the branch is reworked rather than dropped, the marker form (§6 F3, no text 
 the shape that survives; the flat-argument problem and its `\begin{finding}` fix (F2) both
 disappear, since there is no span.
 
+### 11.5b What shipped for §11.3
+
+`src/sci_adk/core/declarations.py` — the type + loader, at `runs/<id>/declarations.json`
+(beside `spec.json`/`pubreqs.json`, outside the regenerated `paper/` so `render` never
+clobbers it). NOT frozen, unlike `PubReqs`: a declaration list is revised whenever the
+paper is, which is exactly what check 2 enforces.
+
+`src/sci_adk/render/declaration_checks.py` — the three pure checks. Quote matching
+normalizes whitespace only (LaTeX re-wraps freely) and strips unescaped-`%` comments first,
+so a sentence surviving only inside a commented-out block does not count as present.
+
+`loop/verify.py` `_check_declarations` → `declarations_clean` in the combined HARD gate;
+`cli.py` surfacing; `science-workflow-publish/SKILL.md` rewritten to author the list
+instead of the markup. `tests/test_declarations.py`, 25 tests including the belief-revision
+catch, the silently-edited-conclusion catch, and a test asserting the manuscript itself
+carries no markup.
+
+Opt-in at the RUN level: no `declarations.json` → vacuously clean, so no existing run is
+retro-broken. A malformed file is a loud failure, never a silent skip.
+
 ### 11.6 Open
 
 - The pre-existing number-audit false positive (a digit-bearing hypothesis id inside
@@ -439,6 +463,6 @@ disappear, since there is no span.
 
 ---
 
-Version: 0.4 (§11 architecture supersedes §9; §9 kept as the record of the first answer)
+Version: 0.5 (§11.3 built; §11.1 and §11.4 remain unbuilt)
 Source: author reading report + framing correction + the submission-boundary objection,
 2026-08-31.

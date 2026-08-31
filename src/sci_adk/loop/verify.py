@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
+from sci_adk.core.declarations import load_declarations
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.pkgreqs import (
     DEFAULT_REQUIRED_SECTIONS as PKG_DEFAULT_REQUIRED_SECTIONS,
@@ -79,10 +80,7 @@ from sci_adk.render.consistency import (
     check_latex_ref_consistency,
 )
 from sci_adk.render.factref import find_unresolved_factrefs
-from sci_adk.render.finding import (
-    find_mismatched_findings,
-    find_unargued_hypotheses,
-)
+from sci_adk.render.declaration_checks import declaration_problems
 from sci_adk.render.novelty import find_unsupported_novelty
 from sci_adk.render.number_audit import (
     RecordedValuePool,
@@ -208,16 +206,17 @@ class VerifyReport:
             ``si.tex`` are scanned (no gap where an author sneaks ``\\novelty`` into SI prose).
         paper_novelty_clean: True iff no paper document carries an unsupported novelty
             assertion (and True vacuously with no paper). Part of the HARD gate.
-        paper_finding_problems: per-paper-document ``\\finding{hyp}{status}{...}`` failures
-            (OD-R1), keyed by file name. Two kinds: a DECLARATION the record no longer
-            derives (belief is non-monotone -- a revision must cost a rewrite, not a silent
-            word swap), scanned in both documents; and, in ``draft.tex`` only, a decided
-            hypothesis the manuscript argues NOWHERE (the FLOOR -- the structural dual of
-            the ceiling rule, which alone is optimized by silent omission). EMPTY when clean
-            / no ``\\finding`` markup / no paper.
-        paper_finding_clean: True iff no paper document carries a stale declaration or an
-            unargued decided hypothesis (True vacuously with no markup). Part of the HARD
-            gate.
+        declaration_problems: the conclusion-declaration failures (design §11.3): a declared
+            status the record no longer derives (belief is non-monotone -- a revision must
+            cost a rewrite of the passage, not a silent re-wording); a declared sentence
+            that is no longer in the manuscript (it was edited, so the declaration has
+            detached from its subject); and a hypothesis the record DECIDED for which no
+            conclusion is declared (the FLOOR -- the structural dual of the ceiling rule,
+            which alone rewards silent omission). EMPTY when clean, or when the run has no
+            ``declarations.json`` (opt-in; no existing run is retro-broken). Whether a
+            sentence OVERSTATES its declared status is semantic and is never decided here.
+        declarations_clean: True iff the declaration list is faithful (True vacuously when
+            the run declares nothing). Part of the HARD gate.
         paper_cross_doc_refs: every plain-text "Figure S<n>" / "Table S<n>" the MAIN paper
             (``draft.tex``) cites that points past the SI's float count -- a silent dangling
             cross-document reference (the SI renumbers its floats ``S1, S2, ...`` and a real
@@ -254,7 +253,7 @@ class VerifyReport:
             ``paper_*_clean`` flags.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
-            paper_finding_clean and paper_cross_doc_clean and paper_requirements_clean``.
+            declarations_clean and paper_cross_doc_clean and paper_requirements_clean``.
             This is what the CLI exits
             on; ``all_reproduced`` alone is the claim signal.
     """
@@ -271,8 +270,8 @@ class VerifyReport:
     paper_tool_clean: bool = field(default=True)
     paper_novelty_problems: Dict[str, List[str]] = field(default_factory=dict)
     paper_novelty_clean: bool = field(default=True)
-    paper_finding_problems: Dict[str, List[str]] = field(default_factory=dict)
-    paper_finding_clean: bool = field(default=True)
+    declaration_problems_found: List[str] = field(default_factory=list)
+    declarations_clean: bool = field(default=True)
     paper_cross_doc_refs: List[str] = field(default_factory=list)
     paper_cross_doc_clean: bool = field(default=True)
     paper_requirements_problems: List[str] = field(default_factory=list)
@@ -460,10 +459,10 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # record (a belief revision makes the argument around it stale -> rewrite, not re-word),
     # and a draft that argues one hypothesis this way must argue every DECIDED one (the
     # floor). READ-ONLY, no recompile, no LLM.
-    paper_finding_problems = _check_paper_findings(
+    declaration_problems_found = _check_declarations(
         run_dir, spec, list(recorded_claims.values())
     )
-    paper_finding_clean = not any(paper_finding_problems.values())
+    declarations_clean = not declaration_problems_found
 
     # Cross-document gate: the main paper cites SI floats as plain text ("Figure S1") that a
     # real \ref cannot carry across the compile boundary, so a "Figure S3" with only two SI
@@ -526,8 +525,8 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_tool_clean=paper_tool_clean,
         paper_novelty_problems=paper_novelty_problems,
         paper_novelty_clean=paper_novelty_clean,
-        paper_finding_problems=paper_finding_problems,
-        paper_finding_clean=paper_finding_clean,
+        declaration_problems_found=declaration_problems_found,
+        declarations_clean=declarations_clean,
         paper_cross_doc_refs=paper_cross_doc_refs,
         paper_cross_doc_clean=paper_cross_doc_clean,
         paper_requirements_problems=paper_requirements_problems,
@@ -541,7 +540,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             and paper_factref_clean
             and paper_tool_clean
             and paper_novelty_clean
-            and paper_finding_clean
+            and declarations_clean
             and paper_cross_doc_clean
             and paper_requirements_clean
         ),
@@ -913,43 +912,47 @@ def _check_paper_novelty(
     return problems
 
 
-def _check_paper_findings(
+def _check_declarations(
     run_dir: Path, spec: Spec, claims: List[Claim]
-) -> Dict[str, List[str]]:
-    """Re-check every ``\\finding{hyp}{status}{...}`` declaration in the paper (OD-R1).
+) -> List[str]:
+    """Run the conclusion-declaration checks (design/reader-facing-prose.md §11.3).
 
-    READ-ONLY (mirrors :func:`_check_paper_novelty`). Two gates, deliberately scoped to
-    different documents:
+    READ-ONLY: reads ``run_dir/declarations.json`` (the author's list of the conclusions
+    the paper states) and the manuscript it names, then runs three deterministic checks --
+    NONE of which reads meaning (:mod:`sci_adk.render.declaration_checks`):
 
-      - MISMATCH -- runs over BOTH ``_PAPER_DOCS``: a declaration whose status the record
-        no longer derives is stale. Because belief is NON-MONOTONE, this is the gate that
-        turns a revision into a required human rewrite instead of a silent word swap
-        (:func:`sci_adk.render.finding.find_mismatched_findings`). Scanning ``si.tex`` too
-        leaves no gap where a stale declaration could hide.
-      - FLOOR -- runs over ``draft.tex`` ONLY: the main paper is where the argument is
-        made, so it is where every decided hypothesis must be argued
-        (:func:`sci_adk.render.finding.find_unargued_hypotheses`). The SI is authored
-        overflow, not the argument, so requiring full coverage there would be wrong (this
-        is the partial resolution of OD-R3).
+      1. every declared status is still what the record derives (belief is non-monotone, so
+         a revision must cost a REWRITE of the passage, not a silent re-wording);
+      2. every declared sentence still appears in the manuscript (an edit detaches the
+         declaration from its subject, so it must be re-made);
+      3. every hypothesis the record DECIDED has a declared conclusion (the floor -- the
+         structural dual of the ceiling rule, which alone rewards silent omission).
 
-    Both are opt-in per document: a manuscript with no ``\\finding`` markup yields nothing.
-    Returns a map keyed by file name -> problems (only for documents that have any).
+    The binding lives OUTSIDE the manuscript on purpose: what is submitted is the ``.tex``
+    source, so it may carry no opaque shorthand a reviewer would not recognize (the OD-7
+    constraint, design/paper-writing-enforcement.md §6a). Whether a sentence OVERSTATES its
+    declared status is semantic and is NOT decided here -- it is escalated to the advisory
+    reviewer of design §11.4; no language model sits on the verdict path.
+
+    Opt-in at the RUN level: no ``declarations.json`` -> ``[]`` (vacuously clean, so no
+    existing run is retro-broken). A malformed file is a LOUD failure, never a silent skip.
     """
-    paper_dir = run_dir / "paper"
-    problems: Dict[str, List[str]] = {}
-    if not paper_dir.is_dir():
-        return problems
-    for name in _PAPER_DOCS:
-        doc = paper_dir / name
-        if not doc.is_file():
-            continue
-        tex = doc.read_text(encoding="utf-8")
-        found = find_mismatched_findings(tex, claims)
-        if name == "draft.tex":
-            found = found + find_unargued_hypotheses(tex, spec, claims)
-        if found:
-            problems[name] = sorted(found)
-    return problems
+    try:
+        declarations = load_declarations(run_dir)
+    except ValueError as exc:
+        return [str(exc)]
+    if declarations is None:
+        return []
+    doc = run_dir / "paper" / declarations.document
+    if not doc.is_file():
+        return [
+            f"declarations: the list quotes sentences from paper/{declarations.document}, "
+            f"which does not exist -- render the paper, or point the list at the document "
+            f"the conclusions are written in."
+        ]
+    return declaration_problems(
+        declarations, spec, claims, doc.read_text(encoding="utf-8")
+    )
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
