@@ -1663,6 +1663,16 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("  tool-vocabulary FAILED (draft.tex names the toolchain, not the "
               "science -- §10): " + ", ".join(report.paper_tool_vocab), file=sys.stderr)
 
+    # Finding gate (OD-R1): a \finding declaration the record no longer derives (belief is
+    # revisable -- the argument around it is stale and must be REWRITTEN, not re-worded), or
+    # a decided hypothesis the draft argues nowhere (the floor). Fails the combined gate.
+    if not report.paper_finding_clean:
+        print("  findings FAILED (a stated conclusion no longer matches the record, or a "
+              "decided hypothesis is argued nowhere):", file=sys.stderr)
+        for name in sorted(report.paper_finding_problems):
+            for problem in report.paper_finding_problems[name]:
+                print(f"    - {name}: {problem}", file=sys.stderr)
+
     # Cross-document gate: a main-paper "Figure/Table S<n>" that points past the SI's float
     # count is a silent dangling cross-reference (a real \ref cannot cross the compile
     # boundary, so the within-document gate never sees it). It fails the combined gate.

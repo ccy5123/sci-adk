@@ -38,6 +38,12 @@ from sci_adk.render.figures import (
     order_figures_by_reference,
     render_figure,
 )
+from sci_adk.render.finding import (
+    FINDING_NEWCOMMAND,
+    FINDING_RENDER_RE,
+    check_finding,
+    has_finding_markup,
+)
 from sci_adk.render.novelty import (
     NOVELTY_NEWCOMMAND,
     NOVELTY_RENDER_RE,
@@ -344,6 +350,49 @@ def _novelty_prose(
         )
         pos = match.end()
     out.append(_latex_sanitize_prose(text[pos:]))  # trailing gap / whole string if no spans
+    return "".join(out)
+
+
+def _markup_prose(
+    text: str,
+    spec: Spec,
+    novelty_decisions: Sequence[EvidenceItem],
+    claims: Sequence[Claim],
+) -> str:
+    """Sanitize a prose slot AND render BOTH surviving-markup families (OD-R1 + N2).
+
+    The outer member of the prose pipeline. It SPLIT-and-stitches on
+    :data:`finding.FINDING_RENDER_RE` exactly as :func:`_novelty_prose` walks the novelty
+    spans: each GAP between/around the ``\\finding`` spans is handed to ``_novelty_prose``
+    (so ``\\novelty`` markup in a gap still renders), and each SPAN
+    ``\\finding{hyp}{status}{inner}`` is re-emitted SURVIVING into the ``.tex`` with:
+
+      - ``hyp`` / ``status`` -- slugs, emitted VERBATIM (verify re-scans them; sanitizing
+        would break the re-derivation, like a ref key);
+      - the inner text -- prose-sanitized (FLAT: specials escaped, no nested ref/cite --
+        the documented honest limit, same as ``\\novelty``).
+
+    The two families cannot nest: both text args are ``[^{}]*``, so a ``\\finding`` span
+    cannot contain ``\\novelty`` markup (or any braced command). A string with NO
+    ``\\finding`` markup never enters the loop -> falls straight to ``_novelty_prose``
+    (BYTE-IDENTICAL to the pre-OD-R1 path).
+
+    PURE + FAIL-LOUD: a declaration the record contradicts raises ``ValueError`` via
+    :func:`finding.check_finding` (the HARD gate at render time).
+    """
+    out: list[str] = []
+    pos = 0
+    for match in FINDING_RENDER_RE.finditer(text):
+        out.append(_novelty_prose(text[pos : match.start()], spec, novelty_decisions))
+        hyp, status, inner = match.group(1), match.group(2), match.group(3)
+        check_finding(hyp, status, claims)  # fail-loud
+        out.append(
+            "\\finding{" + hyp + "}{" + status + "}{"
+            + _latex_sanitize_prose(inner)
+            + "}"
+        )
+        pos = match.end()
+    out.append(_novelty_prose(text[pos:], spec, novelty_decisions))
     return "".join(out)
 
 
@@ -692,10 +741,11 @@ def render_paper_latex(
         # render \novelty{} markup (scope baked / HARD fail) + the prose sanitizer (specials
         # escaped; \ref/\cite preserved). Substitute factrefs before, so a substituted string
         # value is escaped as ordinary text; _novelty_prose owns the prose sanitize.
-        return _novelty_prose(
+        return _markup_prose(
             substitute_factrefs(text.strip(), evidence, claims),
             spec,
             novelty_decisions,
+            claims,
         )
 
     # Title: the agent's short title, else spec.id -- NEVER the goal/hypothesis wall.
@@ -741,6 +791,23 @@ def render_paper_latex(
     )
     if has_nov:
         lines.append(NOVELTY_NEWCOMMAND)
+    # \finding{hyp}{status}{text} survives likewise (OD-R1); this \newcommand renders only
+    # the author's sentence, so the reader never meets the belief-state enum while the
+    # declaration stays as verify metadata. Emitted ONLY when the markup is present, so a
+    # no-finding paper is byte-identical (regression invariant).
+    has_find = prose is not None and any(
+        has_finding_markup(s)
+        for s in (
+            prose.abstract,
+            prose.introduction,
+            prose.methods,
+            prose.results,
+            prose.discussion,
+        )
+        if s
+    )
+    if has_find:
+        lines.append(FINDING_NEWCOMMAND)
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     # Author is agent-supplied; absent -> empty \author{} (the paper is tool-agnostic and
     # never names the rendering toolchain -- design feedback §10, tool-vocabulary leakage).

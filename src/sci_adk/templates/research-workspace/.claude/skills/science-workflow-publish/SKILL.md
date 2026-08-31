@@ -59,12 +59,60 @@ gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
 - **`PaperProse`** — the main-paper narrative (what the paper claims and why). It must
   match the DERIVED Claim statuses: never restate a Claim more strongly than its
   status, never introduce a finding the record does not contain.
+
+  That rule is a CEILING. It has a FLOOR, and both are enforced: **state the strongest
+  conclusion the record does support, plainly, and stand behind it.** A ceiling alone is
+  satisfied by asserting as little as possible, which is how a paper ends up saying
+  nothing. Underclaiming and overclaiming are both failures.
 - **`SIProse`** — optional prose around the auto-dumped Supporting Information record.
 - **`FigureSpec`** — figure specifications. For a data plot, the `y` values are pulled
   FROM Evidence by `evidence_id` (record fidelity). For a diagram (not a data plot),
   an image figure is supplied externally via the general figure mechanism — the
   kernel carries no domain plotting code, so any domain-specific figure tool produces
   the image file outside the kernel and you reference it.
+
+### State conclusions as an ARGUMENT, not as a status report
+
+You are writing a PAPER — an argument addressed to a skeptical peer. It is not a prose
+rendering of the record. The reproduction document already exists (the SI record dump);
+do not write a second one.
+
+So a conclusion is never stated as a bookkeeping value. `H2 is supported` tells a reader
+nothing: not what was found, how large it was, under what conditions, or how much to
+believe it. Write the sentence YOU would defend at a seminar, and declare which recorded
+status you wrote it to ::
+
+    \finding{<hypothesis-id>}{<status>}{<your argued sentence>}
+
+The engine checks the declaration against the record and renders ONLY your sentence — the
+reader never meets the words `proposed` / `supported` / `contested` / `refuted`.
+
+```
+NO   H2 is \status{h2}. H1 is \status{h1}.
+YES  \finding{h2}{supported}{The model reproduces the observed values across all nine
+     sites, with no parameter refitted.}
+     \finding{h1}{refuted}{The elasticity relation was mis-stated and does not hold at
+     these concentrations.}
+```
+
+Two HARD gates back this:
+
+- **The declaration must still match the record.** Belief is revisable — new evidence can
+  move a status. When it does, the sentence and the argument built around it were written
+  for the old verdict, so `verify` FAILS and you rewrite the passage. A revision costs a
+  rewrite, never a silent word swap.
+- **Every decided hypothesis must be argued.** Once `draft.tex` argues one hypothesis this
+  way, a hypothesis that has a derived Claim but no `\finding` is a result the paper
+  silently omits, and `verify` fails. This is the floor made structural.
+
+Keep the sentence flat: no `\cite` / `\ref` and no braces inside the third argument — put
+them outside the span. `\status` still resolves for cases where a bare recorded value is
+genuinely what the sentence needs, but a CONCLUSION belongs in `\finding`.
+
+Everything else about the manuscript follows from the same principle: it is tool-agnostic
+science. `verify` scans the submission documents for toolchain vocabulary; when it flags a
+term, rewrite the passage rather than swapping a synonym — a sentence built in the
+record's shape stays wrong after a find-and-replace.
 
 ### Render
 
