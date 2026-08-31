@@ -805,6 +805,17 @@ def render_paper_latex(
         lines.append(_slot(prose.discussion))
         lines.append("")
 
+    # Conclusion. The DEFAULT publishing contract requires this section
+    # (core/pubreqs.DEFAULT_REQUIRED_SECTIONS), so without a slot to author it the
+    # documented `pubreqs freeze --defaults` fast-path could never be satisfied: verify
+    # failed with "missing required section: Conclusion" and no authoring surface could
+    # fix it. Emitted like the others -- only when its slot is present, so a paper that
+    # does not declare Conclusion is byte-identical to before.
+    if prose is not None and prose.conclusion:
+        lines.append(r"\section{Conclusion}")
+        lines.append(_slot(prose.conclusion))
+        lines.append("")
+
     # Pending agent judgments -- only when present (an unresolved proof/qualitative
     # hypothesis). A finished paper has none; this is the working-draft signal.
     if pending:

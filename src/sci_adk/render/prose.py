@@ -99,7 +99,11 @@ class PaperProse(BaseModel):
         default=None, description="Results section body (figures placed here as floats)"
     )
     discussion: Optional[str] = Field(
-        default=None, description="Discussion section body (rendered before References)"
+        default=None, description="Discussion section body"
+    )
+    conclusion: Optional[str] = Field(
+        default=None,
+        description="Conclusion section body (rendered after Discussion, before References)",
     )
 
 

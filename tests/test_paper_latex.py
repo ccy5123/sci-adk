@@ -648,3 +648,42 @@ def test_figure_bearing_paper_emits_font_policy():
     figure_less = render_paper_latex(spec, [claim], [ev])
     assert r"\usepackage{newtxmath}" not in figure_less
     assert "helvet" not in figure_less
+
+
+def test_default_contract_conclusion_section_is_authorable():
+    """The documented `pubreqs freeze --defaults` fast-path must be satisfiable.
+
+    DEFAULT_REQUIRED_SECTIONS includes "Conclusion", but PaperProse had no slot for it and
+    render emitted only Introduction/Methods/Results/Discussion -- so a run that took the
+    documented default path failed verify with "missing required section: Conclusion" and
+    no authoring surface could fix it. Found by an end-to-end CLI run, not by the suite.
+    """
+    from sci_adk.core.pubreqs import DEFAULT_REQUIRED_SECTIONS
+    from sci_adk.render.paper import render_paper_latex
+    from sci_adk.render.prose import PaperProse
+
+    spec = _spec(_basic_hyp())
+    prose = PaperProse(
+        abstract="a", introduction="i", methods="m", results="r",
+        discussion="d", conclusion="The encoding is injective on the tested set.",
+    )
+    tex = render_paper_latex(spec=spec, claims=[], prose=prose)
+    assert "\\section{Conclusion}" in tex
+    assert "The encoding is injective on the tested set." in tex
+    # every default-required section is now emittable (Abstract is an environment)
+    for section in DEFAULT_REQUIRED_SECTIONS:
+        assert (
+            "\\section{" + section + "}" in tex
+            or "\\begin{" + section.lower() + "}" in tex
+        ), f"default-required section not emittable: {section}"
+
+
+def test_a_paper_without_a_conclusion_slot_is_unchanged():
+    from sci_adk.render.paper import render_paper_latex
+    from sci_adk.render.prose import PaperProse
+
+    spec = _spec(_basic_hyp())
+    base = PaperProse(abstract="a", introduction="i", methods="m", results="r", discussion="d")
+    assert "\\section{Conclusion}" not in render_paper_latex(
+        spec=spec, claims=[], prose=base
+    )
