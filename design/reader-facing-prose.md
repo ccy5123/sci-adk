@@ -1,8 +1,9 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **OD-R1 IMPLEMENTED (2026-08-31, v0.3)** on branch `feat/verdict-markup` —
-> see §9. §1-§7 remain the diagnosis; §8 corrects two errors in it that surfaced during
-> implementation; §10 lists what is still open.
+> Status: **DESIGN AGREED, NOT BUILT (2026-08-31, v0.4)**. §1-§7 are the diagnosis; §8
+> corrects two errors in it; §9 is a first answer that was implemented on branch
+> `feat/verdict-markup` and then SUPERSEDED — it fails at the submission boundary; **§11
+> is the current architecture**. The branch is left intact, unmerged, pending a decision.
 >
 > v0.2 supersedes v0.1's framing. v0.1 diagnosed "the protocol specifies no reader" and
 > proposed readability remedies. That was one level too shallow: the missing reader is a
@@ -229,7 +230,15 @@ below is named `\finding`, not `\verdict`.
 
 ---
 
-## 9. OD-R1 — RESOLVED (implemented, branch `feat/verdict-markup`)
+## 9. OD-R1 — first answer, SUPERSEDED by §11 (implemented, branch `feat/verdict-markup`)
+
+> **SUPERSEDED (same day).** The mechanism below is sound about *what* must be bound and
+> *why* declaration beats substitution — §11 keeps both. It is WRONG about *where* the
+> declaration lives. `\finding` is opaque shorthand inside the reviewer-facing source, and
+> `design/paper-writing-enforcement.md` §6a already resolved OD-7 with a standing user
+> constraint that forbids exactly that. The reader was scoped to "someone reading the PDF";
+> the submitted artifact is the `.tex`. The branch is left intact pending a decision; §11
+> is the architecture that replaces it.
 
 **The reframe.** `\status` has the engine WRITING text into the manuscript, so the
 engine's vocabulary arrives by construction. The fix is to have the engine CHECK instead.
@@ -299,6 +308,137 @@ surfacing; the floor + the argument instruction + worked before/after pairs in
 
 ---
 
-Version: 0.3 (OD-R1 resolved + implemented; §8 corrects the v0.2 audit)
-Source: author reading report + framing correction, 2026-08-31; protocol audit and
-implementation same date.
+## 11. The architecture (supersedes §9)
+
+Two corrections drove this: the submitted artifact is the `.tex` source, not the PDF; and
+one document cannot be both the complete record of what happened and the argument to a
+peer. The answer stops trying to make one artifact serve both.
+
+### 11.1 Two documents, honestly named
+
+| | Procedure/record document | Paper |
+|---|---|---|
+| Audience | the team, and the reviewer agent (§11.4) | the venue's reviewers |
+| Submitted | no | yes |
+| Vocabulary | the record's own, freely | tool-agnostic science |
+| Markup | macros fine (`\evval`, `\status`, `\novelty`) | **none a reviewer would not recognize** |
+| Job | complete and traceable | persuasive and correct |
+
+The paper is authored FROM the first document — read it, understand what was found and
+what was meant, then write the argument. Two passes, not one: be faithful first, be
+persuasive second. This is D4 from §7 done properly, and it dissolves the vocabulary
+problem at the source rather than policing it with a banned-word list (which §8 shows was
+never going to be the fix, and C1 forbids anyway).
+
+Note this gives the first document a consumer it did not previously have. Before, it was
+"the paper, written badly"; now it is the input to two distinct readers — the human team
+and the reviewer agent.
+
+**Implementation posture.** `draft.tex` is referenced in 78 places across 10 modules, and
+the path is inside the frozen 1.0 surface. So the move is a REASSIGNMENT of role, not a
+rename: `draft.tex` stops being the submission (existing gates keep applying to it
+unchanged), and the paper becomes a separate artifact carrying the new gates.
+
+### 11.2 Where each kind of statement is bound
+
+The single idea: **turn every semantic question into a comparison of two values.** What
+cannot be reduced that way is escalated to a person, never auto-decided.
+
+| Layer | What it compares | Verdict? |
+|---|---|---|
+| Number audit (exists) | every number in the paper ↔ the recorded value pool | mechanical, HARD |
+| Declaration list (§11.3) | declared status ↔ recorded status; quoted sentence ↔ paper text | mechanical, HARD |
+| Reviewer agent (§11.4) | the status a sentence actually asserts ↔ the declared status | model, **ADVISORY** |
+
+The bottom two decide; the top one summons a human.
+
+### 11.3 The declaration list
+
+A small file beside the paper — never submitted — holding one row per conclusion:
+
+    hypothesis | declared status | the exact sentence in the paper that states it
+
+The paper itself is untouched: plain LaTeX, nothing a reviewer would find odd. This
+satisfies OD-7 while keeping the binding, on the same reasoning OD-7 itself gave — *"the
+macro was only ever ONE way to bind a number to the record."* The same is true of a
+verdict.
+
+`verify` runs two mechanical checks, neither of which reads meaning:
+
+1. **Is the declared status still what the record derives?** Belief is non-monotone; when
+   it moves, the declaration is now false → refuse, and name the passage to rewrite. This
+   is §9's revision catch, preserved intact.
+2. **Does the quoted sentence still appear in the paper?** If the author edited it, the
+   quote no longer matches → refuse, and require re-declaration.
+
+Check 2 is strictly stronger than what `\finding` could do: a macro's text argument can be
+rewritten freely with nothing noticing. The machine still cannot judge the new sentence —
+but it can refuse to let a declaration silently detach from the sentence it was made about.
+
+Completeness rule (carried over from §9's floor, and still necessary): once the paper
+declares one conclusion, it must declare every hypothesis the record actually decided.
+Without it, an author declares the favourable results and omits the rest.
+
+Known costs: one more file to keep in sync; quote matching is brittle against whitespace,
+line wrapping, and LaTeX escaping, so it needs normalization and will still not be perfect.
+
+### 11.4 The reviewer agent — as a label comparison, not a hunt
+
+A fresh-context agent is the only layer that can read meaning. It belongs in the existing
+guard tier (`evaluator-rigor` / `evaluator-active`), which is advisory by construction.
+
+**Do not ask it to find overstatement.** A model asked to find problems finds them whether
+or not they exist; a few false alarms and the signal is ignored, which is how a gate dies.
+
+Ask instead: give it the hypothesis, the pre-registered decision rule, the recorded result,
+and the conclusion sentence — **withholding the declared status** — and have it answer one
+bounded question: *which status does this sentence, as written, assert?* Four values plus
+"unclear". Then compare its answer to the declaration mechanically.
+
+The properties this buys:
+
+- The model **reads** rather than hunts. A clean paper produces silence.
+- The disagreement is **computed, not asserted** by the model.
+- **Both directions come free.** Declared `supported`, read as `contested` = overstatement.
+  Declared `supported`, read as something weaker = UNDERSTATEMENT — which matters, because
+  a reviewer hunting only overclaims rewards hedging and re-creates the §4 defect.
+- The declaration list earns its keep twice: the reviewer is told which sentence to
+  classify instead of having to locate the conclusions itself.
+
+Constraints: the result is a signal for a person, never a gate — an LLM must not sit on the
+verdict path. Model answers vary between runs, so run it more than once and escalate only
+stable disagreements (precedent: the design constitution's independent re-evaluation
+mechanism).
+
+Blind spot, to be stated rather than hidden: this checks declared sentences only. Spin in
+the abstract, selective emphasis, and a discussion that travels further than the results
+support are all invisible to a per-sentence label comparison. A person has to read the
+paper.
+
+### 11.5 What §9 contributes to §11
+
+Not discarded: the reason declaration beats substitution (a revision must cost a rewrite,
+not a silent word swap), the floor as a structural rule, and the finding that no gate ever
+needed the sentence as a macro argument — which is precisely why moving it out of the
+document costs nothing. What changes is the location: outside the manuscript, not inside.
+If the branch is reworked rather than dropped, the marker form (§6 F3, no text argument) is
+the shape that survives; the flat-argument problem and its `\begin{finding}` fix (F2) both
+disappear, since there is no span.
+
+### 11.6 Open
+
+- The pre-existing number-audit false positive (a digit-bearing hypothesis id inside
+  surviving `\novelty` markup is tokenized as a quantity — `hyp-001` → `001`; masked
+  per-run by derived-value leniency, LIVE on the exact-only package path). Independent of
+  everything above and worth fixing on its own.
+- Whether the procedure/record document is authored prose or can be largely the existing
+  deterministic record dump. The dump carries facts but not intent, and intent is what the
+  paper's author needs — so some authored narrative is likely irreducible.
+- Guaranteeing the paper is genuinely written FROM the first document rather than
+  re-rendered from the record still sitting in the same context.
+
+---
+
+Version: 0.4 (§11 architecture supersedes §9; §9 kept as the record of the first answer)
+Source: author reading report + framing correction + the submission-boundary objection,
+2026-08-31.
