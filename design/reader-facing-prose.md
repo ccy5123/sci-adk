@@ -1,7 +1,8 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **§11.3 + §11.4 BUILT (2026-08-31, v0.6)** on branch `feat/declaration-list`;
-> §11.1 (the two-document reassignment) is NOT built. §1-§7 are the
+> Status: **§11 COMPLETE (2026-08-31, v0.7)** on branch `feat/declaration-list` — §11.3
+> and §11.4 built, §11.1 resolved as a protocol change that needed no code (§11.5d).
+> §1-§7 are the
 > diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
 > then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
 >
@@ -469,16 +470,59 @@ Tests: 8 added to `tests/test_declarations.py` — agreement is silent, overstat
 understatement both surface, cannot-tell surfaces, and two tests assert the verdict is
 byte-identical with and without a disagreeing (or malformed) review.
 
+### 11.5d §11.1 RESOLVED — and it needed no code
+
+Both §11.6 questions were answered by the author: **the internal document is the record
+dump**, and **the paper is written in a separate session**.
+
+That resolution collapses the implementation almost entirely, because both halves already
+exist:
+
+- The internal document is `runs/<id>/record.tex` — written by the compiler via
+  `render_si_latex`: the complete Evidence, the numeric tables, every figure, the verdicts
+  with their frozen decision rules, and the record-integrity line, with no authoring
+  judgement and no LLM. Nothing to build. The earlier plan to REASSIGN `draft.tex` is moot:
+  `draft.tex` is the paper, `record.tex` is the internal document, and there is no third
+  artifact.
+- The separate session already has a file-based way in: `sci-adk render <run> --prose
+  prose.json`. A session that never saw the research conversation can read `record.tex`,
+  author a `PaperProse` JSON, render, declare, and verify. No new verb, no surface change.
+
+So §11.1 is a PROTOCOL change, not a code change, and the honest thing was to ship it as
+one rather than manufacture kernel work to look busy. What shipped is the two-session split
+in `sci/SKILL.md` (Session A deposits the record and stops; Session B writes the paper from
+`record.tex`) and the paper session's input contract in `science-workflow-publish/SKILL.md`.
+
+**Stated limit, in the skill itself: no gate can tell whether the paper was really written
+in a separate session.** The separation is a discipline. What the engine can see is whether
+the paper's numbers trace to the record, whether its declared conclusions still match it,
+and whether any decided conclusion is missing — which is why those three are gates and this
+is not. The instruction that matters most is therefore the negative one: the research
+session must NOT continue into the manuscript merely because the record is at hand.
+
+Note the pleasing consequence: rendering with no `--prose` deposits the record and leaves
+the manuscript an empty skeleton. The default behaviour of the research session is now
+exactly the correct one.
+
 ### 11.6 Open
 
-- Whether the procedure/record document is authored prose or can be largely the existing
-  deterministic record dump. The dump carries facts but not intent, and intent is what the
-  paper's author needs — so some authored narrative is likely irreducible.
-- Guaranteeing the paper is genuinely written FROM the first document rather than
-  re-rendered from the record still sitting in the same context.
+Both of v0.6's open questions were answered by the author (§11.5d). What remains is not a
+decision but a bet:
+
+- **RESIDUAL RISK, accepted rather than solved.** Session separation is unenforceable, so
+  the architecture rests on a discipline the engine cannot see. The three gates bound what
+  a paper may SAY; none bounds how it came to be written. A violation will show up as
+  papers that read like the record again — qualitative evidence, not a failing gate. The
+  strongest countermeasure available is the default: rendering with no `--prose` deposits
+  the record and leaves the manuscript empty, so the research session's easiest path is now
+  the correct one.
+- **The record dump carries facts but not INTENT**, and intent is part of what a paper
+  needs. The paper session reconstructs it from the Spec's frozen hypotheses and decision
+  rules, which the dump carries — that is why they were pre-registered. Whether it is
+  enough is an empirical question, and the first real paper written this way is the test.
 
 ---
 
-Version: 0.6 (§11.3 + §11.4 built; §11.1 remains unbuilt)
+Version: 0.7 (§11 complete: 11.3 + 11.4 built, 11.1 resolved as a protocol change)
 Source: author reading report + framing correction + the submission-boundary objection,
 2026-08-31.

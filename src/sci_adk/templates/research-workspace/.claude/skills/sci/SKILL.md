@@ -143,9 +143,30 @@ Load `Skill("science-workflow-experiment")`. SEQUENTIAL (3b reads 3a's Evidence)
    non-numeric checkpoint; loop `sci-adk resolve` until checkpoints clear.
 3. Optionally `Agent(subagent_type: "evaluator-rigor")` (agent form, advisory).
 
-### publish — Render the paper
+### publish — Deposit the record, then write the paper in a SEPARATE session
 
 Load `Skill("science-workflow-publish")`.
+
+This stage is TWO sessions, and the boundary is the point of it. A paper is an
+argument addressed to a skeptical peer; the record is what happened. Written in one
+sitting by the agent that ran the experiments, the paper collapses into prose-shaped
+record — that is the failure this split exists to prevent.
+
+- **Session A (this one)** deposits the record: run the steps below through the
+  render, which writes the deterministic dump at `runs/<id>/record.tex` — the
+  complete Evidence, the numeric tables, every figure, the verdicts with their frozen
+  decision rules, and the record-integrity line. Authoring the manuscript narrative
+  here is OPTIONAL and normally skipped: render with no `--prose` deposits the record
+  and leaves the paper an empty skeleton.
+- **Session B (a NEW session)** writes the paper, reading `runs/<id>/record.tex` as
+  its input — not this conversation. It authors a `prose.json`, runs
+  `sci-adk render <run> --prose prose.json`, records the conclusions in
+  `declarations.json`, and runs `sci-adk verify`.
+
+Tell the user plainly when Session A is done and what Session B needs (the run id and
+`record.tex`). Do NOT continue into the manuscript in this session because the record
+happens to be at hand — that is exactly the shortcut the split forbids, and nothing in
+the engine can catch it.
 
 1. **Elicit + freeze the publishing requirements** (orchestrator-only — a worker
    cannot prompt). BEFORE spawning the writer, ask the user (via `AskUserQuestion`)

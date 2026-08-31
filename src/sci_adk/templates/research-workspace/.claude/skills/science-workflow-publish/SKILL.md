@@ -71,6 +71,37 @@ gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
   kernel carries no domain plotting code, so any domain-specific figure tool produces
   the image file outside the kernel and you reference it.
 
+### The paper is written in a SEPARATE session, from the record
+
+Two documents, two jobs, and they are not written together:
+
+| | `runs/<id>/record.tex` | the paper (`paper/draft.tex`) |
+|---|---|---|
+| What | the deterministic record dump | the argument |
+| Written by | the engine, no authoring judgement | you, in a session of your own |
+| Submitted | no | yes |
+| Vocabulary | the record's own, freely | tool-agnostic science |
+
+If you are the session that ran the experiments, your publish job ends at the record:
+render without `--prose`, which deposits `record.tex` and leaves the manuscript an
+empty skeleton. Then stop and hand off.
+
+If you are the paper session, **`record.tex` is your input** — the complete Evidence,
+the numeric tables, the figures, the verdicts with their frozen decision rules. Read
+it and work out what was found and what it means. Then:
+
+1. author the manuscript into a `prose.json` (a `PaperProse`: title / abstract /
+   introduction / methods / results / discussion);
+2. `sci-adk render <run> --prose prose.json` — this also re-deposits the identical
+   `record.tex`, since the record inputs have not changed;
+3. record the conclusions in `runs/<id>/declarations.json` (below);
+4. `sci-adk verify <run>`.
+
+**No gate can tell whether you actually did this in a separate session.** The
+separation is a discipline, not a check. What the engine can see is whether the
+paper's numbers trace to the record, whether its declared conclusions still match, and
+whether any conclusion is missing — which is why those three are gates and this is not.
+
 ### State conclusions as an ARGUMENT, and declare them beside the paper
 
 You are writing a PAPER — an argument addressed to a skeptical peer. It is not a prose
