@@ -28,8 +28,10 @@ import pytest
 
 from sci_adk.core.claim import Claim, ClaimStatus, Confidence, ConfidenceType
 from sci_adk.core.declarations import (
+    ConclusionReview,
     Declaration,
     Declarations,
+    ReadConclusion,
     load_declarations,
 )
 from sci_adk.core.evidence import (
@@ -42,6 +44,7 @@ from sci_adk.core.spec import (
 from sci_adk.loop.checkpoint_loop import run_checkpoint_loop
 from sci_adk.loop.verify import verify_run
 from sci_adk.render.declaration_checks import (
+    declaration_disagreements,
     declaration_problems,
     status_mismatches,
     unanchored_sentences,
@@ -371,3 +374,91 @@ def test_the_manuscript_carries_no_declaration_markup():
     # Nothing was added to the document to achieve that.
     assert "\\finding" not in tex and "\\status" not in tex
     assert check_paper_tool_vocabulary(tex) == []
+
+
+# --------------------------------------------------------------------------- #
+# the advisory reviewer (design §11.4) -- a label comparison, never a gate
+# --------------------------------------------------------------------------- #
+
+def _review(*rows) -> ConclusionReview:
+    return ConclusionReview(
+        spec_id="sp-decl",
+        reviewer="test",
+        readings=[
+            ReadConclusion(hypothesis_id=h, reads_as=s, basis=b)
+            for h, s, b in rows
+        ],
+    )
+
+
+def test_an_agreeing_reading_is_silent():
+    """A faithful paper produces nothing -- the point of reading instead of hunting."""
+    decls = _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE))
+    review = _review(("hyp-001", ClaimStatus.SUPPORTED, "states it plainly"))
+    assert declaration_disagreements(decls, review) == []
+
+
+def test_overstatement_surfaces():
+    decls = _decls(("hyp-001", ClaimStatus.CONTESTED, _SENTENCE))
+    review = _review(("hyp-001", ClaimStatus.SUPPORTED, "reads as established"))
+    lines = declaration_disagreements(decls, review)
+    assert len(lines) == 1
+    assert "contested" in lines[0] and "supported" in lines[0]
+
+
+def test_understatement_surfaces_too():
+    """A reviewer that flags only overclaims would reward hedging (design §4)."""
+    decls = _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE))
+    review = _review(("hyp-001", ClaimStatus.PROPOSED, "hedged to the point of no claim"))
+    lines = declaration_disagreements(decls, review)
+    assert len(lines) == 1 and "proposed" in lines[0]
+
+
+def test_cannot_tell_gets_its_own_line():
+    decls = _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE))
+    review = _review(("hyp-001", None, "the sentence is ambiguous"))
+    lines = declaration_disagreements(decls, review)
+    assert len(lines) == 1 and "could not tell" in lines[0]
+
+
+def test_a_reading_for_an_undeclared_hypothesis_is_reported():
+    decls = _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE))
+    review = _review(("hyp-002", ClaimStatus.REFUTED, "x"))
+    lines = declaration_disagreements(decls, review)
+    assert len(lines) == 1 and "hyp-002" in lines[0]
+
+
+def test_verify_routes_a_disagreement_to_the_advisory_channel_and_never_gates(tmp_path):
+    run_dir = _seeded_run(tmp_path)
+    _write(run_dir, f"\\section{{Results}}\n{_SENTENCE}\n",
+           _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE)))
+    before = verify_run(run_dir)
+    (run_dir / "review.json").write_text(
+        _review(("hyp-001", ClaimStatus.PROPOSED, "hedged")).model_dump_json(),
+        encoding="utf-8",
+    )
+    after = verify_run(run_dir)
+    assert any("conclusion review" in n for n in after.paper_advisory)
+    # The model's disagreement changed NOTHING about the verdict.
+    assert after.passed == before.passed
+    assert after.declarations_clean is True
+    assert after.declaration_problems_found == before.declaration_problems_found
+
+
+def test_a_malformed_review_cannot_stop_a_run(tmp_path):
+    run_dir = _seeded_run(tmp_path)
+    _write(run_dir, f"\\section{{Results}}\n{_SENTENCE}\n",
+           _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE)))
+    before = verify_run(run_dir)
+    (run_dir / "review.json").write_text("{ not json", encoding="utf-8")
+    after = verify_run(run_dir)
+    assert after.passed == before.passed   # a broken advisory cannot stop a run
+    assert any("review" in n for n in after.paper_advisory)
+
+
+def test_no_review_is_silent(tmp_path):
+    run_dir = _seeded_run(tmp_path)
+    _write(run_dir, f"\\section{{Results}}\n{_SENTENCE}\n",
+           _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE)))
+    report = verify_run(run_dir)
+    assert not any("conclusion review" in n for n in report.paper_advisory)

@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from sci_adk.core.claim import Claim, ClaimStatus
-from sci_adk.core.declarations import load_declarations
+from sci_adk.core.declarations import load_declarations, load_review
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.pkgreqs import (
     DEFAULT_REQUIRED_SECTIONS as PKG_DEFAULT_REQUIRED_SECTIONS,
@@ -80,7 +80,10 @@ from sci_adk.render.consistency import (
     check_latex_ref_consistency,
 )
 from sci_adk.render.factref import find_unresolved_factrefs
-from sci_adk.render.declaration_checks import declaration_problems
+from sci_adk.render.declaration_checks import (
+    declaration_disagreements,
+    declaration_problems,
+)
 from sci_adk.render.novelty import find_unsupported_novelty
 from sci_adk.render.number_audit import (
     RecordedValuePool,
@@ -464,6 +467,11 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     )
     declarations_clean = not declaration_problems_found
 
+    # Conclusion review (design §11.4): an independent BLIND reading of what each conclusion
+    # sentence asserts, compared to what the author declared. ADVISORY ONLY -- routed through
+    # paper_advisory below, so a model can never fail a run.
+    conclusion_review_notes = _conclusion_review_advisory(run_dir)
+
     # Cross-document gate: the main paper cites SI floats as plain text ("Figure S1") that a
     # real \ref cannot carry across the compile boundary, so a "Figure S3" with only two SI
     # figures is a silent dangling reference the within-document check never sees. Static
@@ -531,7 +539,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_cross_doc_clean=paper_cross_doc_clean,
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
-        paper_advisory=paper_advisory,
+        paper_advisory=paper_advisory + conclusion_review_notes,
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
         passed=(
@@ -953,6 +961,38 @@ def _check_declarations(
     return declaration_problems(
         declarations, spec, claims, doc.read_text(encoding="utf-8")
     )
+
+
+def _conclusion_review_advisory(run_dir: Path) -> List[str]:
+    """ADVISORY (never gated): where an independent reading differs from a declaration.
+
+    READ-ONLY. Reads ``runs/<id>/review.json`` -- a fresh-context reviewer's BLIND reading
+    of what status each conclusion sentence asserts (design §11.4) -- and computes the
+    disagreement against the declaration list. The reviewer was never told what the author
+    declared and was never asked to find overstatement, so a faithful paper produces
+    silence and a finding is a computed comparison rather than a model's assertion.
+
+    Routed through ``paper_advisory``, so it CANNOT fail a run: no language model sits on
+    the verdict path. A disagreement summons a person; it decides nothing. For the same
+    reason a malformed/unreadable review becomes an advisory line rather than an error --
+    a broken advisory input must not be able to stop a run either.
+    """
+    try:
+        review = load_review(run_dir)
+    except ValueError as exc:
+        return [str(exc)]
+    if review is None:
+        return []
+    try:
+        declarations = load_declarations(run_dir)
+    except ValueError:
+        return []  # the declaration gate already reports this loudly
+    if declarations is None:
+        return [
+            "conclusion review: a reading exists but the run declares no conclusions -- "
+            "there is nothing to compare it against."
+        ]
+    return declaration_disagreements(declarations, review)
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> List[str]:

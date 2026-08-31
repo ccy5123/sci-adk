@@ -128,4 +128,84 @@ def load_declarations(run_dir: Path) -> Optional[Declarations]:
         ) from exc
 
 
-__all__ = ["DEFAULT_DOCUMENT", "Declaration", "Declarations", "load_declarations"]
+class ReadConclusion(BaseModel):
+    """One conclusion as an INDEPENDENT reviewer read it (design §11.4).
+
+    The semantic question the mechanical checks cannot answer -- does this sentence claim
+    more (or less) than the record licenses? -- is answered by a fresh-context reviewer.
+    But the reviewer is NOT asked to find overstatement: a model asked to find problems
+    finds them whether or not they exist, and a few false alarms are how a signal dies.
+
+    It is asked to READ. Given the hypothesis, its pre-registered decision rule, the
+    recorded result, and the sentence -- and NOT told what the author declared -- it answers
+    one bounded question: which status does this sentence, as written, assert? The
+    disagreement is then COMPUTED against the declaration
+    (:func:`sci_adk.render.declaration_checks.declaration_disagreements`), not asserted by
+    the model. A faithful paper therefore produces silence.
+
+    Both directions fall out of the same comparison. Read as stronger than declared =
+    overstatement; read as weaker = UNDERSTATEMENT -- which matters, because a reviewer
+    hunting only overclaims rewards hedging and re-creates the defect that started this
+    (design §4).
+
+    Attributes:
+        hypothesis_id: the hypothesis whose conclusion was read.
+        reads_as: the status the sentence asserts, as read. ``None`` means the reviewer
+            could not tell -- surfaced as its own advisory line, never silently dropped.
+        basis: the reviewer's one-line justification (reported, never parsed).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    hypothesis_id: str
+    reads_as: Optional[ClaimStatus] = Field(default=None, description="status as read")
+    basis: Optional[str] = Field(default=None, description="one-line justification")
+
+
+class ConclusionReview(BaseModel):
+    """An independent reviewer's blind reading of the paper's conclusions (design §11.4).
+
+    Written by the advisory guard to ``runs/<id>/review.json`` and consumed by
+    ``sci-adk verify`` through the NON-GATING advisory channel. It can never fail a run:
+    no language model sits on the verdict path, so a disagreement summons a person, it
+    does not decide anything.
+
+    Attributes:
+        spec_id: the run this reading belongs to.
+        reviewer: free-text identifier of who/what produced it (reported, never parsed).
+        readings: one entry per conclusion read.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    spec_id: str
+    reviewer: Optional[str] = Field(default=None, description="who produced this reading")
+    readings: List[ReadConclusion] = Field(default_factory=list)
+
+
+def load_review(run_dir: Path) -> Optional[ConclusionReview]:
+    """Read ``runs/<id>/review.json``, or ``None`` when no reviewer has read the paper.
+
+    An absent file is normal: the reviewer is optional and advisory. A MALFORMED file is
+    surfaced as an advisory line by the caller rather than raised -- unlike the declaration
+    list, this input can never gate, so a broken reading must not be able to stop a run
+    either.
+    """
+    path = run_dir / "review.json"
+    if not path.is_file():
+        return None
+    try:
+        return ConclusionReview.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except Exception as exc:  # noqa: BLE001 -- surfaced as advisory, never raised upward
+        raise ValueError(f"{path} is not a readable conclusion review: {exc}") from exc
+
+
+__all__ = [
+    "DEFAULT_DOCUMENT",
+    "Declaration",
+    "Declarations",
+    "load_declarations",
+    "ReadConclusion",
+    "ConclusionReview",
+    "load_review",
+]

@@ -29,7 +29,7 @@ import re
 from typing import Sequence
 
 from sci_adk.core.claim import Claim
-from sci_adk.core.declarations import Declarations
+from sci_adk.core.declarations import ConclusionReview, Declarations
 from sci_adk.core.spec import Spec
 
 # LaTeX comments: a ``%`` that is not escaped (``\%``) starts a comment. Stripped BEFORE
@@ -171,9 +171,69 @@ def declaration_problems(
     )
 
 
+def declaration_disagreements(
+    declarations: Declarations,
+    review: ConclusionReview,
+) -> list[str]:
+    """ADVISORY: where an independent reading of a sentence differs from its declaration.
+
+    PURE. The third layer of design §11.2 -- and the ONLY one that involves a model, which
+    is why its output can never gate. The reviewer was not asked to find overstatement; it
+    was asked which status each sentence asserts, WITHOUT being told what the author
+    declared (:class:`sci_adk.core.declarations.ReadConclusion`). This function computes the
+    disagreement. So a faithful paper produces silence, and the finding is a comparison
+    rather than a model's assertion that something is wrong.
+
+    Both directions come out of the same comparison, deliberately: a sentence read as
+    STRONGER than declared overstates; one read as WEAKER understates. Flagging only the
+    first would reward hedging and re-create the defect that motivated the design (§4).
+
+    A reading the reviewer could not resolve (``reads_as=None``) gets its own line -- an
+    unreadable conclusion is itself worth a person's attention, and silently dropping it
+    would make the signal look cleaner than it is. A reading for a hypothesis that is not
+    declared is reported too, rather than ignored.
+    """
+    declared = {d.hypothesis_id: d for d in declarations.declarations}
+    lines: list[str] = []
+    for reading in review.readings:
+        decl = declared.get(reading.hypothesis_id)
+        if decl is None:
+            lines.append(
+                f"conclusion review for '{reading.hypothesis_id}': the reviewer read a "
+                f"conclusion for a hypothesis the declaration list does not cover."
+            )
+            continue
+        if reading.reads_as is None:
+            lines.append(
+                f"conclusion review for '{reading.hypothesis_id}': the reviewer could not "
+                f"tell what status the sentence asserts"
+                + (f" ({reading.basis})" if reading.basis else "")
+                + " -- a conclusion a careful reader cannot resolve is worth rewriting."
+            )
+            continue
+        read_as = (
+            reading.reads_as.value
+            if hasattr(reading.reads_as, "value")
+            else str(reading.reads_as)
+        )
+        declared_status = (
+            decl.status.value if hasattr(decl.status, "value") else str(decl.status)
+        )
+        if read_as != declared_status:
+            lines.append(
+                f"conclusion review for '{reading.hypothesis_id}': declared "
+                f"'{declared_status}', but an independent reader took the sentence to "
+                f"assert '{read_as}'"
+                + (f" ({reading.basis})" if reading.basis else "")
+                + ". Advisory only -- read the sentence and decide."
+            )
+    return sorted(lines)
+
+
 __all__ = [
     "status_mismatches",
     "unanchored_sentences",
     "undeclared_hypotheses",
     "declaration_problems",
+    "declaration_disagreements",
 ]

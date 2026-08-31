@@ -206,3 +206,8 @@ acquisition design — render-time emission of `\novelty` should survive into th
 - `science-workflow-experiment` — produced the Evidence + derived Claims being narrated.
 - `expert-writer` — the worker that authors the hooks and renders the paper.
 - The `evaluator-rigor` guard — advisory paper-consistency pre-check before close.
+- The `evaluator-conclusions` guard — reads each declared conclusion BLIND (it is not
+  told what you declared) and answers only "which status does this sentence assert?".
+  `verify` computes the disagreement and surfaces it as a non-gating advisory, so a
+  faithful paper produces silence. It catches both overstatement and understatement,
+  and it can never fail a run. Run it before close; do not show it the declaration list.

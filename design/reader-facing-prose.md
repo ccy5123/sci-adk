@@ -1,7 +1,7 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **§11.3 BUILT (2026-08-31, v0.5)** on branch `feat/declaration-list`; §11.1 (the
-> two-document reassignment) and §11.4 (the advisory reviewer) are NOT built. §1-§7 are the
+> Status: **§11.3 + §11.4 BUILT (2026-08-31, v0.6)** on branch `feat/declaration-list`;
+> §11.1 (the two-document reassignment) is NOT built. §1-§7 are the
 > diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
 > then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
 >
@@ -449,12 +449,28 @@ carries no markup.
 Opt-in at the RUN level: no `declarations.json` → vacuously clean, so no existing run is
 retro-broken. A malformed file is a loud failure, never a silent skip.
 
+### 11.5c What shipped for §11.4
+
+`core/declarations.py` gains `ReadConclusion` / `ConclusionReview` / `load_review`
+(`runs/<id>/review.json`); `render/declaration_checks.py` gains
+`declaration_disagreements`, which COMPUTES the disagreement rather than letting the model
+assert one; `verify._conclusion_review_advisory` routes the result through the existing
+non-gating `paper_advisory` channel — so the layer that involves a model is structurally
+incapable of failing a run, and a malformed review becomes an advisory line rather than an
+error (a broken advisory input must not stop a run either).
+
+`.claude/agents/evaluator-conclusions.md` is the guard. Its hard rules: answer only *which
+status does this sentence assert*; **never open `declarations.json`** (seeing the declared
+status destroys the independence that makes the check worth running); treat understatement
+as a real defect, not a safe default; "cannot tell" is a legitimate answer and gets its own
+advisory line rather than being dropped.
+
+Tests: 8 added to `tests/test_declarations.py` — agreement is silent, overstatement and
+understatement both surface, cannot-tell surfaces, and two tests assert the verdict is
+byte-identical with and without a disagreeing (or malformed) review.
+
 ### 11.6 Open
 
-- The pre-existing number-audit false positive (a digit-bearing hypothesis id inside
-  surviving `\novelty` markup is tokenized as a quantity — `hyp-001` → `001`; masked
-  per-run by derived-value leniency, LIVE on the exact-only package path). Independent of
-  everything above and worth fixing on its own.
 - Whether the procedure/record document is authored prose or can be largely the existing
   deterministic record dump. The dump carries facts but not intent, and intent is what the
   paper's author needs — so some authored narrative is likely irreducible.
@@ -463,6 +479,6 @@ retro-broken. A malformed file is a loud failure, never a silent skip.
 
 ---
 
-Version: 0.5 (§11.3 built; §11.1 and §11.4 remain unbuilt)
+Version: 0.6 (§11.3 + §11.4 built; §11.1 remains unbuilt)
 Source: author reading report + framing correction + the submission-boundary objection,
 2026-08-31.
