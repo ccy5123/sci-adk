@@ -163,11 +163,24 @@ Load `Skill("science-workflow-publish")`.
    the frozen `pubreqs.json` contract (declared sections present, font policy, length
    limits) → `sci-adk render` → `paper/{draft.tex, si.tex, figures/, references.bib}`
    + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`). Pass the frozen
-   `pubreqs.json` path in the spawn prompt. Optionally
-   `Agent(subagent_type: "evaluator-rigor")` for the paper-consistency pre-check.
-3. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
+   `pubreqs.json` path in the spawn prompt. The writer ALSO records the paper's
+   conclusions in `runs/<id>/declarations.json` — per conclusion, the hypothesis, the
+   status it is written to, and the sentence VERBATIM. The manuscript itself carries no
+   markup for this: what is submitted is the `.tex` source, so the binding lives beside
+   the paper, not inside it. Optionally `Agent(subagent_type: "evaluator-rigor")` for the
+   paper-consistency pre-check.
+3. Optionally `Agent(subagent_type: "evaluator-conclusions")` → a BLIND reading of each
+   declared conclusion (which status does the sentence assert?), written to
+   `runs/<id>/review.json`. Do NOT pass it the declared statuses or the path to
+   `declarations.json` — its independence is the whole value. `verify` computes the
+   disagreement and surfaces it as a NON-GATING advisory, so a faithful paper is silent
+   and a model can never fail a run.
+4. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
    declared sections, F2 font/DPI policy, reference style, max-words, F3 reproduction
-   bundle) as a HARD gate; `advisory` items + `max_pages` are surfaced, never gated.
+   bundle) and the `declarations_clean` gate (each declared status still matches the
+   record, each declared sentence is still in the manuscript, every decided hypothesis is
+   declared) as HARD gates; `advisory` items, `max_pages`, and the conclusion-review
+   disagreements are surfaced, never gated.
 
 ### package — Assemble the workspace submission
 
