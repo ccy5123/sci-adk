@@ -275,6 +275,13 @@ _STRIP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\\(?:newcommand|renewcommand|providecommand|def|newenvironment)"
                r"\*?(?:\{\\?[A-Za-z@]+\}|\\[A-Za-z@]+)(?:\[\d*\])*(?:\[[^\]]*\])?"),
     re.compile(r"#\d+"),                                  # macro arg reference (#1, #3, ...)
+    # Surviving \novelty{kind}{hyp}{text} markup (render/novelty.py): the first two args are
+    # structural IDENTIFIERS the verify re-scan reads, not data -- and the conventional id
+    # shape carries digits (``hyp-001``), which tokenized as the quantity 1.0 and failed the
+    # exact-only package audit naming a "number" that is part of an id. Strip the command and
+    # those two args ONLY; the lookahead keeps the third arg, which is reader-facing prose and
+    # must stay audited like any other sentence.
+    re.compile(r"\\novelty\s*\{[^{}]*\}\s*\{[^{}]*\}\s*(?=\{)"),
     re.compile(r"\$\$.*?\$\$", re.DOTALL),                # display math $$...$$
     re.compile(r"\$.*?\$", re.DOTALL),                    # inline math $...$
     re.compile(r"\\\[.*?\\\]", re.DOTALL),                # \[ ... \]

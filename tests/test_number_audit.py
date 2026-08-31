@@ -294,3 +294,33 @@ def test_audit_exact_mode_message_names_the_record_macro_remedy():
     joined = " ".join(problems).lower()
     assert "recorded home" in joined
     assert "macro" in joined
+
+
+def test_tokenizer_ignores_novelty_markup_metadata_but_audits_its_text():
+    """A digit-bearing hypothesis id is an identifier, not a measured quantity.
+
+    ``\novelty{kind}{hyp}{text}`` SURVIVES into the rendered .tex (render/novelty.py: the
+    markup is re-scanned by verify, and a preamble \newcommand renders only the text). Its
+    first two arguments are structural identifiers -- and the repo's own conventional id
+    shape carries digits (``hyp-001``), which the tokenizer read as the quantity 1.0. Masked
+    per-run by derived-value leniency, but LIVE on the exact-only package path, where it
+    fails naming a "number" that is really part of an id.
+
+    The THIRD argument is reader-facing prose and must stay audited: a number the author
+    writes inside a novelty sentence is a claim about the world like any other.
+    """
+    tex = r"\novelty{result}{hyp-001}{First to reach a ratio of 2.5 in this regime.}"
+    tokens = {t.value for t in tokenize_quantitative(tex)}
+    assert 2.5 in tokens        # the prose literal is still audited
+    assert 1.0 not in tokens    # 'hyp-001' is an identifier, not data
+
+
+def test_tokenizer_novelty_strip_does_not_swallow_neighbouring_prose():
+    tex = (
+        r"The ratio was 1.6. "
+        r"\novelty{method}{hyp-002}{No prior study applied it here.} "
+        r"The exponent was 0.31."
+    )
+    tokens = {t.value for t in tokenize_quantitative(tex)}
+    assert {1.6, 0.31} <= tokens
+    assert 2.0 not in tokens    # 'hyp-002'
