@@ -1,7 +1,9 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **§11 COMPLETE (2026-08-31, v0.7)** on branch `feat/declaration-list` — §11.3
-> and §11.4 built, §11.1 resolved as a protocol change that needed no code (§11.5d).
+> Status: **§11 COMPLETE, §12 ANALYSIS (2026-08-31, v0.8)** on branch
+> `feat/declaration-list` — §11.3 and §11.4 built, §11.1 resolved as a protocol change
+> that needed no code (§11.5d).
+> §12 defines what tool vocabulary IS; its list extension is deliberately NOT applied.
 > §1-§7 are the
 > diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
 > then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
@@ -523,6 +525,101 @@ decision but a bet:
 
 ---
 
-Version: 0.7 (§11 complete: 11.3 + 11.4 built, 11.1 resolved as a protocol change)
-Source: author reading report + framing correction + the submission-boundary objection,
-2026-08-31.
+## 12. What tool vocabulary IS — a definition, not a list
+
+§8 left "extend the banned-word list" as an open item. Attempting it produced the reason it
+should not be done that way, and the reason is not caution: **a list cannot express the
+thing being banned.**
+
+### 12.1 Why the list cannot work in principle
+
+The words the field manuscript actually leaked are ordinary scientific English:
+
+| word | legitimate use | leaked use |
+|---|---|---|
+| recorded | "we recorded the temperature" | "recorded as refuted" |
+| cycle | the catalytic cycle | "four pre-registered cycles" |
+| gate | a gated ion channel; gate voltage | "the gate" |
+| frozen | samples frozen at -80 C | "the frozen criterion" |
+| pre-registered | "the analysis plan was pre-registered" | "the pre-registered acceptance of 0.15" |
+
+The same word appears on both sides of every row. **The word is not the unit of the
+offence; its referent is.** Any list is therefore either too narrow (only the compounds
+nobody would write anyway) or fires on correct papers — and a gate that fires on correct
+papers is a gate people learn to ignore, which is worse than no gate. sci-adk is
+domain-general, so this is not a corner case: almost any English word is a legitimate term
+of art in some field.
+
+### 12.2 The definition
+
+> **A term is tool vocabulary when its referent is an artifact or state of the authoring
+> system rather than of the science.**
+
+The science includes the object of study, the methods used to interrogate it, and the
+reasoning from evidence to conclusion. It does not include the bookkeeping by which this
+document's claims were tracked.
+
+**The operational test — the stranger test.** *Could a researcher who has never used this
+tool, working from the same experiments, write this sentence?* If the sentence becomes
+unwritable or meaningless without the tool, the term refers to the machinery.
+
+Worked: "we recorded the temperature" — any researcher writes it. "recorded as refuted" —
+only someone with our Claim log does. Same word, opposite verdicts, and the test separates
+them without knowing the word in advance. That is what a list can never do.
+
+### 12.3 The taxonomy, and what each class is enforceable by
+
+| Class | What it is | Signature | Enforceable? |
+|---|---|---|---|
+| **A. System proper nouns** | the tool's name and its types promoted from common nouns (`Spec`, `Evidence`, `Claim`) | capitalised mid-sentence; the product name | partly — the `Spec` rule already does this |
+| **B. Structural literals** | field paths, ids, artifact names, commands (`result.point`, `hyp-001`, `pubreqs.json`, `sci-adk verify`) | dotted paths, slug ids, file extensions, verb names | **yes, high precision** — never ordinary prose |
+| **C. Bookkeeping referents** | ordinary words pointing at our record/gate state | none — identical to legitimate use | **no, in principle** (§12.1) |
+| **D. Criterion recital** | stating the internal threshold instead of the finding | none | no — and it is not vocabulary at all |
+
+The existing list covers A and B. **C is why the field manuscript leaked, and C is exactly
+what no list can catch.**
+
+### 12.4 D was conflated with the rest, and is a different defect
+
+"The pre-registered acceptance of R² ≥ 0.15" was read as a vocabulary leak. It is not. A
+researcher with a real pre-registration could write that sentence, so the stranger test
+passes it. What is wrong with it is that it **reports the bookkeeping instead of the
+result** — the reader is told what we required, not what we found. The repair is the one
+that was actually applied by hand: state the finding and let it speak (`R^2 = -29` — worse
+than predicting the mean). No vocabulary rule would have produced that repair, and adding
+`pre-registered` to a list would have banned a word science wants.
+
+Separating D out also resolves the tension flagged early in this work: pre-registration is
+a *virtue* to advertise, not a term to hide.
+
+### 12.5 Where each class belongs
+
+- **A + B → the gate.** Mechanically detectable, near-zero false positives. Extending the
+  list here is legitimate and additive: machinery compounds (`claim status`, `record
+  digest`, `spec digest`, `evidence item`, `record fidelity`), structural literals, and CLI
+  verb names. Bare ordinary words are never added — §12.1 is the standing reason.
+- **C → the authoring instruction.** The stranger test is written for the author to apply,
+  because only the author knows what a word refers to. This is where the definition earns
+  its keep: it generalises to words nobody listed.
+- **D → the floor + the reviewer.** "State the strongest conclusion the record supports,
+  plainly" already forbids reciting the criterion in place of the finding, and the blind
+  reviewer (§11.4) reads for exactly this: a sentence that recites a threshold asserts
+  nothing, and will be read as `proposed` against a declared `supported`.
+
+Note that the two-document split (§11.1) removes the pressure that made this hard. The
+record document may use every one of these terms freely — it *is* the machinery's own
+document — so the definition now applies to one artifact with a clean boundary, instead of
+to a document that was trying to be both.
+
+### 12.6 Status
+
+Definition and taxonomy: recorded here. **The A+B list extension is NOT applied** — it is
+now a small, well-understood follow-on rather than the fix, and it should not be shipped as
+if it closed §12. The C and D routes (author instruction wording, reviewer emphasis) are
+likewise not yet written into the skills.
+
+---
+
+Version: 0.8 (§12 defines tool vocabulary; the list extension is demoted to a follow-on)
+Source: author reading report + framing correction + the submission-boundary objection +
+the definition-over-enumeration correction, 2026-08-31.
