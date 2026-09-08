@@ -161,7 +161,11 @@ record — that is the failure this split exists to prevent.
 - **Session B (a NEW session)** writes the paper, reading `runs/<id>/record.tex` as
   its input — not this conversation. It authors a `prose.json`, runs
   `sci-adk render <run> --prose prose.json`, records the conclusions in
-  `declarations.json`, and runs `sci-adk verify`.
+  `declarations.json`, and runs `sci-adk verify`. Give it the run id, the path to
+  `record.tex`, and the `venue` from the frozen `pubreqs.json` — the paper is judged
+  against THAT venue's readers, and a term that is standard in one is opaque in
+  another. Warn it that `record.tex` is the machinery's own document: a word being in
+  its input is not a reason to use it in the paper.
 
 Tell the user plainly when Session A is done and what Session B needs (the run id and
 `record.tex`). Do NOT continue into the manuscript in this session because the record
@@ -192,10 +196,11 @@ the engine can catch it.
    paper-consistency pre-check.
 3. Optionally `Agent(subagent_type: "evaluator-conclusions")` → a BLIND reading of each
    declared conclusion (which status does the sentence assert?), written to
-   `runs/<id>/review.json`. Do NOT pass it the declared statuses or the path to
-   `declarations.json` — its independence is the whole value. `verify` computes the
-   disagreement and surfaces it as a NON-GATING advisory, so a faithful paper is silent
-   and a model can never fail a run.
+   `runs/<id>/review.json`, plus a cold read of the opening against the frozen `venue`
+   for terms that venue's readers would not know. Do NOT pass it the declared statuses
+   or the path to `declarations.json` — its independence is the whole value. `verify`
+   computes the disagreement and surfaces it as a NON-GATING advisory, so a faithful
+   paper is silent and a model can never fail a run.
 4. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
    declared sections, F2 font/DPI policy, reference style, max-words, F3 reproduction
    bundle) and the `declarations_clean` gate (each declared status still matches the

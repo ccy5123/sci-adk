@@ -1,9 +1,9 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **§11 COMPLETE, §12 ANALYSIS (2026-08-31, v0.8)** on branch
-> `feat/declaration-list` — §11.3 and §11.4 built, §11.1 resolved as a protocol change
-> that needed no code (§11.5d).
-> §12 defines what tool vocabulary IS; its list extension is deliberately NOT applied.
+> Status: **§11 + §12 COMPLETE (v0.9)** on branch `feat/declaration-list` — §11.3 and
+> §11.4 built, §11.1 resolved as a protocol change that needed no code (§11.5d).
+> §12 defines what tool vocabulary IS and §12.2a corrects it to be AUDIENCE-relative;
+> all of its routes are now applied (list, author instruction, reviewer, floor).
 > §1-§7 are the
 > diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
 > then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
@@ -567,6 +567,40 @@ Worked: "we recorded the temperature" — any researcher writes it. "recorded as
 only someone with our Claim log does. Same word, opposite verdicts, and the test separates
 them without knowing the word in advance. That is what a list can never do.
 
+### 12.2a The test needs a second parameter: the AUDIENCE
+
+The stranger test above is correct for the class it names, and incomplete. It asks whether
+ANY researcher could write the sentence — so it silently assumes one audience. The real
+test carries a venue:
+
+> **Would a competent reader of the venue this document is written for know this term
+> without being told by me?**
+
+with three outcomes rather than two: *field vocabulary* (keep; expand an abbreviation once
+at first use), *standard elsewhere but this venue is cross-disciplinary* (define it in the
+sentence where it first appears, never in a glossary), and *invented here* (remove it and
+rewrite the passage).
+
+**This corrects §12.4 below.** That section argued `pre-registered` can never be banned
+because it is a scientific virtue term. Venue-blind. Pre-registration is standard in a
+clinical journal and opaque in an engineering report — the same word, decided by the
+reader. The right conclusion was never "never ban" but **"the judgement is parameterised by
+venue"**, and the parameter already exists on the record: `pubreqs.json` carries `venue`,
+frozen with the rest of the publishing contract.
+
+That gives a clean split of labour, and it is why the mechanical gate stays
+venue-independent:
+
+- A term naming the machinery leaks in EVERY venue (`spec digest`, `result.point`,
+  `sci-adk`). Venue-independent → the list, mechanically.
+- A term ordinary somewhere and opaque here depends on the reader. Venue-relative → the
+  author's judgement and the reviewer's, both of which must be TOLD the venue.
+
+A boundary case worth stating: in a paper ABOUT this tool, the machinery vocabulary IS the
+field vocabulary. The same word is correct in `paper/paper.md` and a leak in a chemistry
+manuscript the tool produced — so the vocabulary gate would be wrong to run against this
+project's own tool paper.
+
 ### 12.3 The taxonomy, and what each class is enforceable by
 
 | Class | What it is | Signature | Enforceable? |
@@ -574,10 +608,30 @@ them without knowing the word in advance. That is what a list can never do.
 | **A. System proper nouns** | the tool's name and its types promoted from common nouns (`Spec`, `Evidence`, `Claim`) | capitalised mid-sentence; the product name | partly — the `Spec` rule already does this |
 | **B. Structural literals** | field paths, ids, artifact names, commands (`result.point`, `hyp-001`, `pubreqs.json`, `sci-adk verify`) | dotted paths, slug ids, file extensions, verb names | **yes, high precision** — never ordinary prose |
 | **C. Bookkeeping referents** | ordinary words pointing at our record/gate state | none — identical to legitimate use | **no, in principle** (§12.1) |
+| **C2. Borrowed vocabulary** | words imported from the record document, undefined by the author either | none | no — but it has a known SOURCE (§12.3a) |
+| **C3. Files as concepts** | "the analysis says", "per the probe" | none — no filename token appears | no — class B's scan cannot see it |
 | **D. Criterion recital** | stating the internal threshold instead of the finding | none | no — and it is not vocabulary at all |
 
 The existing list covers A and B. **C is why the field manuscript leaked, and C is exactly
 what no list can catch.**
+
+### 12.3a Borrowed vocabulary — a risk §11.1 created
+
+C2 deserves separate mention because the two-document architecture PUT the paper session in
+the position where it happens. Session B's input is `record.tex`, the machinery's own
+document, which uses the machinery's own words freely and correctly. The author is
+therefore importing vocabulary from a document whose terms they did not define — the
+hardest kind to catch, because it arrives pre-legitimised by its source.
+
+§12.5 previously said the split "removes the pressure" on the vocabulary problem. Half
+right: the pressure MOVED, from the document to the person reading it. The countermeasures
+are stated where they act — the publish skill warns Session B that a word appearing in its
+input is not a reason to use it in its output, and the reviewer is told to look for exactly
+this.
+
+C3 is a second thing class B cannot see. Class B catches a filename as a TOKEN
+(`pubreqs.json` appearing in prose); it cannot catch a file used as an agent, because no
+token appears at all. "The analysis says X" is ordinary English whose referent is a script.
 
 ### 12.4 D was conflated with the rest, and is a different defect
 
@@ -594,32 +648,48 @@ a *virtue* to advertise, not a term to hide.
 
 ### 12.5 Where each class belongs
 
-- **A + B → the gate.** Mechanically detectable, near-zero false positives. Extending the
-  list here is legitimate and additive: machinery compounds (`claim status`, `record
-  digest`, `spec digest`, `evidence item`, `record fidelity`), structural literals, and CLI
-  verb names. Bare ordinary words are never added — §12.1 is the standing reason.
-- **C → the authoring instruction.** The stranger test is written for the author to apply,
-  because only the author knows what a word refers to. This is where the definition earns
-  its keep: it generalises to words nobody listed.
+- **A + B → the gate.** Mechanically detectable, near-zero false positives, and
+  venue-independent — which is what makes them listable at all. APPLIED: the list now
+  carries the machinery compounds (`claim status`, `evidence item`, `record digest`,
+  `spec digest`, `record fidelity`, `frozen contract`, `frozen decision rule`,
+  `pre-registered decision rule`, `research compiler`, `verify gate`), with a test that
+  locks the restraint — eight sentences of correct scientific English using the words the
+  field manuscript leaked must produce no findings.
+- **C, C2, C3 → the authoring instruction, carrying the venue.** Only the author knows what
+  a word refers to, and only the venue says who has to understand it. APPLIED: the publish
+  skill states the venue test, its three outcomes, the leak classes (including the borrowed
+  and files-as-concepts kinds), both non-fixes, and the two post-rewrite checks — re-verify
+  the numbers survived, and read the opening cold.
+- **The opening, cold → the reviewer.** APPLIED: `evaluator-conclusions` reads the title,
+  abstract and first paragraphs as a reader of the frozen `venue`, BEFORE any declared
+  conclusion, and reports terms that venue's reader would not know. It proposes no
+  replacement words — a synonym leaves the sentence built around the old concept, so the
+  repair is the author's rewrite.
 - **D → the floor + the reviewer.** "State the strongest conclusion the record supports,
   plainly" already forbids reciting the criterion in place of the finding, and the blind
   reviewer (§11.4) reads for exactly this: a sentence that recites a threshold asserts
   nothing, and will be read as `proposed` against a declared `supported`.
 
-Note that the two-document split (§11.1) removes the pressure that made this hard. The
-record document may use every one of these terms freely — it *is* the machinery's own
-document — so the definition now applies to one artifact with a clean boundary, instead of
-to a document that was trying to be both.
+The two-document split (§11.1) gives the definition one artifact with a clean boundary
+instead of a document trying to be both — but see §12.3a: it moved the pressure onto the
+paper session rather than removing it.
 
-### 12.6 Status
+### 12.6 Status — APPLIED
 
-Definition and taxonomy: recorded here. **The A+B list extension is NOT applied** — it is
-now a small, well-understood follow-on rather than the fix, and it should not be shipped as
-if it closed §12. The C and D routes (author instruction wording, reviewer emphasis) are
-likewise not yet written into the skills.
+All routes of §12.5 are wired. The A+B list extension shipped WITH the load-bearing half
+rather than in place of it, which was the condition for shipping it at all.
+
+What the engine can enforce: the venue-independent compounds, plus the two post-rewrite
+checks the guideline can only ask a human to perform — that every number and claim survived
+the rewrite (the number audit and the declaration checks REFUSE if they did not). What it
+cannot: the venue-relative judgement, which is stated for the author, read for by an
+advisory reviewer, and decided by neither alone.
+
+Sources: the author's writing guideline (2026-09-08), and this document's §12.1-12.2
+analysis, which that guideline completed.
 
 ---
 
-Version: 0.8 (§12 defines tool vocabulary; the list extension is demoted to a follow-on)
+Version: 0.9 (§12 corrected: the test is audience-relative; all routes applied)
 Source: author reading report + framing correction + the submission-boundary objection +
 the definition-over-enumeration correction, 2026-08-31.

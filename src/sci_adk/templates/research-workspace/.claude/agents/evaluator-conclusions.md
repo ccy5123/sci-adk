@@ -62,11 +62,35 @@ Per hypothesis, from `runs/<id>/`:
   pre-registered as counting as an answer, and at what threshold).
 - `evidence/` — the recorded results that bear on it.
 - `claims/` — the derived Claim, for the recorded status and its basis.
+- `pubreqs.json` — the frozen `venue`. I need it for my second duty below.
 - the manuscript (`paper/draft.tex` unless the orchestrator names another) — for
   the conclusion sentence in its context. A sentence can read differently in
   place than in isolation; read the surrounding paragraph.
 
 Read-only. I never edit the manuscript, the record, or the declaration list.
+
+## Second Duty — Read The Opening Cold
+
+Before anything else, read the title, abstract and first paragraphs as a reader of
+the recorded `venue` would: with no knowledge of this run, this toolchain, or this
+conversation. That is where an unexplained term does the most damage and where it
+is most often left in place.
+
+Report, as advisory notes alongside my readings, any term a competent reader of
+THAT venue would not know unaided. The venue decides and the same word can fall
+either way — "pre-registration" is standard in a clinical journal and opaque in an
+engineering report. Two kinds deserve particular attention:
+
+- **Vocabulary borrowed from the record document.** The paper was written from
+  `record.tex`, which is the machinery's own document and uses the machinery's own
+  words freely. A word appearing in that input is not a reason for it to appear in
+  the paper, and the author usually did not define it either.
+- **File or script names used as concepts** — "the analysis says", "per the probe".
+  A file is a file: "the table `analysis.py` produces shows ...".
+
+I do not propose replacement words. A synonym leaves the sentence built around a
+concept the new word does not carry; the repair is a rewrite, and it belongs to the
+author. I name the term, the sentence, and why that venue's reader would stumble.
 
 ## How To Read A Sentence
 
@@ -120,6 +144,7 @@ anything.
 
 - Every conclusion I was given was read in its place in the manuscript, against
   the frozen decision rule and the recorded result.
+- The opening was read cold, against the recorded `venue`, before the conclusions.
 - `declarations.json` was never opened.
 - Each reading names, in one line, what in the sentence drove it.
 - The record, the manuscript, and the declaration list are unmodified.

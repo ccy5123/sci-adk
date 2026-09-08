@@ -156,10 +156,52 @@ Numbers need no markup either: `verify` audits every quantitative token in the m
 against the recorded values, so a plain `1.6` is bound exactly as tightly as a macro would
 bind it.
 
-Everything else follows from the same principle: the manuscript is tool-agnostic science.
-`verify` scans it for toolchain vocabulary; when it flags a term, rewrite the passage
-rather than swapping a synonym — a sentence built in the record's shape stays wrong after
-a find-and-replace.
+### Write for readers who were not in the room
+
+A document leaving this session must not use a word whose meaning exists only inside it.
+That is not a ban on technical language — a field's own vocabulary belongs in a paper
+written for that field. What is banned is WORKING vocabulary reaching a deliverable.
+
+**The test, applied against the actual venue** (`venue` is recorded in the frozen
+`pubreqs.json` — read it before you write):
+
+> Would a competent reader of THIS venue know this term without being told by me?
+
+- Yes → use it. Expand an abbreviation once at first use, then freely.
+- No, but it is standard elsewhere and this venue is cross-disciplinary → define it in
+  the sentence where it first appears, never in a glossary.
+- No, because it was invented during this work → remove it and rewrite the passage.
+
+The venue decides, and the same word can fall on either side of it: "pre-registration" is
+standard in a clinical journal and opaque in an engineering report; "commit" is ordinary
+to software readers and jargon to chemists. Judge against the real audience, not a general
+one. This is why `verify`'s vocabulary scan carries only compounds that name the machinery
+in EVERY venue — the venue-relative half is your judgement, and no gate makes it for you.
+
+**What leaks most often:**
+
+- Variant labels and numbers: Arm A, Case 3, run type 2, cycle 15, hypothesis 2.
+- Words for the machinery: gate, harness, probe, manifest, the pipeline, stage 2.
+- Coined shorthand for a finding: the substitution, the hump, the drift.
+- Status vocabulary: in force, superseded, frozen, carried through.
+- **Vocabulary borrowed from the record document** — the worst kind, because you did not
+  define it either. You are reading `record.tex` to write this paper, so you are in
+  exactly the position where this happens. A word being in your input is not a reason to
+  use it in your output.
+- **Script and file names used as concepts**: "the analysis says", "per the probe". Name
+  files as files: "the table `analysis.py` produces shows ...".
+
+**Two things that are not the fix.** A glossary is not: defining invented vocabulary and
+then using it asks the reader to learn a private language first, and leaves the prose
+unreadable to anyone who skips the table. Find-and-replace is not: swapping a word leaves
+the sentence built around a concept the new word does not carry, and reads worse than the
+original. Read the passage, work out what it is doing, write it again.
+
+**Then check two things the rewrite can break.** Re-verify that every number and claim
+survived it — `verify` does this for you (the number audit and the declaration checks) and
+will refuse if it did not. And **read the opening cold**: the abstract and the first
+paragraphs are where an unexplained term does the most damage and where it is most often
+left in place.
 
 ### Render
 
