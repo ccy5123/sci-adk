@@ -938,6 +938,22 @@ _PAPER_TOOL_PHRASES: tuple[str, ...] = (
     "result.point",
     "result.finding",
     "decision rule",
+    # Machinery compounds (design/reader-facing-prose.md §12.5, classes A+B). Every entry
+    # here is a COMPOUND whose referent is the authoring system in EVERY venue -- that is
+    # the admission criterion. Bare ordinary words are never added, however often they
+    # leak: whether "recorded" or "gate" or "pre-registered" is a leak depends on what it
+    # refers to and on who is reading (§12.1, §12.2), and a list can see neither. Adding
+    # them would fire on correct papers, which is how a gate stops being read.
+    "claim status",
+    "evidence item",
+    "record digest",
+    "spec digest",
+    "record fidelity",
+    "frozen contract",
+    "frozen decision rule",
+    "pre-registered decision rule",
+    "research compiler",
+    "verify gate",
 )
 # Bare jargon words (word-boundary, case-insensitive): a paper states a "result", not a
 # "verdict".

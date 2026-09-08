@@ -687,3 +687,59 @@ def test_a_paper_without_a_conclusion_slot_is_unchanged():
     assert "\\section{Conclusion}" not in render_paper_latex(
         spec=spec, claims=[], prose=base
     )
+
+
+# --------------------------------------------------------------------------- #
+# tool vocabulary: what the list may hold, and what it must never hold
+# --------------------------------------------------------------------------- #
+
+def test_tool_vocabulary_catches_machinery_compounds():
+    """Compounds naming the machinery are audience-INDEPENDENT: no venue wants them.
+
+    design/reader-facing-prose.md §12.5 -- classes A (system proper nouns) and B
+    (structural literals) are the only ones a list can carry, because they are the only
+    ones whose referent is the authoring system in every venue.
+    """
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    for phrase in (
+        "claim status",
+        "evidence item",
+        "record digest",
+        "spec digest",
+        "record fidelity",
+        "frozen contract",
+        "frozen decision rule",
+        "pre-registered decision rule",
+        "research compiler",
+        "verify gate",
+    ):
+        assert check_paper_tool_vocabulary(
+            f"The {phrase} shows that the effect is present."
+        ), f"not caught: {phrase}"
+
+
+def test_tool_vocabulary_does_not_flag_ordinary_scientific_english():
+    """The restraint is the load-bearing part of the list.
+
+    The words the field manuscript actually leaked -- gate, recorded, cycle, frozen,
+    pre-registered, registered -- are ordinary scientific English in some venue, and this
+    tool is domain-general. Whether they leak depends on the REFERENT and on the AUDIENCE,
+    neither of which a word list can see (§12.1, §12.2). Banning them would fire on correct
+    papers, and a gate that cries wolf is ignored.
+
+    This test exists to stop a future change from "helpfully" adding them.
+    """
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    for sentence in (
+        "Currents through the gated ion channel were recorded at each gate voltage.",
+        "The catalytic cycle completes in three steps; each cycle was recorded.",
+        "Samples were frozen at -80 C and thawed once before assay.",
+        "The analysis plan was pre-registered before the data were collected.",
+        "We report this as a registered report following the journal's format.",
+        "Events were gated on forward scatter, and the recorded counts are shown.",
+        "The specification of the instrument is given by the manufacturer.",
+        "Evidence from three independent laboratories supports the effect.",
+    ):
+        assert check_paper_tool_vocabulary(sentence) == [], f"false positive: {sentence}"
