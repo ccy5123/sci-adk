@@ -3,7 +3,8 @@
 > Status: **§11 + §12 COMPLETE (v0.9)** on branch `feat/declaration-list` — §11.3 and
 > §11.4 built, §11.1 resolved as a protocol change that needed no code (§11.5d).
 > §12 defines what tool vocabulary IS and §12.2a corrects it to be AUDIENCE-relative;
-> all of its routes are now applied (list, author instruction, reviewer, floor).
+> all of its routes are now applied (list, author instruction, reviewer, floor). §13
+> records the first outside test: two findings open, one fixed.
 > §1-§7 are the
 > diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
 > then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
@@ -690,6 +691,62 @@ analysis, which that guideline completed.
 
 ---
 
-Version: 0.9 (§12 corrected: the test is audience-relative; all routes applied)
+## 13. First outside test (2026-09-09)
+
+The same recorded result was written twice -- once under the pre-§11 protocol (A), once
+under this one (B) -- and an external reviewer, given both and told nothing else, was asked
+which was submittable.
+
+| | A (old) | B (new) |
+|---|---|---|
+| belief-state enum visible to a reader | `supported`, `refuted` | none |
+| tool-vocabulary gate | 4 findings | clean |
+| body words | 301 | 1003 |
+| record revises `refuted` -> `contested` | text changes silently, no gate fires | `verify` exits 1, names the passage to rewrite |
+
+The reviewer chose B, on grounds the design did not anticipate and that are worth keeping:
+A is unreproducible (no sizes, no distribution, no reference method), its criterion is
+unauditable ("qualitative ... expert judgment"), it records a refutation without explaining
+it, and its Discussion is a tautology. Its verdict -- *A is an audit log, B is a paper* --
+is the §2 genre distinction reached independently from outside.
+
+### 13.1 What it found that the machinery cannot
+
+**An inferential overclaim.** B says the measured exponent is "below even the square-root
+growth that independent rounding errors would produce". With one seed and five points that
+claim is not supported. Every gate passed it: the numbers all trace to the record, so the
+number audit was silent; the blind reviewer agreed with the declaration. **This is §11.4's
+stated blind spot -- a discussion travelling further than the results support -- occurring
+live on the first real paper.** It is the strongest evidence in this document that the
+advisory human layer is load-bearing rather than decorative.
+
+**No home for a deviation.** The pre-registered criterion for the first hypothesis was a
+ratio, and the ratio proved uncomputable (its denominator measured exactly zero). B says so
+honestly in prose, but sci-adk has nowhere to RECORD that a frozen criterion was departed
+from. The record shows a supported claim and gives no sign that its stated test could not
+be run. OPEN.
+
+**Artifact ids in the manuscript.** FIXED (`986d180`) -- §12.5 had claimed class B was
+gated and it was not. Provenance worth stating: that leak was the author's own sentence,
+not something the old protocol forced; the record macros substitute their ids away. The gap
+was real regardless, and nothing stopped it.
+
+### 13.2 One claim of the review that does not hold
+
+The review read A ("the decision rules are qualitative") against B ("two criteria were
+fixed in advance") as a contradiction, and warned that submitting B with A attached would
+destroy the credibility of the pre-registration. Checked against the record: both are true.
+`decision_rule.kind` is `qualitative` with `params: None`, AND the thresholds sit inside the
+frozen hypothesis STATEMENTS, written before any value was computed.
+
+But the concern underneath it is right, and it is this document's own open item: **the
+binding rule carries no threshold; the threshold lives only in prose.** An auditor holding
+both documents would be right to ask which one binds. That is the four-pane path's
+inability to express a numeric decision rule -- found from the inside during this test, and
+rediscovered from the outside by a reader who had only the two manuscripts.
+
+---
+
+Version: 1.0 (§13 records the first outside test: two findings open, one fixed)
 Source: author reading report + framing correction + the submission-boundary objection +
 the definition-over-enumeration correction, 2026-08-31.
