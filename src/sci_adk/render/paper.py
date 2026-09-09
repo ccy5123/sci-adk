@@ -962,6 +962,34 @@ _PAPER_TOOL_WORD_RE = re.compile(r"\b(?:verdict|verdicts)\b", re.IGNORECASE)
 # "specifically", lowercase "spec" -- is fine; the capitalized object "Spec" is not.
 _PAPER_TOOL_PROPER_RE = re.compile(r"\bSpec\b")
 
+# Run-artifact IDENTIFIERS and internal artifact FILENAMES (design/reader-facing-prose.md
+# §12.3 class B). This is the one class a list can carry with near-zero risk: the shapes
+# below are ours, they are meaningless to a reader, and no venue wants them -- so unlike
+# the ordinary words of class C they are venue-INDEPENDENT (§12.2a).
+#
+# Matched by SHAPE, not enumerated: ids are generated per run, so listing them is
+# impossible. ``claim-`` is narrowed to the two real id shapes, because "claim-based" and
+# "claim-level" are ordinary English.
+#
+# DEPOSITED artifacts are deliberately ABSENT -- ``reproduce.py``, ``record.tex``,
+# ``si.tex``, ``claims_all.csv`` and the rest of the bundle. Naming the file that carries
+# the deposited record or regenerates the results is exactly what a data-availability
+# statement is for; the package's own si.tex does it correctly today, and an earlier draft
+# of this list broke seven existing tests by forbidding it. Only files a reader can never
+# have a reason to name -- the internal contracts and working notes -- belong here.
+#
+# ``hyp-<id>`` is also ABSENT, for a different reason: the ENGINE emits hypothesis ids into
+# the generated package SI, so adding the shape here would fail runs over text the engine
+# itself wrote. Whether that emission is itself a leak is a separate decision in
+# SPEC-SI-AUTHORING-001 territory (the SI is authored belief and sits next to the record),
+# and it is left open rather than settled by a list entry.
+_PAPER_ARTIFACT_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bevi-[A-Za-z0-9][A-Za-z0-9._-]*"),          # Evidence ids
+    re.compile(r"\bclaim-(?:hyp|novelty)-[A-Za-z0-9._-]+"),   # derived Claim ids
+    re.compile(r"\b(?:spec|pubreqs|pkgreqs|declarations|review)\.json\b"),
+    re.compile(r"\b(?:checkpoints|science)\.md\b"),
+)
+
 
 def check_paper_tool_vocabulary(paper_tex: str) -> list[str]:
     """Return the tool-vocabulary leaks found in a rendered PAPER (``draft.tex``).
@@ -984,6 +1012,11 @@ def check_paper_tool_vocabulary(paper_tex: str) -> list[str]:
             found.append(word)
     if _PAPER_TOOL_PROPER_RE.search(paper_tex) and "Spec" not in found:
         found.append("Spec")
+    for pattern in _PAPER_ARTIFACT_RES:
+        for match in pattern.finditer(paper_tex):
+            token = match.group(0)
+            if token not in found:
+                found.append(token)
     return found
 
 
