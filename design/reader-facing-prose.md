@@ -1,6 +1,6 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **§11 + §12 COMPLETE (v0.9)** on branch `feat/declaration-list` — §11.3 and
+> Status: **§11-§13 COMPLETE (v1.0)** on branch `feat/declaration-list` — §11.3 and
 > §11.4 built, §11.1 resolved as a protocol change that needed no code (§11.5d).
 > §12 defines what tool vocabulary IS and §12.2a corrects it to be AUDIENCE-relative;
 > all of its routes are now applied (list, author instruction, reviewer, floor). §13
