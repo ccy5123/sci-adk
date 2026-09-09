@@ -166,13 +166,20 @@ class ProposalParser:
 
             # Create hypothesis with default rule
             # TODO: Better hypothesis extraction (milestone 2+)
+            hyp_id = f"hyp-{idx:03d}"
             hyp = Hypothesis(
-                id=f"hyp-{idx:03d}",
+                id=hyp_id,
                 statement=sentence.strip(),
                 mode=HypothesisMode.EXPLORATORY,  # Default to exploratory
                 decision_rule=DecisionRule(
                     kind=DecisionRuleKind.QUALITATIVE,
-                    expression="Expert judgment based on evidence",
+                    # The expression must be DISTINCT per hypothesis: the engine matches
+                    # an authored verdict to its rule by this text, and refuses to
+                    # attribute belief when two hypotheses share it ("ambiguous verdict
+                    # match"). With one shared default, every proposal carrying more than
+                    # one goal sentence froze and evidenced fine but could never be
+                    # resolved -- and no CLI verb can edit a frozen rule to repair it.
+                    expression=f"Expert judgment on the evidence bearing on {hyp_id}",
                 ),
             )
             hypotheses.append(hyp)
@@ -186,7 +193,7 @@ class ProposalParser:
                     mode=HypothesisMode.EXPLORATORY,
                     decision_rule=DecisionRule(
                         kind=DecisionRuleKind.QUALITATIVE,
-                        expression="Expert judgment based on evidence",
+                        expression="Expert judgment on the evidence bearing on hyp-001",
                     ),
                 )
             )

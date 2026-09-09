@@ -110,3 +110,38 @@ class TestT1Specific:
 
         # Should have prime factorization related approaches
         assert len(spec.method.approaches) > 0
+
+
+def test_multi_hypothesis_proposal_gets_distinct_rule_expressions():
+    """A proposal with two goals must stay resolvable.
+
+    The engine refuses to attribute belief when two hypotheses share a
+    DecisionRule.expression ("ambiguous verdict match ... cannot attribute belief"),
+    and the CLI offers no way to edit a frozen rule -- `amend-spec` takes only a
+    rationale. So identical default expressions made every multi-hypothesis proposal
+    a dead end: it could be frozen and evidenced, but never resolved.
+
+    Found by running a real two-hypothesis study through the documented path.
+    """
+    from sci_adk.core.parser import ProposalParser
+
+    text = (
+        "# Background\nb\n\n"
+        "# Goal\n"
+        "Compensated summation is at least one hundred times more accurate than the "
+        "naive left-to-right sum on ten million values. "
+        "The relative error of the naive sum grows in proportion to the number of "
+        "terms with an exponent of at least 0.9.\n\n"
+        "# Method\nm\n\n"
+        "# Expected Output\no\n"
+    )
+    spec = ProposalParser().parse(text, spec_id="multi-hyp")
+
+    assert len(spec.hypotheses) >= 2, "the goal should yield two hypotheses"
+    expressions = [h.decision_rule.expression for h in spec.hypotheses]
+    assert len(set(expressions)) == len(expressions), (
+        f"hypotheses share a rule expression, so the run cannot be resolved: {expressions}"
+    )
+    # each expression still names the hypothesis it governs
+    for h in spec.hypotheses:
+        assert h.id in h.decision_rule.expression
