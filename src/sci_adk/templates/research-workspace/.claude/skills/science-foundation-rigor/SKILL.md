@@ -110,7 +110,7 @@ verb, which enforces typing, provenance, and append-only-ness.
 | Verb | Stage | What it does |
 |---|---|---|
 | `sci-adk init-spec --spec-json <file>` | plan | Freezes a drafted Spec (S1–S5); sets `created_at`; refuses an already-frozen id; emits spec_id + spec_digest + receipt |
-| `sci-adk amend-spec` | plan | New Spec version with a human-checkpointed amendment receipt (S5) |
+| `sci-adk amend-spec` | plan | New Spec version (content from a drafted full Spec JSON via `--spec-json`) with a human-checkpointed amendment receipt (S5); the prior version is kept in `spec_history/` |
 | `sci-adk execute` | experiment | Runs the frozen MethodPlan, capturing provenance |
 | `sci-adk append-evidence` | experiment | Appends ONE typed, immutable Evidence entry with `bears_on[]` |
 | `sci-adk derive-claim` | experiment | Applies the DecisionRule; records Claim status + confidence + basis |

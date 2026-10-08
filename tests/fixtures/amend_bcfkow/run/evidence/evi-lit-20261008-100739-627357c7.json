@@ -1,0 +1,32 @@
+{
+  "id": "evi-lit-20261008-100739-627357c7",
+  "created_at": "2026-10-08T10:07:39.815841Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "literature",
+  "provenance": {
+    "code_ref": null,
+    "data_ref": "runs/SPEC-BCFKOW-001/literature/manifest.csv",
+    "data_source": null,
+    "seed": null,
+    "environment": "paperforge@2cec69b version=0.1.0 returncode=1",
+    "cost": null,
+    "search_log": null
+  },
+  "result": {
+    "type": "qualitative",
+    "point": null,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "{\"acquired\": [{\"doi\": \"10.1186/s13321-018-0263-1\", \"source\": \"unpaywall\", \"license\": \"cc-by\", \"filename\": \"Mansouri2018.pdf\"}, {\"doi\": \"10.1186/s13321-020-00453-4\", \"source\": \"unpaywall\", \"license\": \"cc-by\", \"filename\": \"Krotko2020.pdf\"}, {\"doi\": \"10.5772/intechopen.1006120\", \"source\": \"unpaywall\", \"license\": \"cc-by\", \"filename\": \"DossouOlory2025.pdf\"}, {\"doi\": \"10.1002/jps.21494\", \"source\": \"semantic_scholar\", \"license\": \"CCBY\", \"filename\": \"Mannhold2008.pdf\"}, {\"doi\": \"10.5772/31647\", \"source\": \"unpaywall\", \"license\": \"cc-by\", \"filename\": \"Taherpour2012.pdf\"}, {\"doi\": \"10.1021/acs.jcim.4c02013\", \"source\": \"unpaywall\", \"license\": \"\", \"filename\": \"Sorgun2025.pdf\"}], \"failed\": [{\"doi\": \"10.1139/f79-146\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1520/stp27411s\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/es00099a008\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/0045-6535(88)90040-9\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1002/etc.5620180412\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1139/a06-005\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1080/10629369308028814\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/0045-6535(96)00246-9\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/es60098a008\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/es60165a001\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/0273-2300(85)90007-8\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1002/etc.5620170803\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/0045-6535(92)90570-h\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1520/stp29034s\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/j.envres.2014.12.019\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/j.chemosphere.2006.09.079\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/j.yrtph.2023.105556\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1080/10629360412331297489\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.3390/toxics10100581\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/ci00062a008\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1007/BF01170004\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/ci00024a012\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/ci00018a017\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/0012-365x(95)00182-v\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1007/s10910-013-0178-z\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1002/jps.2600641216\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/ci050024v\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1002/jcc.21208\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1021/ci034200g\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1080/10629369508233995\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.1016/j.heliyon.2024.e25908\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.3390/ijms12107250\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.3390/molecules28155822\", \"error\": \"no OA PDF\"}, {\"doi\": \"10.3390/ph18091255\", \"error\": \"no OA PDF\"}], \"counts\": {\"succeeded\": 6, \"failed\": 34}, \"normalization\": {\"pdfs\": [{\"filename\": \"Mansouri2018.pdf\", \"status\": \"already_extractable\", \"original_preserved\": false, \"retries_spent\": 0, \"note\": \"PDF is not encrypted; already extractable (no-op).\"}, {\"filename\": \"Krotko2020.pdf\", \"status\": \"already_extractable\", \"original_preserved\": false, \"retries_spent\": 0, \"note\": \"PDF is not encrypted; already extractable (no-op).\"}, {\"filename\": \"DossouOlory2025.pdf\", \"status\": \"already_extractable\", \"original_preserved\": false, \"retries_spent\": 0, \"note\": \"PDF is not encrypted; already extractable (no-op).\"}, {\"filename\": \"Mannhold2008.pdf\", \"status\": \"already_extractable\", \"original_preserved\": false, \"retries_spent\": 0, \"note\": \"PDF is not encrypted; already extractable (no-op).\"}, {\"filename\": \"Taherpour2012.pdf\", \"status\": \"already_extractable\", \"original_preserved\": false, \"retries_spent\": 0, \"note\": \"PDF is not encrypted; already extractable (no-op).\"}, {\"filename\": \"Sorgun2025.pdf\", \"status\": \"already_extractable\", \"original_preserved\": false, \"retries_spent\": 0, \"note\": \"PDF is not encrypted; already extractable (no-op).\"}], \"counts\": {\"normalized\": 0, \"already_extractable\": 6, \"locked\": 0, \"error\": 0}}, \"citation_keys\": {\"10.1186/s13321-018-0263-1\": \"Mansouri2018\", \"10.1186/s13321-020-00453-4\": \"Krotko2020\", \"10.5772/intechopen.1006120\": \"DossouOlory2025\", \"10.1002/jps.21494\": \"Mannhold2008\", \"10.5772/31647\": \"Taherpour2012\", \"10.1021/acs.jcim.4c02013\": \"Sorgun2025\"}, \"citation_key_collisions\": []}",
+    "artifact_ref": "runs/SPEC-BCFKOW-001/literature"
+  },
+  "bears_on": [],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": null,
+  "negative_control": null
+}

@@ -702,6 +702,15 @@ def _add_verb_parsers(sub) -> None:
         help="REQUIRED non-empty rationale for the amendment (S5: a Spec change is never "
              "silent; the record must say why)",
     )
+    amend_spec.add_argument(
+        "--spec-json", default=None, metavar="FILE",
+        help="the full Spec of the new version (a copy of the frozen spec.json with the "
+             "changes). raw_proposal, hypotheses, method and target_claims are taken from "
+             "it; its id must be the run's Spec id, a version in it must be current+1, an "
+             "amendment_rationale in it must equal --rationale; created_at and "
+             "prior_version_id in it are ignored. Without it only version and rationale "
+             "change. The prior frozen spec.json is kept in spec_history/",
+    )
 
     # execute: run the Spec's experiment into Evidence (capability selection like run).
     execute = sub.add_parser(
@@ -1079,15 +1088,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
 # -- Step 2 verbs (design/sci-adk-as-moai.md §4.6): each is a thin wrapper over one
 # ResearchCompiler stage function. `run` remains the chained wrapper.
 
-def _load_spec_json(path_arg: str, spec_id: Optional[str]):
-    """Load + validate a pre-built Spec for ``init-spec --spec-json``.
+def _read_spec_json_object(path: Path) -> dict:
+    """Read a Spec JSON file for ``init-spec`` / ``amend-spec --spec-json``.
 
-    Returns ``(spec, created_at_ignored)``. Raises :class:`_CliError` (exit 2) on a
-    missing file, malformed JSON, an unknown top-level key, a schema violation, an
-    ``--spec-id`` that disagrees with the file's ``id``, or amendment fields (a fresh
-    freeze is always version 1; amendments go through ``amend-spec``).
+    Raises :class:`_CliError` (exit 2) on a missing file, malformed JSON, a non-object top
+    level, or any key that is not a field of the Spec model at its position. The Spec
+    models do not forbid extra fields (pydantic ignores them), so a typo'd key -- at the
+    top level or inside a hypothesis / decision rule -- would be dropped silently from a
+    frozen pre-registration; it is refused here with its JSON path instead.
     """
-    path = Path(path_arg)
     if not path.exists():
         raise _CliError(f"spec-json file not found: {path}")
     try:
@@ -1096,15 +1105,24 @@ def _load_spec_json(path_arg: str, spec_id: Optional[str]):
         raise _CliError(f"invalid spec JSON ({path}): {e}")
     if not isinstance(raw, dict):
         raise _CliError(f"invalid spec JSON ({path}): top level must be an object")
+    from sci_adk.core.spec import unknown_spec_keys
 
-    # Spec's model_config does not forbid extra fields (pydantic ignores them), so a
-    # typo'd top-level key would be dropped silently from a frozen pre-registration.
-    # Reject it here instead.
-    unknown = sorted(set(raw) - set(Spec.model_fields))
+    unknown = unknown_spec_keys(raw)
     if unknown:
-        raise _CliError(
-            f"unknown top-level Spec field(s) in {path}: {', '.join(unknown)}"
-        )
+        raise _CliError(f"unknown Spec field(s) in {path}: {', '.join(unknown)}")
+    return raw
+
+
+def _load_spec_json(path_arg: str, spec_id: Optional[str]):
+    """Load + validate a pre-built Spec for ``init-spec --spec-json``.
+
+    Returns ``(spec, created_at_ignored)``. Raises :class:`_CliError` (exit 2) on a
+    missing file, malformed JSON, an unknown key at any depth, a schema violation, an
+    ``--spec-id`` that disagrees with the file's ``id``, or amendment fields (a fresh
+    freeze is always version 1; amendments go through ``amend-spec``).
+    """
+    path = Path(path_arg)
+    raw = _read_spec_json_object(path)
 
     # created_at is ALWAYS the freeze time, never the caller's value. `verify` fails a
     # found_nothing novelty decision whose search log is dated after spec.created_at
@@ -1482,21 +1500,54 @@ def _cmd_amend_spec(args: argparse.Namespace) -> int:
     exit 2 with the S5 message (re-raised ValueError from Spec.amend).
     """
     run_dir = Path(args.run_dir)
-    from sci_adk.loop.amend_spec import amend_spec
+    from sci_adk.loop.amend_spec import amend_spec, content_changes, history_path
+
+    proposed = None
+    ignored: list = []
+    if args.spec_json is not None:
+        path = Path(args.spec_json)
+        try:
+            raw = _read_spec_json_object(path)
+            proposed = Spec.model_validate(raw)
+        except _CliError as e:
+            print(f"error: {e.message}", file=sys.stderr)
+            return e.exit_code
+        except ValueError as e:
+            print(f"error: invalid Spec ({path}): {e}", file=sys.stderr)
+            return 2
+        ignored = [k for k in ("created_at", "prior_version_id") if raw.get(k) is not None]
 
     try:
-        new_spec, receipt = amend_spec(run_dir, rationale=args.rationale)
+        old_spec = _load_run_spec(run_dir)
+        new_spec, receipt = amend_spec(
+            run_dir, rationale=args.rationale, spec=old_spec, proposed=proposed
+        )
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
     except FileNotFoundError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     except ValueError as e:
-        # Blank rationale (S5): a Spec amendment is never silent -- the record must say why.
+        # Blank rationale (S5), or a refused proposal (AmendmentRefused): nothing written.
         print(f"error: {e}", file=sys.stderr)
         return 2
 
     print(f"amend-spec: Spec '{new_spec.id}' amended "
           f"v{receipt.prior_version} -> v{receipt.new_version}")
     print(f"  rationale: {receipt.rationale}")
+    changes = content_changes(old_spec, new_spec)
+    if changes:
+        print("  changed:")
+        for change in changes:
+            print(f"    - {change}")
+    else:
+        print("  changed: nothing (version and rationale only)")
+    if ignored:
+        print(f"  note: {', '.join(ignored)} in {args.spec_json} ignored; set by the "
+              "amendment")
+    print(f"  prior version kept: {history_path(run_dir, receipt.prior_version)} "
+          f"(sha256 {receipt.prior_spec_sha256})")
     print(f"  receipt: {run_dir / 'checkpoints' / f'amendment-v{receipt.new_version}.json'}")
     print(f"  spec.json now holds the amended (v{new_spec.version}) frozen Spec")
     # The amended Spec's NEW digest -- it differs from the pre-amend one, so the worker's

@@ -1,0 +1,7 @@
+{
+  "checkpoint_type": "prior_work",
+  "spec_id": "SPEC-BCFKOW-001",
+  "trigger": "spec_creation",
+  "spec_version": 1,
+  "prompt": "Prior-work check (Spec creation): before any result exists, has this been done? Search prior work (agent web_search), then record the decision -- searched (-> LITERATURE evidence) or skipped with a reason (-> a recorded null). Run `sci-adk prior-work <run-dir> --searched <dois...>` or `--skip --reason \"...\"`."
+}

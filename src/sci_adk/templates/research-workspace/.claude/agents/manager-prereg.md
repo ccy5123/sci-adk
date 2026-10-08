@@ -51,12 +51,13 @@ because the novelty search needs the exact, final hypothesis text:
 | Verb | When | What it records |
 |---|---|---|
 | `sci-adk init-spec --spec-json drafts/<spec-id>/spec.json` | Pass 2, after literature review | Freezes the Spec (sets `created_at`; refuses an already-frozen id); emits spec_id + spec_digest + checkpoint receipt (S1–S5 enforced) |
-| `sci-adk amend-spec` | When a frozen Spec must change | Produces a new Spec version with a human-checkpointed amendment receipt (S5) |
+| `sci-adk amend-spec <run_dir> --rationale "..." --spec-json <draft>` | When a frozen Spec must change, after the human approves the draft | Produces a new Spec version from the drafted full Spec JSON, prints what changed, keeps the prior version in `spec_history/`, writes the amendment receipt (S5) |
 
 Both verbs reject malformed input — the CLI is the safety net, not your own
-discipline alone. If `init-spec` rejects the draft (schema error, unknown field,
-version other than 1, or an id already frozen), fix the draft or amend; do not work
-around the rejection.
+discipline alone. If `init-spec` rejects the draft (schema error, unknown field at
+any depth, version other than 1, or an id already frozen), fix the draft or amend; do
+not work around the rejection. `amend-spec --spec-json` rejects the same way, plus an
+id / version / rationale mismatch or a draft that changes nothing.
 
 ## Frozen-Spec Reference
 
@@ -73,7 +74,14 @@ verb call anyway.
 An amendment is triggered only by an explicit decision (a checkpoint the engine
 surfaced, or a recorded user instruction), never by convenience. When amending:
 - State precisely WHAT changes and WHY, grounded in the recorded reason.
-- Call `sci-adk amend-spec`, which creates a new version + checkpoint receipt.
+- Draft the new version as a full Spec JSON: a copy of the frozen
+  `runs/<spec-id>/spec.json` with the changes made, `version` set to the next
+  version, `amendment_rationale` removed (or equal to the rationale). Return the
+  draft and the rationale; record nothing until the human approves.
+- After approval, call
+  `sci-adk amend-spec <run_dir> --rationale "..." --spec-json <draft>`, which creates
+  the new version + checkpoint receipt and keeps every prior frozen version in
+  `spec_history/`. Without `--spec-json` only the version and rationale change.
 - A new Spec version means downstream Evidence/Claims bind to the new digest;
   report this to the orchestrator so it re-stamps subsequent worker prompts.
 
@@ -159,7 +167,9 @@ divergent guard list.
 - Pass 2: the frozen `spec_id` + `spec_digest` + checkpoint receipt + the
   novelty_result / novelty_method values you set, each with the one-line basis
   (which `found_nothing` search or prior-art finding justified it).
-- Amendment: new `spec_id` / version + amendment receipt + what changed.
+- Amendment, before approval: the draft path + the rationale + what it changes.
+  After recording: new `spec_id` / version + amendment receipt + the changed fields
+  the verb printed + the new `spec_digest`.
 
 ## Blocker Protocol
 

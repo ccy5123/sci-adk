@@ -89,7 +89,9 @@ DecisionRule as a JSON document in the `Spec` schema, written to
 carries any DecisionRule kind with its `params` exactly — a numeric `threshold` or
 `interval` rule included. Do NOT author `created_at` (the freeze sets it), and leave
 `version` at 1 with no `prior_version_id` / `amendment_rationale` (those belong to
-amendments). Unknown top-level fields are rejected at freeze, not dropped. Do NOT
+amendments). Unknown fields are rejected at freeze, not dropped — at any depth, named
+by their JSON path (e.g. `hypotheses[1].decision_rule.parms`); only the free-form
+`decision_rule.params` mapping takes any key. Do NOT
 freeze. Return the draft (exact hypothesis text per kind) so the orchestrator can
 dispatch the literature search against it.
 
@@ -189,10 +191,27 @@ amendment, so a weak Spec is never silently accepted. The HARD verdict-gate halt
 
 A frozen Spec changes ONLY via `sci-adk amend-spec`, triggered by an explicit
 decision (a checkpoint the engine surfaced, or a recorded user instruction) — never
-by convenience. An amendment produces a new Spec version + checkpoint receipt; state
-precisely WHAT changes and WHY, grounded in the recorded reason. Downstream
-Evidence/Claims then bind to the new digest, and expert-literature re-searches only
-the hypotheses that changed.
+by convenience. State precisely WHAT changes and WHY, grounded in the recorded reason.
+
+1. **Draft** the new version as a full Spec JSON: a copy of the frozen
+   `runs/<spec-id>/spec.json` with the changes made, written to
+   `drafts/<spec-id>/amend-v<N>/spec.json`. Set `version` to the next version (or
+   remove it) and remove `amendment_rationale` (or set it to the exact rationale
+   text). `created_at` and `prior_version_id` are set by the amendment; values in the
+   draft are ignored. Write the rationale beside the draft.
+2. **Approve.** Show the human the change and the rationale; nothing is recorded until
+   they approve (S5).
+3. **Record** with `sci-adk amend-spec runs/<spec-id> --rationale "<rationale>"
+   --spec-json drafts/<spec-id>/amend-v<N>/spec.json`. The verb prints which fields
+   changed. It refuses a draft whose `id`, `version` or `amendment_rationale` does not
+   match, an unknown field, or content identical to the frozen version. Without
+   `--spec-json` only the version and rationale change.
+
+Every prior frozen version is kept byte-for-byte in `runs/<spec-id>/spec_history/`
+(`spec.v<N>.json`; its sha256 is in the receipt `checkpoints/amendment-v<N+1>.json`),
+so what was originally pre-registered stays on record. Evidence already recorded stays
+in the record; new Evidence/Claims bind to the new digest the verb prints, and
+expert-literature re-searches only the hypotheses that changed.
 
 ## Advanced (10+ minutes)
 

@@ -20,7 +20,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Union
+from types import UnionType
+from typing import Dict, List, Literal, Optional, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -574,6 +575,68 @@ class Spec(BaseModel):
         return None
 
 
+def _field_keys(model: type[BaseModel]) -> Dict[str, object]:
+    """``{json key: field annotation}`` for ``model`` -- field names plus string aliases."""
+    keys: Dict[str, object] = {}
+    for name, info in model.model_fields.items():
+        keys[name] = info.annotation
+        for alias in (info.alias, info.validation_alias):
+            if isinstance(alias, str):
+                keys[alias] = info.annotation
+    return keys
+
+
+def _walk_unknown(annotation: object, value: object, path: str, out: List[str]) -> None:
+    """Collect JSON paths in ``value`` that are not fields of the model at ``annotation``.
+
+    Follows only model-typed positions (a model, a list of models, an Optional of either);
+    a ``Dict[...]`` field is free-form and is not walked. A value whose JSON type does not
+    match the annotation is left to pydantic validation.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        if not isinstance(value, dict):
+            return
+        known = _field_keys(annotation)
+        for key, sub in value.items():
+            sub_path = f"{path}.{key}" if path else str(key)
+            if key not in known:
+                out.append(sub_path)
+            else:
+                _walk_unknown(known[key], sub, sub_path, out)
+        return
+    origin = get_origin(annotation)
+    if origin in (list, List):
+        args = get_args(annotation)
+        if args and isinstance(value, list):
+            for i, item in enumerate(value):
+                _walk_unknown(args[0], item, f"{path}[{i}]", out)
+    elif origin in (Union, UnionType):
+        for arg in get_args(annotation):
+            if arg is type(None):
+                continue
+            arg_origin = get_origin(arg)
+            if (isinstance(value, dict) and isinstance(arg, type)
+                    and issubclass(arg, BaseModel)) or (
+                    isinstance(value, list) and arg_origin in (list, List)):
+                _walk_unknown(arg, value, path, out)
+                return
+
+
+def unknown_spec_keys(data: object) -> List[str]:
+    """JSON paths of keys in a Spec JSON object that are not fields of the Spec models.
+
+    The models do not forbid extra fields, so pydantic drops an unknown key silently -- a
+    typo inside a hypothesis or a decision rule would vanish from a frozen
+    pre-registration. This walks ``data`` against the model tree derived from
+    :class:`Spec`'s field annotations (no hand-kept list) and returns e.g.
+    ``["hypotheses[1].decision_rule.parms"]``. Free-form mapping fields
+    (``DecisionRule.params``) are not walked.
+    """
+    out: List[str] = []
+    _walk_unknown(Spec, data, "", out)
+    return out
+
+
 __all__ = [
     "Id",
     "HypothesisMode",
@@ -586,4 +649,5 @@ __all__ = [
     "MethodPlan",
     "TargetClaim",
     "Spec",
+    "unknown_spec_keys",
 ]

@@ -1,0 +1,170 @@
+{
+  "id": "SPEC-BCFKOW-001",
+  "created_at": "2026-10-08T13:32:04.934281Z",
+  "version": 2,
+  "raw_proposal": {
+    "background": "The bioconcentration factor (BCF) of a neutral organic chemical in fish is routinely\nestimated from its octanol-water partition coefficient (Kow). Separately, molecular graphs\ncan be given integer codes by number-theoretic encodings, such as assigning a prime to each\nelement and raising it to a power set by the atom's bonding. Whether such a code carries\nany information about partitioning behaviour has not, to our knowledge, been examined.",
+    "goal": "Hypothesis 1: For neutral organic chemicals with log Kow between 1 and 6, log BCF in fish\nincreases linearly with log Kow, with a slope between 0.7 and 1.0.\n\nHypothesis 2: Ranking 50 neutral organic chemicals by the magnitude of a prime-power\nmolecular graph code gives a Spearman correlation of at least 0.5 with their measured\nlog Kow.",
+    "method": "For hypothesis 1, fit an ordinary least-squares line of log BCF on log Kow over a public\nset of measured fish BCF values for neutral organic chemicals, and report the slope with\nits 95% confidence interval.\n\nFor hypothesis 2, encode each of 50 chemicals with measured log Kow as the product over\natoms of p(element) raised to the atom's heavy-atom degree, take the base-10 logarithm of\nthe code, and compute the Spearman rank correlation with log Kow.",
+    "expected_output": "A slope estimate with its interval for hypothesis 1, and a rank correlation for\nhypothesis 2, each judged against the threshold stated in its hypothesis."
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "statement": "For neutral organic chemicals with measured log Kow between 1 and 6, the ordinary least-squares slope of log BCF in fish regressed on log Kow lies between 0.7 and 1.0 inclusive.",
+      "mode": "confirmatory",
+      "decision_rule": {
+        "kind": "threshold",
+        "expression": "SUPPORTED iff the OLS slope point estimate b of log BCF on log Kow lies in [0.7, 1.0] inclusive. Encoded for the threshold kind as Result.point = m = min(b - 0.7, 1.0 - b) with m >= 0, which holds exactly when 0.7 <= b <= 1.0. The slope b is recorded in Result.effect_size and its 95% confidence interval in Result.ci; the interval is reported and does not enter the decision.",
+        "params": {
+          "statistic": "slope_band_margin",
+          "op": ">=",
+          "value": 0.0,
+          "combine": "latest",
+          "band_lower": 0.7,
+          "band_upper": 1.0
+        }
+      },
+      "referent": "empirical",
+      "non_circularity": null,
+      "novelty_result": false,
+      "novelty_method": false,
+      "epistemic_kind": "capability_check",
+      "discriminating_cases": [
+        {
+          "case": "h1-kow-5-to-6",
+          "why": "Chemicals with measured log Kow from 5 to 6. At the top of the range fish BCF often falls below the straight-line trend (biotransformation, slow uptake), and these points have high leverage on the slope, so a slope inside [0.7, 1.0] is informative only when they are in the fit. A pipeline that drops or caps them, or that admits log Kow above 6, moves the slope."
+        },
+        {
+          "case": "h1-kow-1-to-2",
+          "why": "Chemicals with measured log Kow from 1 to 2. At the bottom of the range BCF approaches a floor set by partitioning into non-lipid tissue, so the trend flattens; these high-leverage points show whether the lower range bound was applied as pre-registered rather than widened or narrowed."
+        },
+        {
+          "case": "h1-multi-record-chemicals",
+          "why": "Chemicals with five or more retained BCF records. A pipeline that fits individual records instead of per-chemical means weights these chemicals by how often they were tested; each must enter the fit as one aggregated point."
+        }
+      ],
+      "cost_metrics": null
+    },
+    {
+      "id": "H2",
+      "statement": "For 50 neutral organic chemicals with measured log Kow, drawn at random from a curated fish bioconcentration data set, the base-10 logarithm of a prime-power molecular graph code (the product over heavy atoms of p(Z) raised to the atom's heavy-atom degree, where p(Z) is the Z-th prime) has a Spearman rank correlation of at least 0.5 with measured log Kow.",
+      "mode": "confirmatory",
+      "decision_rule": {
+        "kind": "threshold",
+        "expression": "SUPPORTED iff the Spearman rank correlation point estimate rho (ties given average ranks) between the code and measured log Kow over the 50 sampled chemicals is >= 0.5. Result.point = rho.",
+        "params": {
+          "statistic": "spearman_rho",
+          "op": ">=",
+          "value": 0.5,
+          "combine": "latest"
+        }
+      },
+      "referent": "empirical",
+      "non_circularity": null,
+      "novelty_result": true,
+      "novelty_method": false,
+      "epistemic_kind": "finding",
+      "discriminating_cases": [
+        {
+          "case": "h2-matched-size-pairs",
+          "why": "Pairs of sampled chemicals whose heavy-atom counts differ by at most 1 and whose measured log Kow differ by at least 2. Size carries no ordering information within these pairs, so a code that tracks partitioning orders them like log Kow, while a code that tracks only size orders them at chance."
+        },
+        {
+          "case": "h2-hydrocarbon-vs-oxygenated-pairs",
+          "why": "The matched-size pairs in which one member contains no N, O, P or S atom and the other contains at least one O atom (for example an alkane against an alcohol, polyol, ether or ester). Adding oxygen lowers log Kow but adds heavy-atom bonds to the code, so these pairs separate a code that tracks partitioning from one that tracks atom and bond counts."
+        },
+        {
+          "case": "h2-ref-hexane-vs-1-pentanol",
+          "why": "Reference pair outside the random sample: n-hexane and 1-pentanol both have 6 heavy atoms, and the measured log Kow of n-hexane is about 2.4 units higher. A code that tracks partitioning must rank n-hexane above 1-pentanol; a code driven by size and heteroatom count does not."
+        },
+        {
+          "case": "h2-ref-hexane-vs-glycerol",
+          "why": "Reference pair outside the random sample: n-hexane and glycerol both have 6 heavy atoms, and their measured log Kow differ by more than 5 units (glycerol lower). A code that tracks partitioning must rank n-hexane above glycerol."
+        }
+      ],
+      "cost_metrics": null
+    }
+  ],
+  "method": {
+    "approaches": [
+      "Data source, pre-registered fallback order (the first one obtained is used for both hypotheses): (a) the Arnot & Gobas (2006) curated fish BCF database, Environ. Rev. 14:257-297, acceptable-quality entries only; if no copy can be obtained, (b) the OPERA BCF data set (Mansouri et al. 2018); if neither, (c) the EPI Suite BCFBAF training set (Meylan et al. 1999). The data set obtained, its version or download date, source URL and the SHA-256 checksum of the file are recorded in an observation Evidence item before any fit is made or sample drawn.",
+      "Record selection, applied in this order, with the number of records and chemicals remaining recorded after each step: (1) quality: for the Arnot & Gobas database keep only entries that its own quality assessment designates acceptable (the column and values used are recorded); for OPERA or BCFBAF keep all entries of the published curated set; (2) fish only: keep records whose test organism is a fish according to the data set's organism or taxon field; if the data set has no such field and its documentation states that all values are for fish, keep all records and cite that documentation in provenance; (3) endpoint: where the data set distinguishes them, keep laboratory bioconcentration factors on a whole-body wet-weight basis (L/kg) and exclude lipid-normalised, tissue-specific and field bioaccumulation (BAF) values; exclude records with BCF <= 0. For the Arnot & Gobas database, keep only ENDPOINT CATEGORY 2 (BCF from total water concentrations); exclude category 3 (BCFfd, BCF from freely dissolved water concentrations) as well as categories 1 and 4 (field and modelled BAF).",
+      "Chemical structure: use the SMILES the data set provides. If the data set provides no SMILES for a chemical, resolve its CAS RN to the QSAR-ready SMILES of the US EPA CompTox Chemicals Dashboard (DSSTox), recording the retrieval date; chemicals that cannot be resolved are excluded and counted.",
+      "Organic-structure filter: parse each SMILES with RDKit; exclude the chemical if the SMILES does not parse, has more than one component ('.' in the SMILES: salts, mixtures, hydrates), has no carbon atom, or contains any element other than H, C, N, O, F, P, S, Cl, Br and I (this excludes organometallic, organosilicon and inorganic species). Isotope labels are ignored.",
+      "Neutral-chemical filter (keep only chemicals expected to be predominantly un-ionised near pH 7): exclude a chemical if its net formal charge is not zero, or if it matches any of these RDKit SMARTS: carboxylic acid [CX3](=O)[OX2H1]; sulfonic, sulfuric-monoester or sulfinic acid [SX4,SX3](=O)[OX2H1]; phosphorus oxoacid [PX4](=[O,S])[OX2H1]; tetrazole N-H [nH]1nnnc1 or c1nn[nH]n1; acidic sulfonamide N-H [SX4](=O)(=O)[NX3;H1]-[a,$([CX3]=[O,S,N])]; vinylogous acid, e.g. 4-hydroxycoumarins, [OX2H1][#6;!$(c1ccccc1)]=,:[#6]-,:[#6]=O; aromatic thiol [SX2H1]-a; cation without a bonded anionic partner [N+,P+,S+,n+,s+,o+;!$(*~[-])]; anion without a bonded cationic partner [-;!$(*~[+])]; aliphatic amine [NX3;H2,H1,H0;!$(N-a);!$(N-[#6]=[#7,#8,#16]);!$(N-[#6]=[#6]);!$(N-[#7,#8,#16,#15]);!$(N-C#N);!$(N-[#6]#[#6])]; amidine or guanidine [NX3][CX3;!$(C-[OX2]);!$(C-[SX2])]=[NX2;!a;!$(N-[#7,#8])]. Also exclude acidic phenols: a hydroxyl on an aromatic ring that also carries three or more halogen substituents or any nitro or cyano substituent. Charge-separated neutral groups (nitro, N-oxide, azide) are kept because their charges are paired; aromatic nitrogen heterocycles and anilines are kept. The filter is applied to the SMILES as given, without tautomer or protonation-state normalisation.",
+      "Measured log Kow: use the log Kow the data set reports where the data set or its documentation identifies the value as experimentally measured. Where the data set reports no log Kow for a chemical, or does not identify its value as measured, use the experimental log Kow from PHYSPROP as distributed in the OPERA LogP data set (Mansouri et al. 2018), matched by CAS RN; chemicals with no experimental log Kow from either source are excluded and counted. Where one source gives several measured values for a chemical, their arithmetic mean is used. Calculated log Kow values are never used.",
+      "Aggregation: chemicals are identified by CAS RN (by the data set's own chemical identifier where CAS RN is absent). Each chemical's log BCF is the arithmetic mean of log10 BCF over its retained records (the log of the geometric-mean BCF); where the data set reports log BCF, those values are averaged as given.",
+      "H1 analysis: the H1 analysis set is every chemical passing all steps above whose measured log Kow lies in [1, 6] inclusive. Fit log BCF = a + b * log Kow by ordinary least squares, one point per chemical, unweighted, with intercept. Report b, its 95% confidence interval (t distribution, n - 2 degrees of freedom), a, n and R^2. The decision statistic is the band margin m = min(b - 0.7, 1.0 - b); m >= 0 exactly when 0.7 <= b <= 1.0. The confidence interval does not enter the decision.",
+      "H2 sampling: the sampling frame is every chemical passing all steps above except the log Kow range filter (neutral, in scope, with a retained fish BCF record and a measured log Kow). No log Kow range restriction applies to this frame: the 1 to 6 range that defines the H1 analysis set is not applied, so chemicals with measured log Kow below 1 or above 6 are eligible. Sort the frame by CAS RN as a string, ascending (data-set identifier where CAS RN is absent), then draw 50 positions without replacement with numpy.random.default_rng(20261008).choice(N, size=50, replace=False). The frame size N, the seed, the NumPy version and the 50 drawn chemicals are recorded in an observation Evidence item before any H2 statistic is computed. If N < 50, no H2 statistic is computed, the shortfall is recorded, and any change goes through amend-spec.",
+      "H2 encoding: on the hydrogen-suppressed graph of the SMILES (heavy atoms only; bond orders ignored), code = product over heavy atoms of p(Z)^deg, where p(Z) is the Z-th prime (C 13, N 17, O 19, F 23, P 47, S 53, Cl 59, Br 149, I 241) and deg is the atom's number of heavy-atom neighbours. The code is computed as an exact integer and log10(code) = sum over heavy atoms of deg * log10 p(Z) is reported. Ranks are taken on the exact integer codes, so chemicals with equal codes tie exactly.",
+      "H2 analysis: Spearman rank correlation rho between the code and measured log Kow over the 50 sampled chemicals, ties given average ranks (rho = Pearson correlation of the two average-rank vectors). Report rho, n and the number of tied code groups. The decision statistic is rho.",
+      "Exploratory size baseline (bears on no hypothesis): on the same 50 chemicals, the Spearman rank correlation (average ranks) between heavy-atom count and measured log Kow, reported beside H2 for comparison. It is not part of H2's decision rule and does not bear on H2's verdict.",
+      "Discriminating-case reports (descriptive; bear on no hypothesis): for H1, the number of chemicals in each declared case and their residuals from the H1 fit; for H2, the number of in-sample pairs meeting each declared pair rule and the fraction the code orders the same way as measured log Kow (code ties count one half), and for each named reference pair both codes and both measured log Kow values (taken from the log Kow sources above; codes only if no measured value is available).",
+      "Negative controls, one per hypothesis, each expected to return not supported. H1: permute the measured log Kow values across the H1 analysis set with numpy.random.default_rng(20261009).permutation, refit the same OLS line, and apply the frozen H1 rule to the permuted band margin; it covers h1-kow-5-to-6, h1-kow-1-to-2 and h1-multi-record-chemicals. H2: permute measured log Kow across the 50 sampled chemicals with numpy.random.default_rng(20261010).permutation and apply the frozen H2 rule to the resulting rho; it covers h2-matched-size-pairs and h2-hydrocarbon-vs-oxygenated-pairs (the two named reference pairs lie outside the sample and are not covered). Each control is recorded as a negative_control Evidence item (bears_on empty) with the mutation, the rule's outcome, the statistic and its value, the cases covered, and code_ref and environment provenance. A control whose outcome is supported is recorded as supported.",
+      "Pre-registered bears_on map. Exactly two Evidence items carry a bearing: (i) the H1 primary fit (kind experiment_run, data_source measured; Result.point = m, Result.effect_size = b, Result.ci = 95% CI of b) bears on H1, direction supports if m >= 0 and refutes otherwise; (ii) the H2 primary correlation (kind experiment_run, data_source measured; Result.point = rho) bears on H2, direction supports if rho >= 0.5 and refutes otherwise. Every other item has bears_on empty: the data-source record, the filter counts, the H2 sample record, the size baseline, the discriminating-case reports and both negative controls. Both rules combine by 'latest', so any later item that would bear on H1 or H2 (for example a re-analysis) requires an amendment first.",
+      "Provenance: every Evidence item records code_ref (script path and commit), environment (Python, RDKit, NumPy and SciPy versions) and data_ref (data set, version or download date, checksum); items built on the data set carry data_source measured."
+    ],
+    "tools": [
+      {
+        "name": "Python",
+        "version": null,
+        "kind": "language"
+      },
+      {
+        "name": "RDKit",
+        "version": null,
+        "kind": "library"
+      },
+      {
+        "name": "NumPy",
+        "version": null,
+        "kind": "library"
+      },
+      {
+        "name": "SciPy",
+        "version": null,
+        "kind": "library"
+      },
+      {
+        "name": "Arnot & Gobas 2006 fish BCF database (Environ. Rev. 14:257-297)",
+        "version": null,
+        "kind": "dataset"
+      },
+      {
+        "name": "OPERA BCF data set (Mansouri et al. 2018)",
+        "version": null,
+        "kind": "dataset"
+      },
+      {
+        "name": "EPI Suite BCFBAF training set (Meylan et al. 1999)",
+        "version": null,
+        "kind": "dataset"
+      },
+      {
+        "name": "PHYSPROP experimental log Kow via OPERA LogP data set (fallback)",
+        "version": null,
+        "kind": "dataset"
+      },
+      {
+        "name": "US EPA CompTox Chemicals Dashboard QSAR-ready SMILES (fallback)",
+        "version": null,
+        "kind": "dataset"
+      }
+    ]
+  },
+  "target_claims": [
+    {
+      "id": "TC-H1",
+      "statement": "On the pre-registered fish BCF data set, the ordinary least-squares slope of log BCF regressed on measured log Kow, for neutral organic chemicals with log Kow between 1 and 6, lies between 0.7 and 1.0, the range spanned by earlier estimates (about 0.85, Veith et al. 1979; about 1.0, Mackay 1982).",
+      "answers": "H1"
+    },
+    {
+      "id": "TC-H2",
+      "statement": "For 50 randomly drawn neutral organic chemicals, the prime-power molecular graph code has a Spearman rank correlation of at least 0.5 with measured log Kow.",
+      "answers": "H2"
+    }
+  ],
+  "amendment_rationale": "The Arnot & Gobas (2006) supplementary database obtained on 2026-10-08 (a06-005.xls, SHA-256 d5f642bdaf3c69fa1cf5de3679a5f6d5ed920d8ca68cc8bd86aaece87dc7f8f0) codes ENDPOINT CATEGORY as 1 = field BAF, 2 = BCF from total water concentrations, 3 = BCFfd from freely dissolved concentrations and 4 = modelled BAF, and step (3) of approach 1 in v1 did not say whether BCFfd counts as a fish BCF. Before any record selection, fit or sample, the user chose to keep category 2 only: it is the BCF definition used by the fits H1 is compared with (Veith 1979, Mackay 1982, Isnard & Lambert 1988, Meylan 1999) and it avoids counting one test twice when both a BCF and a BCFfd were derived from it. Only the file's schema and per-category row counts (1: 1295, 2: 5206, 3: 82, 4: 390) were inspected; no BCF-log Kow relationship and no filtered count was computed. Hypotheses, decision rules, guard fields and novelty flags are unchanged, so no literature re-search is needed.",
+  "prior_version_id": "1791453819.934251"
+}
