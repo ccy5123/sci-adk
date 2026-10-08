@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -48,10 +48,8 @@ from sci_adk.core.evidence import (
     Result,
 )
 from sci_adk.core.spec import Spec
-from sci_adk.search.citation_keys import (
-    KeyingResult,
-    assign_and_apply_citation_keys,
-)
+from sci_adk.search.citation_keys import KeyingResult
+from sci_adk.search.literature_merge import key_and_merge, snapshot_literature
 from sci_adk.search.manual_literature import normalize_doi
 from sci_adk.search.paperforge_adapter import (
     EXIT_OK,
@@ -180,8 +178,10 @@ class AcquisitionOutcome:
     """
     What :meth:`LiteratureAcquirer.acquire` returns.
 
-    Bundles the persisted record (``evidence``), the raw per-DOI result
-    (``result``), and -- when the loop should stop -- a structured ``halt``.
+    Bundles the persisted record (``evidence``), the per-DOI result (``result``),
+    and -- when the loop should stop -- a structured ``halt``. ``result.records``,
+    the evidence and the halt cover only the DOIs requested in this call, although
+    paperforge's ``manifest.csv`` accumulates every call's rows.
 
     ``normalizations`` holds the per-PDF normalization outcomes (one
     :class:`~sci_adk.search.pdf_normalize.NormalizeResult` per acquired PDF).
@@ -192,10 +192,12 @@ class AcquisitionOutcome:
     parsed even after re-download retries (corrupt/truncated/HTML-as-pdf) --
     surfaced the same way; the batch was not aborted for them.
     ``citation_keys`` maps each acquired DOI to its sci-adk citation key
-    (``<Surname><Year>`` with ``a/b`` on collision); the PDF/sidecar/bib/manifest
-    were renamed to match. ``key_collisions`` lists any overwrite collisions
-    detected (distinct DOIs that resolved to one on-disk file) -- surfaced so a
-    silently-overwritten paper is never lost.
+    (``<Surname><Year>`` with ``a/b`` on collision; a DOI keyed by an earlier call
+    keeps its key -- see ``search/literature_merge.py``); the PDF/sidecar/bib/
+    manifest were renamed to match. ``key_collisions`` lists any overwrite
+    collisions detected (distinct DOIs that resolved to one on-disk file, or a
+    PDF whose key is held by another paper's file and was left unrenamed) --
+    surfaced so a silently-overwritten paper is never lost.
     """
 
     evidence: EvidenceItem
@@ -302,8 +304,21 @@ class LiteratureAcquirer:
         self.literature_dir.mkdir(parents=True, exist_ok=True)
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
 
-        result = self.adapter.fetch(dois, self.literature_dir, **options)
-        _require_tool_ran(result, dois)
+        # paperforge rewrites references.bib with only this call's DOIs, so the
+        # store's existing keys, stems and bib text are captured before it runs.
+        snapshot = snapshot_literature(self.literature_dir)
+        full_result = self.adapter.fetch(dois, self.literature_dir, **options)
+        _require_tool_ran(full_result, dois)
+        bib_path = self.literature_dir / "references.bib"
+        call_bib_text = (
+            bib_path.read_text(encoding="utf-8") if bib_path.exists() else None
+        )
+        # The manifest accumulates across calls; the record, the halt and the
+        # keying cover only the DOIs requested here.
+        wanted = {normalize_doi(d) for d in dois}
+        result = replace(full_result, records=[
+            r for r in full_result.records if normalize_doi(r.doi) in wanted
+        ])
 
         # Auto-normalize each acquired PDF: owner/permission-restricted-but-
         # openable PDFs are re-written extractable; a real user-password lock is
@@ -322,13 +337,13 @@ class LiteratureAcquirer:
             if n.status == NormalizeStatus.ERROR
         ]
 
-        # Apply sci-adk's own citation-key convention to the acquired files
-        # (after fetch + normalize, before the record is built): rename each
-        # PDF/sidecar to <Surname><Year> (a/b-by-DOI on collision) and update
-        # references.bib + manifest.csv to match. Naming/IO only -- no belief.
-        # An overwrite collision (two DOIs -> one on-disk file) is detected and
-        # surfaced, never silently dropped.
-        keying = assign_and_apply_citation_keys(self.literature_dir, result.records)
+        # Apply sci-adk's own citation-key convention to this call's files (after
+        # fetch + normalize, before the record is built): an already-keyed DOI
+        # keeps its key; a new one gets <Surname><Year> or the next free a/b
+        # suffix; references.bib becomes the earlier bib plus this call's new
+        # entries. Naming/IO only -- no belief. Overwrite collisions are surfaced.
+        keying = key_and_merge(
+            self.literature_dir, result.records, call_bib_text, snapshot)
 
         evidence = self._build_evidence(
             result, target_id, normalizations, retries_spent, keying
