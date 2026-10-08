@@ -1,7 +1,8 @@
 # Parallel literature search
 
-> Status: **v0.2 (2026-10-08)** — §4.4 (the search log) is built and §6 decisions 1–2
-> are taken. Parallel searchers (§4.1–4.3) and decision 3 remain a proposal.
+> Status: **v0.3 (2026-10-08)** — all of §4 is applied: the search log (§4.4) in the
+> engine, the parallel searchers and the single recorder (§4.1–4.3) in the workspace
+> instructions. §6 decisions all taken. Not yet exercised on a real research run.
 > Cross-references: `design/literature-acquisition.md` (discovery is the agent's job,
 > acquisition is `paperforge`; the trigger model and `found_nothing` as a recorded null),
 > the workspace skill `science-tool-academic-search` (how one search is conducted).
@@ -48,14 +49,18 @@ section. sci-adk needs DOIs, the exact hypothesis text per kind, and a recorded 
 - One searcher per (hypothesis × kind). A Spec with three hypotheses has six units.
 - Each searcher must query at least two indexes and at least two phrasings of the
   hypothesis (the conduct in `science-tool-academic-search`).
-- Optional redundancy: when there are few units (≤ 2), run two independent searchers on
-  the same unit with different phrasings. Parallelism then buys fewer false nulls rather
-  than speed.
+- Redundancy is automatic when there are 1 or 2 units: two independent searchers per
+  unit, told to use different phrasings and a different first index. With so few units
+  parallelism saves no time, so it is spent on fewer false nulls instead. With 3 or more
+  units, one searcher each.
 - Cap concurrent searchers at 4. The public indexes rate-limit: Semantic Scholar
   refused every keyless request in testing (HTTP 429), and OpenAlex reports a per-request
-  cost against a free allowance.
-- Below 2 units, do not fan out: the token cost scales with the number of searchers and
-  the time saved is nil.
+  cost against a free allowance. Two units with two searchers each fill the cap exactly.
+- No units (the draft proposes no novelty): one `expert-literature` in its normal mode
+  runs the Spec-level prior-art search and records it.
+
+Searchers are `expert-literature` in a second mode, not a new agent: the prompt names one
+unit and a log path, and the agent then searches only and runs no verb.
 
 ### 4.2 The notes file
 
@@ -87,12 +92,20 @@ The searcher does not run any sci-adk verb.
 The orchestrator, alone and in sequence, after all searchers return:
 
 1. Reads every notes file for a unit.
-2. Records `found-prior-art` if any searcher marked a candidate `same`; otherwise
-   `found-nothing` only if at least two indexes answered (`status: ok`) across the
-   unit's searchers. If fewer answered, it does not record a null — it re-runs the search
-   or records a skip with the reason.
+2. Records `found-prior-art`, passing the `same` DOIs, if any searcher marked a
+   candidate `same`. Otherwise `found-nothing` only if at least two distinct indexes
+   answered (`status: ok`) across the unit's logs, passing the `related` DOIs (the
+   nearest work examined) to `--searched`, which requires at least one DOI. If fewer
+   answered, it re-spawns one searcher for the unit, once; if that still falls short, it
+   records a skip whose reason names the failed indexes.
 3. Calls `sci-adk novelty --hypothesis <h> --kind <k> --searched <dois> --outcome ...
    --search-log <notes files>` (see 4.4), then moves to the next unit.
+4. After every unit: one Spec-level `sci-adk prior-work --searched <all same and
+   related DOIs> --search-log <all log files>`. Only then does `manager-prereg` freeze.
+
+Applied to the workspace templates: `/sci plan` step 2 (`skills/sci/SKILL.md`),
+`expert-literature` (its searcher mode), `science-orchestrator` Stage 2, and the log path
+in `science-tool-academic-search`.
 
 ### 4.4 Engine change (implemented)
 
@@ -152,8 +165,9 @@ all searchers before step 4.3.
    whose log shows fewer than two answering indexes fails `verify`; a `found_nothing`
    with no log gets an advisory line, so existing runs are not failed retroactively.
    Implemented (§4.4).
-3. **Open.** Whether the redundancy in 4.1 is default or opt-in.
+3. **Decided: automatic for 1–2 units.** Two searchers per unit when there are one or
+   two units; one per unit from three. Applied (§4.1).
 
 ---
 
-Version: 0.2
+Version: 0.3

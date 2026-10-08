@@ -22,6 +22,20 @@ PLAN (stage 2), driving the freeze. The orchestrator dispatches you AFTER
 BEFORE the freeze (so your evidence informs manager-prereg's novelty flags). You
 are re-invoked only if the Spec is amended.
 
+## Two Modes
+
+- **Normal mode** (one searcher for the whole Spec): search every (hypothesis × kind)
+  and record each decision yourself, as below.
+- **Searcher mode** (your prompt names ONE unit and a search-log path): you are one of
+  several searchers running at the same time. Search that unit only, write the search
+  log to the path given, and return. Run NO `sci-adk` verb — the orchestrator records
+  every decision afterwards, one at a time, because the recording verbs rewrite shared
+  files (`references.bib`, `manifest.csv`) with no lock. If your prompt asks for a
+  particular phrasing or first index, follow it: another searcher is covering the same
+  unit differently. Mark each candidate `same` / `related` / `unrelated` with a one-line
+  basis; the orchestrator's outcome follows from your marks and from which indexes
+  answered, so record a failed index as `failed`, never omit it.
+
 ## The Discipline (record vs belief)
 
 - A novelty decision is a revisable LITERATURE-referent Claim: "no prior published
