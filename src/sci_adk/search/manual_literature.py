@@ -25,13 +25,99 @@ having read the document.
 
 from __future__ import annotations
 
+import csv
 import re
 from pathlib import Path
 from typing import Optional
 
-from sci_adk.search.citation_keys import _base_key
+from sci_adk.search.citation_keys import _BIB_DOI_RE, _BIB_ENTRY_RE, _base_key
 
 SI_SUFFIX = "_SI"
+
+# Prefixes stripped from a DOI before comparison (the same set paperforge's
+# ``normalize_doi`` strips when it writes manifest.csv / references.bib).
+_DOI_PREFIXES = (
+    "https://doi.org/", "http://doi.org/",
+    "https://dx.doi.org/", "http://dx.doi.org/",
+    "doi:", "doi ",
+)
+_DOI_TRAILING = ".,;)]}>\"' \t\r\n"
+
+# manifest.csv ``source`` value marking a PDF the user supplied (not an OA source).
+MANUAL_SOURCE = "manual"
+
+
+def normalize_doi(raw: Optional[str]) -> str:
+    """Return the comparison form of a DOI: prefix-free, trimmed, case-folded.
+
+    DOIs are case-insensitive; ``https://doi.org/``, ``dx.doi.org`` and ``doi:``
+    prefixes are dropped, as are trailing punctuation and whitespace.
+    """
+    doi = (raw or "").strip()
+    low = doi.lower()
+    for prefix in _DOI_PREFIXES:
+        if low.startswith(prefix):
+            doi = doi[len(prefix):]
+            break
+    return doi.strip().strip(_DOI_TRAILING).lower()
+
+
+# @MX:NOTE: [AUTO] DOI -> citation key comes from references.bib, not manifest.csv:
+# the acquirer writes a bib entry for EVERY DOI, but manifest ``filename`` is empty
+# for a DOI whose PDF was not fetched, and sci-adk never re-keys such an entry. The
+# bib key is therefore the only record of that DOI's key; reuse it verbatim.
+def find_recorded_key(literature_dir: Path, doi: str) -> Optional[str]:
+    """Return the citation key of the ``references.bib`` entry whose DOI is ``doi``.
+
+    Matching uses :func:`normalize_doi` on both sides. Returns ``None`` when the bib
+    file is absent or no entry carries the DOI. Raises ``ValueError`` when two
+    entries with DIFFERENT keys carry the same DOI (the binding would be a guess).
+    """
+    bib = Path(literature_dir) / "references.bib"
+    if not bib.exists():
+        return None
+    target = normalize_doi(doi)
+    keys: list[str] = []
+    for m in _BIB_ENTRY_RE.finditer(bib.read_text(encoding="utf-8")):
+        _head, key, body, _tail = m.groups()
+        doi_match = _BIB_DOI_RE.search(body)
+        if doi_match and normalize_doi(doi_match.group(1)) == target and key not in keys:
+            keys.append(key)
+    if len(keys) > 1:
+        raise ValueError(
+            f"DOI {doi} appears under more than one references.bib key: {', '.join(keys)}"
+        )
+    return keys[0] if keys else None
+
+
+def mark_manifest_pdf_present(literature_dir: Path, doi: str, filename: str) -> bool:
+    """Record in manifest.csv that ``doi``'s PDF is now on disk as ``filename``.
+
+    Sets ``status=success`` (so a resumed acquisition skips the DOI instead of
+    re-fetching it), ``source=manual``, ``filename``, and clears ``error``. Every
+    other column and every other row is preserved, in the original column order.
+    Returns False (nothing written) when the manifest or the DOI's row is absent.
+    """
+    manifest = Path(literature_dir) / "manifest.csv"
+    if not manifest.exists():
+        return False
+    with open(manifest, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    target = normalize_doi(doi)
+    hit = False
+    for row in rows:
+        if normalize_doi(row.get("doi")) == target:
+            row.update(status="success", source=MANUAL_SOURCE, filename=filename, error="")
+            hit = True
+    if not hit:
+        return False
+    with open(manifest, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    return True
 
 
 def _upper_suffix(index: int) -> str:

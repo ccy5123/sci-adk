@@ -58,12 +58,18 @@ user-offered PDF converge on the same manual-ingest verb:
   The verb OWNS the canonical bibkey (`<Surname><Year>`; arrival-order UPPERCASE
   `A/B` for DOI-less collisions; `_SI` for supplementary) and saves the PDF to
   `runs/<spec.id>/literature/pdfs/` — never hand-craft the filename.
+  When the PDF is one of the run's recorded DOIs (the usual case after an acquisition
+  halt listed it), run `sci-adk add-literature <run_dir> --pdf <path> --doi <DOI>
+  [--si]` instead: the verb saves the PDF under the key that DOI's `references.bib`
+  entry already has and marks its `manifest.csv` row present, so the PDF and its
+  citation cannot drift apart. `--author`/`--year` are not needed on that path; a DOI
+  the run has not recorded falls back to the provisional author/year key.
 - *Proactive* — a prior-work / novelty search hits a paper it cannot fetch. When
   `sci-adk prior-work --searched ...` or `sci-adk novelty --searched ...` prints
   `halt (human input needed):` on STDERR (a searched DOI had no downloadable OA PDF;
   the exit code is still `0` and the decision is recorded), do NOT silently proceed.
   Surface the missed-paper list via `AskUserQuestion`, offering: (a) provide the PDF
-  now → the reactive `add-literature` path above, or (b) skip this paper → record the
+  now → the reactive `add-literature --doi <DOI>` path above, or (b) skip this paper → record the
   miss as a null and continue. This carries the kernel's `AcquisitionHalt` to the
   human instead of relying on the agent noticing stderr.
 

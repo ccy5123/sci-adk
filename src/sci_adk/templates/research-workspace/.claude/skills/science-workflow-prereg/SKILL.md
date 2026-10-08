@@ -105,8 +105,10 @@ searched after the freeze.
 had no downloadable Open-Access PDF), the exit code is still `0` and the decision is
 already recorded — but do NOT silently proceed. The orchestrator surfaces the missed
 paper list to the user via `AskUserQuestion`, offering: (a) provide the PDF now → the
-manual-ingest path (`sci-adk add-literature`, see the workspace CLAUDE.md
-"User-provided literature" rule for the verb + bibkey ownership), or (b) skip this
+manual-ingest path (`sci-adk add-literature <run_dir> --pdf <path> --doi <missed
+DOI>`, which keeps the key that DOI already has in `references.bib`; see the
+workspace CLAUDE.md "User-provided literature" rule for the verb + bibkey
+ownership), or (b) skip this
 paper → record the miss as a null and continue. This is how the kernel's
 `AcquisitionHalt` reliably reaches the human instead of depending on the agent
 noticing stderr.

@@ -166,6 +166,10 @@ immediately, without being asked again:
 2. Run `sci-adk add-literature <run_dir> --pdf <path> --author "<Surname>" --year
    <YYYY> [--si]`. The verb assigns the canonical bibkey deterministically and copies
    the PDF to `runs/<spec.id>/literature/pdfs/<bibkey>.pdf`.
+   If the PDF is a DOI the run already recorded (e.g. one an acquisition halt
+   listed), run `sci-adk add-literature <run_dir> --pdf <path> --doi <DOI> [--si]`
+   instead: the PDF takes that DOI's existing `references.bib` key and its
+   `manifest.csv` row is marked present (author/year not needed).
 
 Naming is OWNED by the verb, never hand-crafted: base = `<Surname><Year>` (Anon/nd
 fallbacks); DOI-less same-base collisions get an arrival-order UPPERCASE suffix

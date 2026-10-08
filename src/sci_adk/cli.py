@@ -407,6 +407,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--si", action="store_true",
         help="this file is supplementary information (-> a _SI key)",
     )
+    add_lit.add_argument(
+        "--doi", default=None, metavar="DOI",
+        help="the DOI this PDF belongs to. If the run's references.bib already has an "
+             "entry for it (e.g. a DOI acquisition could not fetch), the PDF is saved "
+             "under that entry's existing key and its manifest.csv row is updated; "
+             "--author/--year are then ignored. An unrecorded DOI falls back to the "
+             "provisional author/year key",
+    )
 
     scan_lit = sub.add_parser(
         "scan-literature",
@@ -2139,6 +2147,9 @@ def _cmd_add_literature(args: argparse.Namespace) -> int:
         print(f"error: file not found: {src}", file=sys.stderr)
         return 2
 
+    if args.doi is not None:
+        return _add_literature_by_doi(args, run_dir, src)
+
     pdfs_dir = run_dir / "literature" / "pdfs"
     key = assign_manual_key(pdfs_dir, args.author, args.year, is_si=args.si)
     pdfs_dir.mkdir(parents=True, exist_ok=True)
@@ -2148,6 +2159,72 @@ def _cmd_add_literature(args: argparse.Namespace) -> int:
     print(f"add-literature: saved '{src.name}' as bibkey '{key}' -> {dest}")
     print("  provisional key: an UPPERCASE A/B is arrival-order (DOI unknown); "
           "render-time normalization re-sorts to lowercase a/b by DOI")
+    return 0
+
+
+def _add_literature_by_doi(args: argparse.Namespace, run_dir: Path, src: Path) -> int:
+    """``add-literature --doi``: bind the PDF to the DOI's recorded citation key.
+
+    A DOI already in the run's references.bib keeps that entry's key exactly (the
+    PDF becomes ``pdfs/<key>.pdf`` or ``<key>_SI.pdf``) and, for the paper itself,
+    its manifest.csv row is marked present. An unrecorded DOI falls back to the
+    provisional author/year key (no bib entry is invented).
+    """
+    import shutil
+
+    from sci_adk.search.literature_scan import file_sha256
+    from sci_adk.search.manual_literature import (
+        SI_SUFFIX,
+        assign_manual_key,
+        find_recorded_key,
+        mark_manifest_pdf_present,
+    )
+
+    with open(src, "rb") as fh:
+        if b"%PDF-" not in fh.read(1024):
+            print(f"error: not a PDF (no %PDF- header): {src}", file=sys.stderr)
+            return 2
+
+    lit_dir = run_dir / "literature"
+    pdfs_dir = lit_dir / "pdfs"
+    try:
+        key = find_recorded_key(lit_dir, args.doi)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    if key is None:
+        key = assign_manual_key(pdfs_dir, args.author, args.year, is_si=args.si)
+        pdfs_dir.mkdir(parents=True, exist_ok=True)
+        dest = pdfs_dir / f"{key}.pdf"
+        shutil.copy2(src, dest)
+        print(f"add-literature: saved '{src.name}' as bibkey '{key}' -> {dest}")
+        print(f"  DOI {args.doi} not found in this run's references.bib: the key is "
+              "provisional (from --author/--year)")
+        return 0
+
+    if args.author or args.year:
+        print(f"  note: --author/--year ignored; DOI {args.doi} is recorded under "
+              f"key '{key}'")
+    stem = f"{key}{SI_SUFFIX}" if args.si else key
+    dest = pdfs_dir / f"{stem}.pdf"
+    if dest.exists():
+        if file_sha256(dest) != file_sha256(src):
+            print(f"error: {dest} already exists with different content; nothing "
+                  "written", file=sys.stderr)
+            return 2
+        print(f"add-literature: '{src.name}' already present as {dest} (same content)")
+    else:
+        pdfs_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        print(f"add-literature: saved '{src.name}' as bibkey '{stem}' (DOI {args.doi}) "
+              f"-> {dest}")
+    if not args.si:
+        if mark_manifest_pdf_present(lit_dir, args.doi, dest.name):
+            print(f"  manifest.csv: {args.doi} -> {dest.name} (status=success, "
+                  "source=manual)")
+        else:
+            print(f"  manifest.csv: no row for {args.doi}; manifest not changed")
     return 0
 
 

@@ -110,8 +110,9 @@ has no downloadable Open-Access PDF, the acquirer HALTS: the verb prints
 exit code is still `0` and the decision is already recorded — so watch STDERR, not the
 exit code. Do NOT proceed silently: the orchestrator surfaces the missed-paper list to
 the user via `AskUserQuestion`, offering (a) provide the PDF now → `sci-adk
-add-literature` (the manual-ingest verb; the workspace CLAUDE.md
-"User-provided literature" rule owns the bibkey), or (b) skip this paper → record the
+add-literature <run_dir> --pdf <path> --doi <missed DOI>` (the manual-ingest verb;
+`--doi` saves the PDF under the key that DOI already has in `references.bib`; the
+workspace CLAUDE.md "User-provided literature" rule owns the bibkey), or (b) skip this paper → record the
 miss as a null and continue. A missed acquisition is a recorded null, never a
 skipped-over gap.
 
