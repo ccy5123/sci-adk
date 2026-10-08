@@ -2,10 +2,10 @@
 name: science-tool-academic-search
 description: >
   sci-adk academic-search tool knowledge: how to conduct a prior-art / novelty search per
-  (hypothesis × kind) against the exact draft-Spec hypothesis text — arXiv, Semantic
-  Scholar, and web sources, with a recorded search date ("as of <date>"), a graceful
-  WebFetch fallback when the academic MCP is unavailable, and found_nothing recorded as a
-  result. The conduct behind the novelty decision; the record is written by the prereg
+  (hypothesis × kind) against the exact draft-Spec hypothesis text — the public academic
+  indexes (OpenAlex, arXiv, Crossref; Semantic Scholar when it answers) queried through
+  WebFetch, plus the open web, with a recorded search date ("as of <date>") and
+  found_nothing recorded as a result. The conduct behind the novelty decision; the record is written by the prereg
   verbs. Loaded by the sci hub at /sci plan and by expert-literature. Builds on
   science-foundation-rigor; the freeze procedure is science-workflow-prereg.
 license: Apache-2.0
@@ -18,7 +18,7 @@ metadata:
   status: "active"
   updated: "2026-06-25"
   modularized: "false"
-  tags: "sci-adk, academic-search, prior-art, novelty, arxiv, semantic-scholar, literature, search-date, found-nothing, mcp-fallback, result-kind, method-kind"
+  tags: "sci-adk, academic-search, prior-art, novelty, arxiv, semantic-scholar, literature, search-date, found-nothing, openalex, crossref, result-kind, method-kind"
 
 # MoAI Extension: Progressive Disclosure
 progressive_disclosure:
@@ -57,16 +57,26 @@ flags) is `science-workflow-prereg`, and the record is written by the verbs
 ### Sources and order
 
 Search the academic record, then the open web, against the DRAFT Spec's exact hypothesis
-text for the kind in hand:
+text for the kind in hand. Discovery is your job, not a sci-adk module: no academic-search
+server ships with this workspace. Query the indexes' public APIs directly with WebFetch —
+they need no key, and they are the same services `paperforge` already uses to acquire
+the DOIs you find, so nothing new is added to the toolchain.
 
-- **arXiv** — preprints; closest to the frontier for math / CS / physics claims.
-- **Semantic Scholar** — cross-publisher index with citation graph; good for "has this
-  result/method appeared anywhere" coverage.
-- **WebSearch / WebFetch** — official venues, journal pages, and grey literature the
-  academic indexes miss; verify each candidate against its primary source.
+| Index | Query (URL-encode the terms) | Use it for | Watch for |
+|---|---|---|---|
+| **OpenAlex** | `https://api.openalex.org/works?filter=title_and_abstract.search:<terms>&per-page=25&select=doi,title,publication_year` | the main cross-publisher sweep; returns DOIs | `search=` matches full text and is far too broad — use the title-and-abstract filter |
+| **arXiv** | `https://export.arxiv.org/api/query?search_query=abs:"<phrase>"+AND+abs:<term>&max_results=25` | preprints, closest to the frontier | bare words are OR-ed together — quote phrases and join with `AND` |
+| **Crossref** | `https://api.crossref.org/works?query.bibliographic=<terms>&rows=25&select=DOI,title,issued` | DOI coverage OpenAlex misses | loose relevance ranking — a candidate source, never a null; supplementary files carry their own DOIs (e.g. a `.s003` suffix) — pass the article's DOI, not the file's |
+| **Semantic Scholar** | `https://api.semanticscholar.org/graph/v1/paper/search?query=<terms>&limit=25&fields=title,year,externalIds` | citation-graph follow-up | often refuses keyless requests (HTTP 429); if it does, say so — it was not searched |
+| **WebSearch** | — | official venues, journal pages, grey literature the indexes miss | verify each candidate against its primary source |
 
-Use the academic-search MCP (arXiv / Semantic Scholar) when available. Search the precise
-hypothesis statement, not a paraphrase — a vague query manufactures a false `found_nothing`.
+If a contact email is configured for acquisition (`UNPAYWALL_EMAIL`), add
+`&mailto=<that address>` to the OpenAlex and Crossref queries; both then serve you from
+their faster, more reliable pool.
+
+Search the precise hypothesis statement, not a paraphrase — a vague query manufactures a
+false `found_nothing`. Then run at least one rephrasing (synonyms, the field's other name
+for the method) on a second index: one phrasing on one index is not a search.
 
 ### Per (hypothesis × kind)
 
@@ -105,12 +115,14 @@ add-literature` (the manual-ingest verb; the workspace CLAUDE.md
 miss as a null and continue. A missed acquisition is a recorded null, never a
 skipped-over gap.
 
-### MCP fallback (do not let a missing MCP block the search)
+### When an index does not answer
 
-If the academic-search MCP is unavailable, detect it immediately and fall back to
-WebFetch against official sources (arxiv.org, semanticscholar.org, journal/venue pages),
-and SAY in the recorded basis that you used the fallback. A missing MCP weakens coverage;
-it never excuses skipping the search or recording a hollow `found_nothing`.
+An index that refuses (HTTP 429), times out or errors was NOT searched. Do not count it
+toward a `found_nothing`. Retry it once later in the session; if it still fails, carry on
+with the others and report, in the `Sources:` list you return, which indexes were
+queried, with which query strings, and which failed. The recording verbs do not yet
+store this, so that list is the only trace — never omit it. An unavailable index weakens
+coverage; it never excuses skipping the search or recording a hollow `found_nothing`.
 
 ### Re-search only on amendment
 
