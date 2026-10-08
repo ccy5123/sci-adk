@@ -14,6 +14,7 @@ from sci_adk.search.paperforge_adapter import (
     AcquisitionResult,
     PaperforgeAdapter,
     PaperforgeNotInstalled,
+    PaperforgePathError,
 )
 from sci_adk.search.pdf_normalize import (
     NormalizeResult,
@@ -26,6 +27,7 @@ __all__ = [
     "AcquisitionResult",
     "PaperforgeAdapter",
     "PaperforgeNotInstalled",
+    "PaperforgePathError",
     "PINNED_SHA",
     "NormalizeResult",
     "NormalizeStatus",

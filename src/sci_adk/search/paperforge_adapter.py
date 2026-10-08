@@ -21,23 +21,58 @@ Pin: ccy5123/paperforge @ 2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e
     (feature branch tip: metadata enrichment + citation-style filenames).
     Declared in pyproject.toml as the optional ``tools`` dependency group;
     install with ``pip install -e ".[tools]"``.
+
+Which executable runs (see :func:`resolve_paperforge_bin`): ``$SCI_ADK_PAPERFORGE``,
+else ``[literature] paperforge`` in the sci-adk config file, else the ``paperforge``
+beside the running sci-adk, else PATH. Provenance records the path that ran, the rule
+that chose it, and the version that tool reports -- the pin above is only what
+pyproject declares.
 """
 
 from __future__ import annotations
 
 import csv
+import os
+import shlex
 import shutil
 import subprocess
+import sys
+import sysconfig
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from importlib import metadata as _ilmd
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-# The git SHA paperforge is pinned to (pyproject.toml [tools]). Recorded in
-# provenance so a run is traceable to an exact tool version, not "whatever was
-# installed". Keep in sync with pyproject.toml.
+# The git SHA pyproject.toml's [tools] group pins paperforge to. It states what a
+# `pip install -e ".[tools]"` installs, NOT what a given run executed (that is
+# ``tool_path`` / ``tool_version`` in provenance). Keep in sync with pyproject.toml.
 PINNED_SHA = "2cec69b5c9e3cdd518463a24f67cf713ff3f0d9e"
+
+# Environment variable naming the exact paperforge executable (absolute path).
+ENV_VAR = "SCI_ADK_PAPERFORGE"
+
+# Resolution rule labels, recorded in provenance as ``tool_resolved_by``.
+RULE_ARGUMENT = "argument"
+RULE_ENV = f"env:{ENV_VAR}"
+RULE_CONFIG = "config:[literature] paperforge"
+RULE_SCI_ADK_DIR = "sci-adk-dir"
+RULE_PATH = "PATH"
+
+# Seconds allowed for each version probe (local process start only, no network).
+_VERSION_PROBE_TIMEOUT = 15
+
+# Run by the tool's own interpreter when it has no ``--version``: the installed
+# distribution's version, plus the git commit when it was installed from git.
+_DIST_VERSION_PROBE = (
+    "import importlib.metadata as m, json\n"
+    "d = m.distribution('paperforge')\n"
+    "try:\n"
+    "    c = json.loads(d.read_text('direct_url.json') or '{}')"
+    ".get('vcs_info', {}).get('commit_id')\n"
+    "except Exception:\n"
+    "    c = None\n"
+    "print(d.version + (' git ' + c if c else ''))\n"
+)
 
 # Columns paperforge writes to manifest.csv (paperforge orchestrator.py).
 _MANIFEST_FIELDS = ("index", "doi", "status", "source", "license",
@@ -87,7 +122,7 @@ class AcquisitionResult:
 
 
 class PaperforgeNotInstalled(RuntimeError):
-    """Raised when the paperforge CLI cannot be located on PATH."""
+    """Raised when no paperforge executable was found by any resolution rule."""
 
 
 class AcquisitionToolError(RuntimeError):
@@ -105,6 +140,139 @@ class AcquisitionToolError(RuntimeError):
         lines = (stderr or "").strip().splitlines()
         self.stderr_tail = "\n".join(lines[-self.STDERR_TAIL_LINES:])
         super().__init__(message)
+
+
+class PaperforgePathError(AcquisitionToolError):
+    """An explicitly configured paperforge path is unusable (relative, missing, or not
+    executable). Raised instead of falling back to another paperforge, so a pinned
+    choice is never silently replaced. Like its parent, it is raised before any
+    Evidence is written; ``returncode`` 127 is the shell's "command not found"."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, returncode=127)
+
+
+def _is_executable_file(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def _explicit_bin(value: str, rule: str) -> str:
+    """Validate an explicitly configured path; raise rather than fall through."""
+    path = Path(value).expanduser()
+    where = f"${ENV_VAR}" if rule == RULE_ENV else "[literature] paperforge in the config file"
+    if not path.is_absolute():
+        raise PaperforgePathError(
+            f"paperforge path from {where} must be an absolute path, got {value!r}")
+    if not path.exists():
+        raise PaperforgePathError(f"paperforge path from {where} does not exist: {path}")
+    if not _is_executable_file(path):
+        raise PaperforgePathError(
+            f"paperforge path from {where} is not executable: {path}")
+    return str(path)
+
+
+def _sci_adk_script_dirs() -> list[Path]:
+    """Directories that hold the running sci-adk: its console script's own dir first
+    (exact for user installs, where the interpreter's scheme dir is a system dir),
+    then the interpreter's scripts dir."""
+    dirs: list[Path] = []
+    if sys.argv and sys.argv[0]:
+        dirs.append(Path(sys.argv[0]).resolve().parent)
+    scripts = sysconfig.get_path("scripts")
+    if scripts:
+        dirs.append(Path(scripts))
+    unique: list[Path] = []
+    for d in dirs:
+        if d not in unique:
+            unique.append(d)
+    return unique
+
+
+def resolve_paperforge_bin(
+    config_root: Optional[Path] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Choose the paperforge executable and say which rule chose it.
+
+    Order: ``$SCI_ADK_PAPERFORGE``; ``[literature] paperforge`` in the sci-adk config;
+    a ``paperforge`` in the directory of the running sci-adk (console-script dir, then
+    the interpreter's scripts dir); ``shutil.which("paperforge")``. An explicit value
+    (the first two) that is unusable raises :class:`PaperforgePathError`.
+
+    Returns:
+        ``(absolute path, rule label)``, or ``(None, None)`` when nothing is found.
+    """
+    # @MX:NOTE: [AUTO] explicit settings never fall through: a stale pin must fail loudly
+    #   instead of silently running whichever paperforge PATH offers (an unrelated
+    #   program of the same name came first on PATH in some shells).
+    from sci_adk.config import paperforge_path
+
+    env_value = os.environ.get(ENV_VAR, "").strip()
+    if env_value:
+        return _explicit_bin(env_value, RULE_ENV), RULE_ENV
+    cfg_value = paperforge_path(config_root)
+    if cfg_value:
+        return _explicit_bin(cfg_value, RULE_CONFIG), RULE_CONFIG
+
+    names = ("paperforge.exe", "paperforge") if os.name == "nt" else ("paperforge",)
+    for directory in _sci_adk_script_dirs():
+        for name in names:
+            candidate = directory / name
+            if _is_executable_file(candidate):
+                return str(candidate), RULE_SCI_ADK_DIR
+
+    found = shutil.which("paperforge")
+    if found:
+        return os.path.abspath(found), RULE_PATH
+    return None, None
+
+
+def _python_shebang(path: Path) -> Optional[list[str]]:
+    """The interpreter argv on ``path``'s ``#!`` line when it is a Python, else None."""
+    try:
+        with open(path, "rb") as f:
+            first = f.readline(512).decode("utf-8", "strict").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not first.startswith("#!"):
+        return None
+    try:
+        argv = shlex.split(first[2:])
+    except ValueError:
+        return None
+    if argv and Path(argv[0]).name == "env":
+        argv = [a for a in argv[1:] if not a.startswith("-")]
+    if not argv or not Path(argv[0]).name.startswith("python"):
+        return None
+    return argv
+
+
+def probe_tool_version(tool_path: Optional[str]) -> str:
+    """The version the paperforge at ``tool_path`` reports, or ``"unknown"``.
+
+    First ``<tool> --version`` (first non-blank stdout line on exit 0). paperforge has
+    no ``--version`` today, so when that yields nothing and the tool is a Python console
+    script, its own interpreter (from the shebang) is asked for the installed
+    ``paperforge`` distribution version and git commit. Local processes only; any
+    failure gives ``"unknown"``.
+    """
+    if not tool_path:
+        return "unknown"
+    attempts: list[list[str]] = [[tool_path, "--version"]]
+    interpreter = _python_shebang(Path(tool_path))
+    if interpreter:
+        attempts.append([*interpreter, "-c", _DIST_VERSION_PROBE])
+    for argv in attempts:
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=_VERSION_PROBE_TIMEOUT)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        if proc.returncode != 0:
+            continue
+        for line in (proc.stdout or "").splitlines():
+            if line.strip():
+                return line.strip()
+    return "unknown"
 
 
 def _stat_signature(path: Path) -> Optional[tuple[int, int]]:
@@ -133,18 +301,27 @@ class PaperforgeAdapter:
         paperforge_bin: Optional[str] = None,
         email: Optional[str] = None,
         timeout: int = 600,
+        *,
+        config_root: Optional[Path] = None,
     ) -> None:
         """
         Args:
-            paperforge_bin: path to the ``paperforge`` executable. Defaults to
-                whatever ``shutil.which`` finds on PATH (the entry point
-                installed by ``pip install -e ".[tools]"``).
+            paperforge_bin: path to the ``paperforge`` executable, used as given.
+                When None it is chosen by :func:`resolve_paperforge_bin`.
             email: contact email for the Unpaywall/OpenAlex polite pool. When
                 None, paperforge falls back to ``$UNPAYWALL_EMAIL`` and, if that
                 is also unset, skips Unpaywall (weaker results).
             timeout: subprocess timeout in seconds (a batch can be slow).
+            config_root: override the sci-adk config root (tests).
+
+        Raises:
+            PaperforgePathError: an explicitly configured path is unusable.
         """
-        self.paperforge_bin = paperforge_bin or shutil.which("paperforge")
+        if paperforge_bin:
+            self.paperforge_bin: Optional[str] = paperforge_bin
+            self.resolved_by: Optional[str] = RULE_ARGUMENT
+        else:
+            self.paperforge_bin, self.resolved_by = resolve_paperforge_bin(config_root)
         self.email = email
         self.timeout = timeout
 
@@ -205,9 +382,10 @@ class PaperforgeAdapter:
         """
         if self.paperforge_bin is None:
             raise PaperforgeNotInstalled(
-                "paperforge CLI not found on PATH; install it with "
-                'pip install -e ".[tools]" (pins ccy5123/paperforge@'
-                f"{PINNED_SHA[:7]})"
+                "paperforge CLI not found (not beside sci-adk, not on PATH); install "
+                'it with pip install -e ".[tools]" (pins ccy5123/paperforge@'
+                f"{PINNED_SHA[:7]}), or name it with ${ENV_VAR} / "
+                "[literature] paperforge in the sci-adk config file"
             )
         cmd: list[str] = [self.paperforge_bin, *dois, "-o", str(output_dir)]
         if self.email:
@@ -325,21 +503,18 @@ class PaperforgeAdapter:
     # -- provenance --------------------------------------------------------
 
     def _capture_provenance(self, cmd: list[str], returncode: int) -> dict[str, Any]:
-        """Record the exact tool version and command for reproducibility."""
+        """Record which executable ran, why it was chosen, and the version it reports.
+
+        ``pinned_sha`` is what pyproject.toml declares, kept for comparison; it is not
+        evidence of what ran.
+        """
         return {
             "tool": "paperforge",
-            "pinned_sha": PINNED_SHA,
-            "installed_version": self._installed_version(),
             "tool_path": self.paperforge_bin,
+            "tool_resolved_by": self.resolved_by,
+            "tool_version": probe_tool_version(self.paperforge_bin),
+            "pinned_sha": PINNED_SHA,
             "command": cmd,
             "returncode": returncode,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-    @staticmethod
-    def _installed_version() -> Optional[str]:
-        """The installed paperforge package version, or None if unavailable."""
-        try:
-            return _ilmd.version("paperforge")
-        except _ilmd.PackageNotFoundError:
-            return None

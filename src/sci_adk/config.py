@@ -12,6 +12,9 @@ The config file is a tiny TOML at ``~/.config/sci-adk/config.toml``::
     [contact]
     email = "you@example.org"
 
+    [literature]
+    paperforge = "/abs/path/to/paperforge"   # optional: pin the executable sci-adk runs
+
 Read-only, stdlib-only (``tomllib``), no LLM. The config ROOT is overridable so tests
 never touch a real home directory.
 """
@@ -82,6 +85,29 @@ def watch_dirs(config_root: Optional[Path] = None) -> list[Path]:
     if dirs is None:
         dirs = list(_DEFAULT_WATCH_DIRS)
     return [Path(d).expanduser() for d in dirs]
+
+
+def paperforge_path(config_root: Optional[Path] = None) -> Optional[str]:
+    """Return ``[literature] paperforge`` from the config file, or None if absent/blank.
+
+    The value names the exact ``paperforge`` executable sci-adk should run (the adapter
+    validates it; a missing or non-executable path is an error there, not here). ``~``
+    is expanded. A missing or malformed config file reads as "not set".
+    """
+    path = _config_root(config_root) / _CONFIG_RELPATH
+    if not path.exists():
+        return None
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError):
+        return None
+    lit = data.get("literature")
+    if not isinstance(lit, dict):
+        return None
+    value = lit.get("paperforge")
+    if isinstance(value, str) and value.strip():
+        return str(Path(value.strip()).expanduser())
+    return None
 
 
 def _read_config_email(config_root: Optional[Path]) -> Optional[str]:
@@ -188,6 +214,7 @@ def require_contact_email(
 
 __all__ = [
     "ConfigHalt",
+    "paperforge_path",
     "resolve_contact_email",
     "require_contact_email",
 ]

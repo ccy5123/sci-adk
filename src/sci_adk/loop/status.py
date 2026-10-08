@@ -18,9 +18,11 @@ The state read is a pure composition over already-tested read-only loaders/predi
     {hypothesis, kind} whose ``novelty_{kind}`` flag is set (2-kind);
   - contested: ``literature_triggers.contested_open(spec, hyp_id, workspace_dir)`` per
     hypothesis;
-  - open checkpoints: a ``checkpoints/<hyp>.json`` with no matching
-    ``verdicts/<hyp>.json`` -- a proof/qualitative checkpoint still awaiting the
-    in-session agent's verdict.
+  - open checkpoints: a judge ``checkpoints/<hyp>.json`` (``<hyp>`` a hypothesis id of
+    the Spec) with no matching ``verdicts/<hyp>.json`` -- a proof/qualitative
+    checkpoint still awaiting the in-session agent's verdict. The other files in
+    ``checkpoints/`` (prior_work, the science audit, amendment receipts,
+    contested/novelty reminders) are not cleared by a verdict and are not counted.
 
 KERNEL-side (``sci_adk.loop``): stdlib + ``sci_adk.core`` + the loop predicates/loaders
 only. It MUST NOT import the adapter (F4 seam, enforced by
@@ -133,7 +135,7 @@ def session_status(run_dir: Path) -> StatusReport:
     # Checkpoints awaiting a verdict exist independently of recorded claims: a
     # proof/qualitative hypothesis surfaces a checkpoint BEFORE any Claim is derived, so
     # it must be reported even on the no-claims path (it is pending work).
-    awaiting = _checkpoints_awaiting_verdict(run_dir)
+    awaiting = _checkpoints_awaiting_verdict(run_dir, [h.id for h in spec.hypotheses])
 
     claims = _load_claims(run_dir)
     if not claims:
@@ -285,26 +287,53 @@ def _count_by_status(claims) -> Dict[str, int]:
     return counts
 
 
-def _checkpoints_awaiting_verdict(run_dir: Path) -> List[str]:
-    """Hypothesis ids with a ``checkpoints/<hyp>.json`` but no matching
+def _checkpoints_awaiting_verdict(run_dir: Path, hypothesis_ids: List[str]) -> List[str]:
+    """Hypothesis ids with a judge ``checkpoints/<hyp>.json`` but no matching
     ``verdicts/<hyp>.json`` -- a proof/qualitative checkpoint still awaiting the
     in-session agent's verdict. Read-only directory listing only.
+
+    ``checkpoints/`` also holds files that a verdict never clears, so they are never
+    counted here:
+
+      - ``prior_work.json`` -- closed by a recorded prior-work decision
+        (``prior_work_open``);
+      - ``science.json`` -- the spec-gate science audit; its findings are resolved by a
+        Spec amendment that re-runs the audit (design/science-guards.md), not by a
+        verdict, so it does not count even when it has findings;
+      - ``amendment-v<N>.json`` -- receipts written by ``amend-spec``;
+      - ``<hyp>.contested.json`` / ``<hyp>.novelty.json`` -- closed by a recorded
+        Evidence decision (``contested_open`` / ``novelty_open``).
+
+    The compiler writes a judge checkpoint as ``<hyp-id>.json``, so a file counts only
+    when its stem is a hypothesis id of the recorded Spec and it is not tagged with a
+    non-judge ``checkpoint_type`` (an untagged file is a legacy judge checkpoint).
     """
     ckpt_dir = run_dir / "checkpoints"
     if not ckpt_dir.is_dir():
         return []
+    hyp_ids = set(hypothesis_ids)
     verdicts_dir = run_dir / "verdicts"
     awaiting: List[str] = []
     for path in sorted(ckpt_dir.glob("*.json")):
         hyp_id = path.stem
-        # the prior-work recording checkpoint (checkpoints/prior_work.json) is not a
-        # proof/qualitative verdict checkpoint -- its open/closed state is the
-        # prior_work_open predicate, not a verdicts/<id>.json file. Skip it here.
-        if hyp_id == "prior_work":
+        if hyp_id not in hyp_ids or not _is_judge_checkpoint_file(path):
             continue
         if not (verdicts_dir / f"{hyp_id}.json").exists():
             awaiting.append(hyp_id)
     return awaiting
+
+
+def _is_judge_checkpoint_file(path: Path) -> bool:
+    """False only when the file is readable JSON tagged with a non-judge
+    ``checkpoint_type``. An unreadable file stays counted, so a damaged judge
+    checkpoint is reported rather than silently hidden."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(payload, dict):
+        return True
+    return payload.get("checkpoint_type", "judge") == "judge"
 
 
 def _headline(

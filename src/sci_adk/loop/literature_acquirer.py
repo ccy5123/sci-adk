@@ -482,8 +482,11 @@ class LiteratureAcquirer:
             bears_on = [Bearing(target_id=target_id,
                                 direction=BearingDirection.NEUTRAL)]
 
-        sha = str(result.provenance.get("pinned_sha", ""))[:7]
-        version = result.provenance.get("installed_version")
+        prov = result.provenance
+        tool = (f"paperforge path={prov.get('tool_path') or 'unknown'} "
+                f"resolved_by={prov.get('tool_resolved_by') or 'unknown'} "
+                f"version={prov.get('tool_version') or 'unknown'} "
+                f"declared_pin={str(prov.get('pinned_sha', ''))[:7] or 'none'}")
 
         return EvidenceItem(
             id=self._generate_evidence_id(),
@@ -491,8 +494,7 @@ class LiteratureAcquirer:
             kind=EvidenceKind.LITERATURE,
             provenance=Provenance(
                 data_ref=str(result.manifest_path),
-                environment=f"paperforge@{sha} version={version} "
-                            f"returncode={result.returncode}",
+                environment=f"{tool} returncode={result.returncode}",
             ),
             result=Result(
                 type="qualitative",

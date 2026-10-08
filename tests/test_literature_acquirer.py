@@ -82,7 +82,7 @@ def test_acquire_writes_literature_evidence(tmp_path):
     lit_dir = tmp_path / "runs" / "test-spec" / "literature"
     assert ev.result.artifact_ref == str(lit_dir)
     assert ev.provenance.data_ref == str(lit_dir / "manifest.csv")
-    assert "paperforge@60fefed" in ev.provenance.environment
+    assert "declared_pin=60fefed" in ev.provenance.environment
 
     # the adapter was driven with the run's literature dir
     called_dois, called_dir, _ = adapter.calls[0]

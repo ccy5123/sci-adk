@@ -387,3 +387,85 @@ def test_render_status_text_headline_first_and_nonempty(tmp_path):
     assert text  # non-empty
     assert text.splitlines()[0] == report.headline
     assert "claim-hyp-x" in text
+
+
+# --------------------------------------------------------------------------- #
+# only hypothesis judge checkpoints await a verdict (real-run checkpoints/ dir)
+# --------------------------------------------------------------------------- #
+
+_REAL_RUN = Path(__file__).parent / "fixtures" / "amend_bcfkow" / "run"
+
+
+def _copy_real_run(tmp_path: Path) -> Path:
+    """Copy the real BCF/Kow run (spec + evidence + prior_work.json + an empty
+    science.json) to <tmp>/runs/<spec.id> and add the amendment receipt that
+    amend-spec writes next to them."""
+    import shutil
+
+    spec_id = json.loads((_REAL_RUN / "spec.json").read_text(encoding="utf-8"))["id"]
+    run_dir = tmp_path / "runs" / spec_id
+    shutil.copytree(_REAL_RUN, run_dir)
+    (run_dir / "checkpoints" / "amendment-v2.json").write_text(json.dumps({
+        "spec_id": spec_id, "prior_version": 1, "new_version": 2,
+        "rationale": "method rewritten", "recorded_at": "2026-10-08T12:00:00+00:00",
+        "prior_spec_sha256": "0" * 64,
+    }), encoding="utf-8")
+    return run_dir
+
+
+def test_science_audit_and_amendment_receipt_never_await_a_verdict(tmp_path):
+    """Regression: a real run reported "2 checkpoints awaiting verdict" for
+    science.json (0 findings) and amendment-v2.json. Neither is a judge
+    checkpoint; neither is cleared by a verdicts/<id>.json."""
+    run_dir = _copy_real_run(tmp_path)
+    assert sorted(p.name for p in (run_dir / "checkpoints").iterdir()) == [
+        "amendment-v2.json", "prior_work.json", "science.json"]
+
+    report = session_status(run_dir)
+    assert report.checkpoints_awaiting_verdict == []
+    assert "awaiting verdict" not in report.headline
+
+
+def test_science_findings_are_not_verdict_checkpoints(tmp_path):
+    """Science-guard findings are resolved by a Spec amendment that re-runs the audit
+    (design/science-guards.md), never by a recorded verdict -- so even a science.json
+    WITH findings is not counted as awaiting a verdict."""
+    run_dir = _copy_real_run(tmp_path)
+    (run_dir / "checkpoints" / "science.json").write_text(json.dumps({"findings": [
+        {"guard": "G2", "hypothesis_id": "H1", "message": "no power analysis"}]}),
+        encoding="utf-8")
+
+    assert session_status(run_dir).checkpoints_awaiting_verdict == []
+
+
+def test_contested_and_novelty_reminders_are_not_verdict_checkpoints(tmp_path):
+    """<hyp>.contested.json / <hyp>.novelty.json reminders close on a recorded
+    Evidence decision (reported via contested_pending / novelty_unresolved), not on a
+    verdicts/ file -- they must not be counted here as well."""
+    run_dir = _copy_real_run(tmp_path)
+    ckpt = run_dir / "checkpoints"
+    base = {"hypothesis_id": "H1", "spec_id": "SPEC-BCFKOW-001", "spec_version": 1,
+            "prompt": "p"}
+    (ckpt / "H1.contested.json").write_text(
+        json.dumps({"checkpoint_type": "contested", **base}), encoding="utf-8")
+    (ckpt / "H1.novelty.json").write_text(
+        json.dumps({"checkpoint_type": "novelty", **base}), encoding="utf-8")
+
+    assert session_status(run_dir).checkpoints_awaiting_verdict == []
+
+
+def test_real_run_judge_checkpoint_still_awaits_until_verdict(tmp_path):
+    """A proof/qualitative judge checkpoint <hyp>.json beside the non-verdict files
+    is still counted, and stops being counted once verdicts/<hyp>.json exists."""
+    run_dir = _copy_real_run(tmp_path)
+    (run_dir / "checkpoints" / "H2.json").write_text(json.dumps({
+        "checkpoint_type": "judge", "hypothesis_id": "H2", "kind": "qualitative",
+        "expression": "e", "finding": "", "spec_version": 2}), encoding="utf-8")
+
+    report = session_status(run_dir)
+    assert report.checkpoints_awaiting_verdict == ["H2"]
+    assert "1 checkpoint awaiting verdict" in report.headline
+
+    (run_dir / "verdicts").mkdir()
+    (run_dir / "verdicts" / "H2.json").write_text("{}", encoding="utf-8")
+    assert session_status(run_dir).checkpoints_awaiting_verdict == []

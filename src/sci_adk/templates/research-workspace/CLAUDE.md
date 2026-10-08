@@ -73,6 +73,15 @@ user-offered PDF converge on the same manual-ingest verb:
   miss as a null and continue. This carries the kernel's `AcquisitionHalt` to the
   human instead of relying on the agent noticing stderr.
 
+**Which acquisition tool runs.** The `--searched` verbs fetch papers with `paperforge`.
+sci-adk runs, in order: the absolute path in `$SCI_ADK_PAPERFORGE`; else `[literature]
+paperforge = "/abs/path"` in `~/.config/sci-adk/config.toml`; else the `paperforge`
+installed next to `sci-adk`; else the first one on `PATH`. A set path that does not
+exist or is not executable stops the verb (nothing is recorded) instead of falling back.
+Each LITERATURE item records the path that ran, which of these chose it, and the
+version it reported. Do not work around a wrong tool with a `PATH=...` prefix; set one
+of the two explicit options.
+
 **Cannot-do.**
 - Never state belief outside the engine (no conclusion that has not passed `verify`).
 - Never silently flip the frozen Spec — amendment is explicit and recorded.
