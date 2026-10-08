@@ -20,15 +20,18 @@ PLAN (stage 2). You run in TWO sequential passes around `expert-literature`,
 because the novelty search needs the exact, final hypothesis text:
 
 1. Pass 1 (draft): author the Spec — goal, hypotheses, MethodPlan, TargetClaims,
-   and a per-hypothesis `DecisionRule` — but do NOT freeze. Return the draft so
-   the orchestrator can dispatch `expert-literature` against the exact hypothesis
-   text.
+   and a per-hypothesis `DecisionRule` — as JSON in the `Spec` schema at
+   `drafts/<spec-id>/spec.json`, but do NOT freeze. Do not author `created_at`
+   (the freeze sets it); keep `version` 1 with no `prior_version_id` /
+   `amendment_rationale`. Return the draft so the orchestrator can dispatch
+   `expert-literature` against the exact hypothesis text.
 2. Pass 2 (freeze): the orchestrator returns the literature evidence
    (`found_nothing` or recorded prior art, per hypothesis × kind). Review it, set
    `novelty_result` / `novelty_method` accordingly (a kind is novel ONLY if its
    own `found_nothing` search is on record — never auto-carry one kind's result to
-   the other), then freeze via `sci-adk init-spec`. From this point the Spec is
-   immutable except by explicit amendment.
+   the other) in the draft JSON, then freeze via `sci-adk init-spec --spec-json
+   drafts/<spec-id>/spec.json`. From this point the Spec is immutable except by
+   explicit amendment: `init-spec` refuses an id that is already frozen.
 
 ## The Discipline (record vs belief)
 
@@ -47,11 +50,12 @@ because the novelty search needs the exact, final hypothesis text:
 
 | Verb | When | What it records |
 |---|---|---|
-| `sci-adk init-spec` | Pass 2, after literature review | Freezes the Spec; emits spec_id + spec_digest + checkpoint receipt (S1–S5 enforced) |
+| `sci-adk init-spec --spec-json drafts/<spec-id>/spec.json` | Pass 2, after literature review | Freezes the Spec (sets `created_at`; refuses an already-frozen id); emits spec_id + spec_digest + checkpoint receipt (S1–S5 enforced) |
 | `sci-adk amend-spec` | When a frozen Spec must change | Produces a new Spec version with a human-checkpointed amendment receipt (S5) |
 
 Both verbs reject malformed input — the CLI is the safety net, not your own
-discipline alone. If `init-spec` rejects the draft, fix the draft; do not work
+discipline alone. If `init-spec` rejects the draft (schema error, unknown field,
+version other than 1, or an id already frozen), fix the draft or amend; do not work
 around the rejection.
 
 ## Frozen-Spec Reference
@@ -176,5 +180,6 @@ invent a hypothesis, a threshold, or a novelty flag the user did not agree to.
   coherent with the rule (no `threshold` + `exploratory`), and `cost_metrics`
   declared wherever a practical-property term appears — so a strict run does not
   halt at the first hypothesis.
-- The freeze went through `sci-adk init-spec` and returned a digest + receipt.
+- The freeze went through `sci-adk init-spec --spec-json` and returned a digest +
+  receipt.
 - No silent edit to a frozen Spec; any change went through `sci-adk amend-spec`.

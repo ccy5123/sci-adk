@@ -120,7 +120,8 @@ Load `Skill("science-workflow-prereg")`. Two-pass, SEQUENTIAL (the novelty searc
 needs the exact draft hypothesis text):
 
 1. `Agent(subagent_type: "manager-prereg")` → draft the Spec (goal + hypotheses +
-   MethodPlan + per-hypothesis DecisionRule), NOT yet frozen.
+   MethodPlan + per-hypothesis DecisionRule) as JSON at `drafts/<spec-id>/spec.json`,
+   NOT yet frozen.
 The order is **search → freeze → record**. The searches must run before the freeze, so
 they cannot be fitted to the plan; the recording verbs need `runs/<id>/spec.json`, which
 only the freeze creates, so the decisions are recorded right after it. Each log's
@@ -150,7 +151,9 @@ whose log was searched after the freeze.
        reason). Never call a null the logs do not carry.
 3. `Agent(subagent_type: "manager-prereg")` (2nd call) → give it the outcome per unit
    and the log paths. It sets `novelty_result` / `novelty_method` ONLY for a unit whose
-   outcome is found-nothing, and freezes via `sci-adk init-spec`.
+   outcome is found-nothing, and freezes via `sci-adk init-spec --spec-json
+   drafts/<spec-id>/spec.json` (the freeze sets `created_at`; an id that is already
+   frozen is refused — change it with `sci-adk amend-spec`).
 4. **Record in sequence (you, right after the freeze, before any experiment).** The
    recording verbs rewrite shared files with no lock: run them one at a time.
    - per unit: `sci-adk novelty <run> --hypothesis <h> --kind <k> --searched <DOIs>

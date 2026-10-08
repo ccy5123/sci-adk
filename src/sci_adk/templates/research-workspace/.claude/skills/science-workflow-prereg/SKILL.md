@@ -40,10 +40,12 @@ verbs and halts) load `Skill("science-foundation-rigor")`; this skill is the HOW
 
 ## Quick Reference (30 seconds)
 
-- **Search → freeze → record**: manager-prereg DRAFTS the Spec → expert-literature
-  searches prior art per (hypothesis × kind) and writes search logs → manager-prereg
-  sets the novelty flags from the logs and FREEZES via `sci-adk init-spec` → the
-  orchestrator RECORDS the decisions, before any experiment.
+- **Search → freeze → record**: manager-prereg DRAFTS the Spec as JSON at
+  `drafts/<spec-id>/spec.json` → expert-literature searches prior art per
+  (hypothesis × kind) and writes search logs → manager-prereg sets the novelty flags
+  from the logs and FREEZES via `sci-adk init-spec --spec-json
+  drafts/<spec-id>/spec.json` → the orchestrator RECORDS the decisions, before any
+  experiment.
 - **Why this order**: the novelty search needs the exact, final hypothesis text, so it
   follows the draft; it must precede the freeze so it cannot be fitted to the plan;
   and the recording verbs need the run directory the freeze creates. The log's
@@ -81,8 +83,15 @@ support undecidable.
 ### The two-pass freeze
 
 **Pass 1 — draft (manager-prereg).** Author the four panes + per-hypothesis
-DecisionRule. Do NOT freeze. Return the draft (exact hypothesis text per kind) so the
-orchestrator can dispatch the literature search against it.
+DecisionRule as a JSON document in the `Spec` schema, written to
+`drafts/<spec-id>/spec.json` (`id`, `raw_proposal`, `hypotheses[]` each with its
+`decision_rule`, `method`, `target_claims[]`). JSON is the freeze format because it
+carries any DecisionRule kind with its `params` exactly — a numeric `threshold` or
+`interval` rule included. Do NOT author `created_at` (the freeze sets it), and leave
+`version` at 1 with no `prior_version_id` / `amendment_rationale` (those belong to
+amendments). Unknown top-level fields are rejected at freeze, not dropped. Do NOT
+freeze. Return the draft (exact hypothesis text per kind) so the orchestrator can
+dispatch the literature search against it.
 
 **Literature pass (expert-literature).** Search prior art per (hypothesis × kind)
 against the draft hypothesis text, BEFORE the freeze, and write a search log per unit
@@ -118,9 +127,18 @@ noticing stderr.
 outcome — no candidate marked `same`, and at least two distinct indexes answered
 (never auto-carry one kind's result to the other). The matching `found_nothing` is
 recorded right after the freeze; `verify` flags any set flag still without one. Each flag gets a
-one-line recorded basis. Then freeze via `sci-adk init-spec`, which emits
-`spec_id` + `spec_digest` + a checkpoint receipt (S1–S5 enforced). From here the Spec
-is immutable except by explicit amendment.
+one-line recorded basis. Then freeze with `sci-adk init-spec --spec-json
+drafts/<spec-id>/spec.json`, which validates the draft, stamps `created_at` with the
+freeze time (a value in the file is ignored, so the freeze cannot be backdated), and
+emits `spec_id` + `spec_digest` + a checkpoint receipt (S1–S5 enforced). From here the
+Spec is immutable except by explicit amendment: `init-spec` refuses an id that is
+already frozen (`runs/<id>/spec.json` exists) and writes nothing — change a frozen
+Spec with `sci-adk amend-spec`, never by re-freezing.
+
+**Quick-start route (not `/sci plan`).** A four-pane Markdown proposal can be frozen
+and run in one step with `sci-adk run proposal.md`. Its parser authors qualitative
+DecisionRules only; a pre-registration with numeric rules goes through the JSON
+freeze above.
 
 ### Science guards at freeze (G1–G5)
 

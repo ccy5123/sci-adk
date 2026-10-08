@@ -498,6 +498,14 @@ def _add_verb_parsers(sub) -> None:
         help="alias for --capability t1-molecular-godel (demo mode): freeze the built-in "
              "T-1 Spec",
     )
+    init_spec.add_argument(
+        "--spec-json", default=None, metavar="FILE",
+        help="freeze a pre-built Spec from a JSON file (the Spec schema; e.g. numeric "
+             "DecisionRules the proposal parser cannot author). Exclusive with a "
+             "proposal, --capability and --t1-demo. created_at is set at freeze (any "
+             "value in the file is ignored); version must be 1 -- amendments go through "
+             "amend-spec",
+    )
 
     # pubreqs: freeze the F1 publishing-requirements contract into runs/<id>/pubreqs.json.
     pubreqs = sub.add_parser(
@@ -1039,25 +1047,110 @@ def _cmd_run(args: argparse.Namespace) -> int:
 # -- Step 2 verbs (design/sci-adk-as-moai.md §4.6): each is a thin wrapper over one
 # ResearchCompiler stage function. `run` remains the chained wrapper.
 
+def _load_spec_json(path_arg: str, spec_id: Optional[str]):
+    """Load + validate a pre-built Spec for ``init-spec --spec-json``.
+
+    Returns ``(spec, created_at_ignored)``. Raises :class:`_CliError` (exit 2) on a
+    missing file, malformed JSON, an unknown top-level key, a schema violation, an
+    ``--spec-id`` that disagrees with the file's ``id``, or amendment fields (a fresh
+    freeze is always version 1; amendments go through ``amend-spec``).
+    """
+    path = Path(path_arg)
+    if not path.exists():
+        raise _CliError(f"spec-json file not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise _CliError(f"invalid spec JSON ({path}): {e}")
+    if not isinstance(raw, dict):
+        raise _CliError(f"invalid spec JSON ({path}): top level must be an object")
+
+    # Spec's model_config does not forbid extra fields (pydantic ignores them), so a
+    # typo'd top-level key would be dropped silently from a frozen pre-registration.
+    # Reject it here instead.
+    unknown = sorted(set(raw) - set(Spec.model_fields))
+    if unknown:
+        raise _CliError(
+            f"unknown top-level Spec field(s) in {path}: {', '.join(unknown)}"
+        )
+
+    # created_at is ALWAYS the freeze time, never the caller's value. `verify` fails a
+    # found_nothing novelty decision whose search log is dated after spec.created_at
+    # (loop/verify.py _check_search_logs); a caller-supplied created_at could backdate
+    # the freeze and defeat that check.
+    created_at_ignored = "created_at" in raw
+    raw = {k: v for k, v in raw.items() if k != "created_at"}
+
+    try:
+        spec = Spec.model_validate(raw)
+    except ValueError as e:
+        raise _CliError(f"invalid Spec ({path}): {e}")
+
+    if spec_id is not None and spec_id != spec.id:
+        raise _CliError(
+            f"--spec-id '{spec_id}' does not match the id in {path} ('{spec.id}')"
+        )
+    amendment_fields = [
+        name for name in ("prior_version_id", "amendment_rationale")
+        if getattr(spec, name)
+    ]
+    if spec.version != 1 or amendment_fields:
+        detail = ", ".join(
+            ([f"version={spec.version}"] if spec.version != 1 else []) + amendment_fields
+        )
+        raise _CliError(
+            f"init-spec freezes version 1 only ({detail} in {path}); amendments go "
+            f"through `sci-adk amend-spec <run_dir> --rationale ...`"
+        )
+    return spec, created_at_ignored
+
+
 def _cmd_init_spec(args: argparse.Namespace) -> int:
     """Author + freeze a Spec into runs/<spec.id>/ (stage 1 of `run`).
 
-    Resolves the Spec from a capability demo or a proposal (the shared
-    ``_resolve_capability_selection``), then runs ``ResearchCompiler.stage_init_spec`` --
-    writing spec.json + the Spec-time prior-work checkpoint.
+    Resolves the Spec from ``--spec-json``, a capability demo, or a proposal (the shared
+    ``_resolve_capability_selection``), refuses if that id is already frozen, then runs
+    ``ResearchCompiler.stage_init_spec`` -- writing spec.json + the Spec-time prior-work
+    checkpoint.
     """
+    created_at_ignored = False
     try:
-        spec, _experiment, proposal_text = _resolve_capability_selection(args)
+        if args.spec_json is not None:
+            spec, created_at_ignored = _load_spec_json(args.spec_json, args.spec_id)
+        else:
+            spec, _experiment, proposal_text = _resolve_capability_selection(args)
+            if spec is None:
+                # Parse here (the same parser stage_init_spec would use) so the id is
+                # known before anything is written.
+                from sci_adk.core.parser import ProposalParser
+
+                spec = ProposalParser().parse(proposal_text, spec_id=args.spec_id)
     except _CliError as e:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
 
+    run_dir = Path(args.output) / "runs" / spec.id
+    # @MX:NOTE: [AUTO] Frozen-Spec invariant (S1): a frozen Spec version is immutable;
+    #   changes create version+1 via amend-spec. stage_init_spec writes spec.json
+    #   unconditionally, so this guard is what stops a second init-spec (any input path)
+    #   from silently replacing a pre-registration. It lives here, not in the stage:
+    #   compile() / `run` / run_checkpoint_loop re-enter stage_init_spec on an existing
+    #   run dir by design (F5 replay, checkpoint-loop iterations).
+    if (run_dir / "spec.json").exists():
+        print(
+            f"error: Spec '{spec.id}' is already frozen at {run_dir / 'spec.json'}; a "
+            f"frozen Spec is never re-frozen. To change it, create a new version with "
+            f"`sci-adk amend-spec {run_dir} --rationale \"...\"`",
+            file=sys.stderr,
+        )
+        return 2
+
     compiler = ResearchCompiler(workspace_dir=Path(args.output))
-    frozen = compiler.stage_init_spec(
-        spec=spec, proposal_text=proposal_text, spec_id=args.spec_id
-    )
-    run_dir = Path(args.output) / "runs" / frozen.id
+    frozen = compiler.stage_init_spec(spec=spec)
     print(f"init-spec: froze Spec '{frozen.id}' (v{frozen.version}) -> {run_dir}")
+    if created_at_ignored:
+        print("  note: created_at in the spec JSON was ignored; set to the freeze time "
+              f"{frozen.created_at.isoformat()}")
     print(f"  spec: {run_dir / 'spec.json'}")
     # The frozen Spec's digest -- the orchestrator captures this for the worker's
     # [FROZEN SPEC REFERENCE] block (design/sci-adk-as-moai.md §6.1).
@@ -2265,10 +2358,24 @@ def _cmd_scan_literature(args: argparse.Namespace) -> int:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     if args.command == "run":
         return _cmd_run(args)
     if args.command == "init-spec":
+        # --spec-json is one of four mutually exclusive Spec sources. Checked here (not
+        # an argparse group) because the positional proposal and the existing
+        # --capability/--t1-demo combination rules are handled elsewhere.
+        if args.spec_json is not None:
+            clashes = [name for name, given in (
+                ("a proposal path", args.proposal),
+                ("--capability", args.capability),
+                ("--t1-demo", args.t1_demo),
+            ) if given]
+            if clashes:
+                parser.error(
+                    f"init-spec: --spec-json cannot be combined with {', '.join(clashes)}"
+                )
         return _cmd_init_spec(args)
     if args.command == "pubreqs":
         return _cmd_pubreqs_freeze(args)

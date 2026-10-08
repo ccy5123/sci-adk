@@ -102,14 +102,15 @@ continuation of prior confirmed work in the same session.
 
 Two-pass, sequential (novelty search needs exact hypothesis text):
 
-1. `manager-prereg` drafts the Spec (hypothesis + MethodPlan + DecisionRule, not
-   yet frozen).
+1. `manager-prereg` drafts the Spec (hypothesis + MethodPlan + DecisionRule) as JSON
+   at `drafts/<spec-id>/spec.json`, not yet frozen.
 2. `expert-literature` searchers run in parallel, one or two per (hypothesis × kind),
    and only write search logs — before the freeze, so the searches cannot be fitted
    to the plan.
 3. `manager-prereg` sets the novelty_result / novelty_method flags from the logs and
-   freezes the Spec via `sci-adk init-spec`. From here the Spec is immutable except
-   by explicit amendment.
+   freezes the Spec via `sci-adk init-spec --spec-json drafts/<spec-id>/spec.json`.
+   From here the Spec is immutable except by explicit amendment (`init-spec` refuses
+   an id that is already frozen).
 4. You record `sci-adk novelty --kind {result|method}` per unit and `sci-adk
    prior-work`, each with `--search-log`, one at a time, before any experiment. The
    recording verbs need the run directory the freeze creates, and they rewrite shared
