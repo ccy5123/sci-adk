@@ -1,6 +1,6 @@
 # The manuscript is an argument, not a rendering of the record
 
-> Status: **§11-§13 COMPLETE (v1.0)** on branch `feat/declaration-list` — §11.3 and
+> Status: **§11-§14 COMPLETE (v1.1)** — §11.3 and
 > §11.4 built, §11.1 resolved as a protocol change that needed no code (§11.5d).
 > §12 defines what tool vocabulary IS and §12.2a corrects it to be AUDIENCE-relative;
 > all of its routes are now applied (list, author instruction, reviewer, floor). §13
@@ -9,9 +9,12 @@
 > diagnosis; §8 corrects two errors in it; §9 is a first answer that was implemented and
 > then SUPERSEDED — it fails at the submission boundary; **§11 is the architecture**.
 >
-> The `\finding` markup of §9 is REMOVED on this branch (the declaration list quotes the
-> sentence, so an in-document marker adds nothing — §11.5). Its commit is preserved at the
-> untouched `feat/verdict-markup` ref.
+> The `\finding` markup of §9 is REMOVED (the declaration list quotes the sentence, so an
+> in-document marker adds nothing — §11.5). Its implementation remains in history at
+> commit `17f88c5`.
+>
+> §14 extends the author protocol from words to claims: verbs follow the recorded design,
+> one claim takes one position, and each section earns its length from the results.
 >
 > v0.2 supersedes v0.1's framing. v0.1 diagnosed "the protocol specifies no reader" and
 > proposed readability remedies. That was one level too shallow: the missing reader is a
@@ -238,7 +241,7 @@ below is named `\finding`, not `\verdict`.
 
 ---
 
-## 9. OD-R1 — first answer, SUPERSEDED by §11 (implemented, branch `feat/verdict-markup`)
+## 9. OD-R1 — first answer, SUPERSEDED by §11 (implemented at commit `17f88c5`)
 
 > **SUPERSEDED (same day).** The mechanism below is sound about *what* must be bound and
 > *why* declaration beats substitution — §11 keeps both. It is WRONG about *where* the
@@ -745,8 +748,39 @@ both documents would be right to ask which one binds. That is the four-pane path
 inability to express a numeric decision rule -- found from the inside during this test, and
 rediscovered from the outside by a reader who had only the two manuscripts.
 
+## 14. Claims, not only words (2026-10-08)
+
+§12 governs which words a paper may use. §13.1 showed the other failure on the first real
+paper: an inferential overclaim ("below even the square-root growth that independent
+rounding errors would produce", from one seed and five points) that every gate passed,
+because every number in it traced to the record. The author's own writing standard was
+revised the same way, adding a second part on claims. It is carried into the shipped
+workspace here.
+
+**Where each part lives.**
+
+| Rule | Author (`science-workflow-publish`) | Blind reviewer (`evaluator-conclusions`) |
+|---|---|---|
+| Verbs follow the design (causal words, scope) | instruction + order of work, step 3 | read as asserting a mechanism, checked against the frozen `method` |
+| One claim, one position (uncertainty as numbers, stock softeners) | instruction, step 4 | a claim plus softener is read as ONE assertion |
+| Proportion (limitations, implications, future work, methods) | instruction, steps 5–6 | not carried |
+| A hedge is not the fix | the third non-fix | stacked hedges read as weaker, not safer |
+
+**Why the reviewer gets reading rules and not a new duty.** §11.4 makes the reviewer a
+label comparison, not a hunt: asked to find overclaims, it would find them whether or not
+they exist. So the claim rules enter its "How to read a sentence" list only — they change
+which status a sentence is read as, and the engine computes any disagreement as before.
+Proportion is not carried at all: it is about a section's length, not a conclusion's
+status, and has no place in a per-conclusion reading.
+
+**Why no gate.** Whether a verb is licensed depends on the design, and whether a
+limitation bites depends on the result it names; neither is a property of the tokens. A
+phrase list would flag "effect" in a randomized trial and pass "was responsible for" in an
+observational one. Same argument as §12.1. The advisory reviewer and the human remain the
+check, and §13.1 is the evidence that check is needed.
+
 ---
 
-Version: 1.0 (§13 records the first outside test: two findings open, one fixed)
+Version: 1.1 (§14 extends the author protocol from words to claims)
 Source: author reading report + framing correction + the submission-boundary objection +
 the definition-over-enumeration correction, 2026-08-31.

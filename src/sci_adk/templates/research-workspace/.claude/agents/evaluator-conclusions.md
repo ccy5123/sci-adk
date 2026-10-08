@@ -101,6 +101,19 @@ author probably meant, and not what the record says.
   from" assert less than "shows", "establishes", "demonstrates".
 - Scope is content: a claim restricted to the tested range asserts less than the
   same claim stated generally.
+- Causal words are content: "caused", "drove", "led to", "due to", and the nouns
+  "effect", "driver", "role" assert a mechanism, which is more than "was associated
+  with" or "was higher in". Read them as asserting that mechanism, and read the
+  frozen method plan (`method` in `spec.json`) to know whether the design could license it;
+  if it could not, the sentence asserts more than the record carries, and my
+  reading says so in its `basis`.
+- A claim followed by a softening sentence ("..., although these results should
+  be interpreted with caution") is one assertion, not two. Read the pair as a
+  skeptical peer would — usually as the strong claim with a disclaimer that
+  retracts nothing — and name both halves in the `basis`.
+- Stacked hedges ("may potentially suggest a possible role") assert almost
+  nothing. If nothing is left after the hedges, that is a weaker reading, not a
+  safe one.
 - A sentence that reports a number without saying what follows from it asserts
   nothing — that is a real reading, and often the right one for a paper that has
   gone quiet. Record it as the status it actually supports, or *cannot tell*.

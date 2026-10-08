@@ -203,6 +203,90 @@ will refuse if it did not. And **read the opening cold**: the abstract and the f
 paragraphs are where an unexplained term does the most damage and where it is most often
 left in place.
 
+### Claim no more than the record shows
+
+The second way a paper fails its reader is a claim stated more strongly than the evidence
+carries, or buried under more apparatus than the evidence earns. This is not a ban on
+caveats: a caveat that changes how a specific result should be read stays, next to that
+result.
+
+**Verbs follow the design.** Every verb and noun that asserts cause, mechanism or
+generality must be licensed by something the paper itself shows — and the design is
+recorded: the method plan (`method`) and each hypothesis's decision rule in the frozen
+`spec.json`.
+
+- Descriptive or observational design: "increased", "was higher in", "was associated
+  with", "was observed", "co-occurred with". Stop there.
+- Causal language — "caused", "drove", "led to", "reduced" (transitive), "due to",
+  "because of", and the nouns "effect", "impact", "driver", "role" — only where the
+  design supports it: a controlled experiment, randomization, or a causal identification
+  strategy stated in the methods.
+- "Demonstrates" and "shows" only for what the data directly display. A mechanism the
+  data are consistent with is "consistent with", once — not "suggests", "indicates" and
+  "points to" in turn.
+- Scope words follow the sample. Twelve cases measured under two conditions support a
+  statement about those twelve cases under those two conditions, not about the class
+  they were drawn from.
+
+**One claim, one position.** Do not state a claim and walk it back in the next sentence.
+
+- Uncertainty goes inside the claim, as numbers: range, interval, n, detection limit.
+  "The difference was 0.42 (95% CI 0.18–0.66, n = 31)" replaces "The difference was
+  positive, although considerable variability was observed."
+- Stacked hedges ("may potentially suggest a possible role") mean the sentence has
+  nothing left to say. Find the one defensible statement or delete it.
+- What the work does not show and the reader does not need: leave it out.
+- Stock softeners are deleted on sight: "It should be noted that", "These results should
+  be interpreted with caution", "Further research is needed", "Importantly", "Notably";
+  in Korean, "~일 가능성을 배제할 수 없다", "해석에 주의가 필요하다", "향후 추가 연구가
+  필요하다".
+
+A null or refuted result is stated as plainly as a supported one — understating is a
+defect too, and the conclusion reviewer reads in both directions.
+
+**Proportion.** Each part earns its length from the results.
+
+- Limitations: only those that would change how a reader interprets a specific result,
+  or that a competent reviewer at this venue would raise. Name the result each one
+  limits; usually one to three. Limitations true of every study of this kind are cut
+  unless they bite on a stated conclusion. The limitations text is shorter than the
+  results it qualifies.
+- Implications: only those that follow directly from a result and that this venue's
+  reader would act on.
+- Future work: at most one sentence, naming the measurement or analysis that would
+  settle a specific open question these results raise. Otherwise none.
+- Methods: enough to reproduce, nothing more. Cite standard procedures instead of
+  narrating them; report software as name, version and non-default settings. The full
+  record is already in `record.tex` — the paper does not repeat it.
+
+Where the venue mandates a section (a required "Limitations" heading in `pubreqs.json`),
+write it and hold its contents to the same test.
+
+**Deletion is the method.** When a sentence needs a hedge to be true, write the hedged
+version and ask whether it still tells the reader anything; if not, delete it. The same
+goes for sentences that exist to look careful: a result restated in softer words, an
+objection nobody raised answered anyway, a closing summary at the end of each section.
+
+**A hedge is not the fix** — the third of the non-fixes above. Keeping the strong verb
+and adding "may", or appending a caution sentence, leaves the overclaim in place and adds
+a retraction on top. Downgrade the claim to what the design supports, or delete it.
+
+**Order of work before render:**
+
+1. List the terms this venue's reader would not know; sort them into field vocabulary
+   (keep, expand once), cross-disciplinary (define in place), invented here (remove).
+2. Rewrite the passages holding invented terms — passage by passage, not word by word.
+3. Mark every verb and noun in the abstract, results and conclusions that asserts cause,
+   mechanism or generality; check each against the recorded design. Downgrade or delete.
+4. Merge every claim-plus-softener pair into one claim with its uncertainty as numbers.
+5. Tie every limitation, implication and future-work sentence to a specific result;
+   delete the rest.
+6. Strip narrated standard procedures and default settings from the methods.
+7. Run `verify` — it re-checks every number and every declared conclusion against the
+   record.
+8. Read the opening and the closing cold. In both, every sentence is either the question
+   or a finding; delete the rest.
+
 ### Render
 
 `sci-adk render` is the ONLY way to produce the paper artifacts — do not hand-write
