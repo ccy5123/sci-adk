@@ -46,7 +46,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.declarations import load_declarations, load_review
@@ -254,9 +254,16 @@ class VerifyReport:
         deposit_complete: True iff the deposit carries both record-side elements (i.e.
             ``deposit_problems`` is empty). The record-side companion to the belief-side
             ``paper_*_clean`` flags.
+        search_log_problems: every ``found_nothing`` NOVELTY_DECISION whose recorded search
+            log (``Provenance.search_log``) shows fewer than two distinct indexes that
+            answered (design/parallel-literature-search.md §4.4). A decision with NO log is
+            not listed here -- it gets a non-blocking line in ``paper_advisory`` instead, so
+            runs recorded before the log existed keep passing. EMPTY when clean.
+        search_log_clean: True iff ``search_log_problems`` is empty. Part of the HARD gate.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
-            declarations_clean and paper_cross_doc_clean and paper_requirements_clean``.
+            declarations_clean and paper_cross_doc_clean and paper_requirements_clean and
+            search_log_clean``.
             This is what the CLI exits
             on; ``all_reproduced`` alone is the claim signal.
     """
@@ -282,6 +289,8 @@ class VerifyReport:
     paper_advisory: List[str] = field(default_factory=list)
     deposit_problems: List[str] = field(default_factory=list)
     deposit_complete: bool = field(default=True)
+    search_log_problems: List[str] = field(default_factory=list)
+    search_log_clean: bool = field(default=True)
     passed: bool = field(default=False)
 
 
@@ -520,6 +529,12 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     deposit_problems = deposit_completeness_problems(deposit_record_path(run_dir))
     deposit_complete = not deposit_problems
 
+    # Search-log gate (design/parallel-literature-search.md §4.4): a found_nothing novelty
+    # decision whose recorded log shows fewer than two indexes that answered fails the run;
+    # one with no log at all is an advisory line only. READ-ONLY, no LLM.
+    search_log_problems, search_log_notes = _check_search_logs(novelty_decisions)
+    search_log_clean = not search_log_problems
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -539,9 +554,11 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_cross_doc_clean=paper_cross_doc_clean,
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
-        paper_advisory=paper_advisory + conclusion_review_notes,
+        paper_advisory=paper_advisory + conclusion_review_notes + search_log_notes,
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
+        search_log_problems=search_log_problems,
+        search_log_clean=search_log_clean,
         passed=(
             all_reproduced
             and paper_consistent
@@ -551,6 +568,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             and declarations_clean
             and paper_cross_doc_clean
             and paper_requirements_clean
+            and search_log_clean
         ),
     )
 
@@ -993,6 +1011,84 @@ def _conclusion_review_advisory(run_dir: Path) -> List[str]:
             "there is nothing to compare it against."
         ]
     return declaration_disagreements(declarations, review)
+
+
+# Fewest distinct indexes that must have answered before a found_nothing stands on record.
+_MIN_OK_INDEXES_FOR_FOUND_NOTHING = 2
+
+
+# @MX:NOTE: [AUTO] Two-index rule for a recorded null (design/parallel-literature-search.md
+# §4.4). found_nothing + a log with < 2 distinct answering indexes = HARD failure;
+# found_nothing + NO log = advisory only, so runs recorded before the log keep passing.
+# Judged per {hypothesis, kind}, like derive_novelty_status: one sound found_nothing
+# clears the group, because the append-only record can never drop an earlier weak one.
+# Gates NOVELTY_DECISION only; prior-work/inquiry/contested logs are stored, not gated.
+def _check_search_logs(
+    novelty_decisions: List[EvidenceItem],
+) -> Tuple[List[str], List[str]]:
+    """Return ``(problems, advisory)`` over the ``found_nothing`` novelty decisions.
+
+    Decisions are grouped by ``{hypothesis, kind}``, the unit a novelty claim derives
+    from (``derive_novelty_status``: SUPPORTED iff ANY found_nothing of that unit). A
+    group with at least one decision whose log shows two or more distinct answering
+    indexes (case-insensitive, ``status: ok``) is clean, whatever else it holds -- the
+    record is append-only, so re-searching soundly must be able to clear an earlier weak
+    null. Otherwise:
+
+    ``problems`` (gated): each decision whose log shows fewer than two answering indexes
+    -- a null that one index produced is not a search of the literature.
+    ``advisory`` (never gated): each decision with no search log, so how the null was
+    produced is not on record.
+
+    ``found_something`` decisions are not checked: prior art found on one index suffices.
+    """
+    groups: Dict[Tuple[str, str], List[EvidenceItem]] = {}
+    for ev in novelty_decisions:
+        decision = ev.literature_decision
+        if decision is None or decision.outcome != "found_nothing":
+            continue
+        groups.setdefault((decision.hypothesis_id, decision.kind), []).append(ev)
+
+    def _sound(ev: EvidenceItem) -> bool:
+        log = ev.provenance.search_log
+        return log is not None and len(log.ok_indexes()) >= _MIN_OK_INDEXES_FOR_FOUND_NOTHING
+
+    problems: List[str] = []
+    advisory: List[str] = []
+    for group in groups.values():
+        if any(_sound(ev) for ev in group):
+            continue
+        for ev in group:
+            _append_search_log_finding(ev, problems, advisory)
+    return problems, advisory
+
+
+def _append_search_log_finding(
+    ev: EvidenceItem, problems: List[str], advisory: List[str]
+) -> None:
+    """Report one unsound found_nothing decision: a problem if logged, advisory if not."""
+    decision = ev.literature_decision
+    where = (
+        f"{decision.kind}-novelty found_nothing for hypothesis "
+        f"'{decision.hypothesis_id}' (evidence {ev.id})"
+    )
+    log = ev.provenance.search_log
+    if log is None:
+        advisory.append(
+            f"search log: {where} has no search log -- which indexes and queries "
+            "produced the null is not on record (record it with --search-log)."
+        )
+        return
+    answered = sorted(log.ok_indexes())
+    failed = sorted(
+        {q.index.lower() for q in log.queries if q.status == "failed"} - set(answered)
+    )
+    problems.append(
+        f"search log: {where} rests on {len(answered)} index(es) that answered "
+        f"({', '.join(answered) or 'none'}; failed: {', '.join(failed) or 'none'})"
+        f" -- a recorded null needs at least {_MIN_OK_INDEXES_FOR_FOUND_NOTHING}. "
+        "Query another index and re-record, or record the search as skipped."
+    )
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> List[str]:

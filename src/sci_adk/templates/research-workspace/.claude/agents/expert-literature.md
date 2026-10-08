@@ -78,9 +78,11 @@ not answer, and `found_nothing` as a recorded result. The essentials:
   manufactures a false `found_nothing`.
 - Record the search date — the novelty decision is "as of <date>", and the engine later
   renders an honest "to our knowledge, as of <search date>" scope from it.
-- An index that refuses or errors was not searched. Report which indexes and query
-  strings were used, and which failed, in the `Sources:` list you return; an unavailable
-  index never excuses skipping the search.
+- An index that refuses or errors was not searched. Write which indexes and query
+  strings were used, and which failed, to the search log passed with `--search-log`
+  (`verify` fails a `found_nothing` with fewer than two indexes that answered), and list
+  them in the `Sources:` list you return; an unavailable index never excuses skipping
+  the search.
 
 ## Frozen-Spec Reference
 

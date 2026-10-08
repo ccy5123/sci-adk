@@ -1,6 +1,7 @@
 # Parallel literature search
 
-> Status: **v0.1 DRAFT (2026-10-08)** — design only; nothing here is built.
+> Status: **v0.2 (2026-10-08)** — §4.4 (the search log) is built and §6 decisions 1–2
+> are taken. Parallel searchers (§4.1–4.3) and decision 3 remain a proposal.
 > Cross-references: `design/literature-acquisition.md` (discovery is the agent's job,
 > acquisition is `paperforge`; the trigger model and `found_nothing` as a recorded null),
 > the workspace skill `science-tool-academic-search` (how one search is conducted).
@@ -93,16 +94,36 @@ The orchestrator, alone and in sequence, after all searchers return:
 3. Calls `sci-adk novelty --hypothesis <h> --kind <k> --searched <dois> --outcome ...
    --search-log <notes files>` (see 4.4), then moves to the next unit.
 
-### 4.4 Engine change needed
+### 4.4 Engine change (implemented)
 
-Add `--search-log <file...>` to `prior-work`, `novelty`, `contested` and `inquiry`. The
-verb validates each file against the 4.2 schema and stores the `queries` list and
-`searched_at` on the decision item (a new optional field on `LiteratureDecision`, or on
-`Provenance`). `verify` can then check that every `found_nothing` was produced by at
-least two indexes that answered. That check is the main gain of this design and closes
-the gap in §2 whether or not searches run in parallel.
+`prior-work`, `novelty`, `contested` and `inquiry` accept `--search-log <file...>` on the
+searched path only (refused with `--skip`, and on `contested` without `--searched`). Each
+file is validated against the 4.2 schema (`src/sci_adk/core/search_log.py`: unknown
+fields, an empty `queries` list, a status other than `ok`/`failed`, or a `searched_at`
+that is not ISO-8601 UTC are refused) before anything is acquired or written. For
+`novelty` and `contested`, a file's `hypothesis_id`/`kind`, when present, must match
+`--hypothesis`/`--kind`. A refused log records nothing.
 
-The flag stays optional so existing runs and single-agent use keep working.
+The decision item stores the log on `Provenance.search_log`: one `searched_at` per file,
+and the `queries` and `candidates` of all files concatenated in file order. The field is
+optional; evidence written before it existed loads unchanged.
+
+`verify` applies a two-index rule to every novelty decision with outcome `found_nothing`:
+
+- a log in which fewer than two distinct indexes (case-insensitive) answered a query
+  (`status: ok`) fails the run (`VerifyReport.search_log_problems`, part of `passed`);
+- no log at all produces one advisory line naming the hypothesis and kind
+  (`VerifyReport.paper_advisory`); it never affects `passed`, so runs recorded before the
+  flag existed keep passing.
+
+The rule is judged per {hypothesis, kind}, the unit a novelty claim derives from
+(`derive_novelty_status`: SUPPORTED if ANY `found_nothing` of that unit exists). One
+decision whose log shows two answering indexes clears the unit, whatever else it holds.
+Without this, a weak null recorded early could never be cured: the record is
+append-only, so re-searching soundly and re-recording must be enough.
+
+Prior-work, contested and inquiry decisions have no `found_nothing` outcome; their logs
+are stored and not checked.
 
 ### 4.5 Timing rule
 
@@ -123,14 +144,16 @@ all searchers before step 4.3.
   (`paperforge/orchestrator.py:77`). Whether that is a bottleneck has not been measured;
   it is a separate change in a separate repository.
 
-## 6. Open decisions
+## 6. Decisions
 
-1. Where `queries`/`searched_at` live: on `LiteratureDecision` (hypothesis-bound
-   decisions only) or on `Provenance` (also covers the Spec-bound prior-art decision).
-2. Whether `verify` enforces the two-index rule for `found_nothing` (a gate) or reports it
-   (an advisory). A gate would fail existing runs that recorded nulls without a log.
-3. Whether the redundancy in 4.1 is default or opt-in.
+1. **Decided: on `Provenance`.** This also covers the Spec-bound prior-work decision,
+   which carries no `LiteratureDecision`. Implemented as `Provenance.search_log` (§4.4).
+2. **Decided: a gate when a log exists, an advisory when none does.** A `found_nothing`
+   whose log shows fewer than two answering indexes fails `verify`; a `found_nothing`
+   with no log gets an advisory line, so existing runs are not failed retroactively.
+   Implemented (§4.4).
+3. **Open.** Whether the redundancy in 4.1 is default or opt-in.
 
 ---
 
-Version: 0.1
+Version: 0.2

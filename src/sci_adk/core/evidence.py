@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .search_log import SearchLogRecord
 from .spec import Id
 
 
@@ -189,6 +190,12 @@ class Provenance(BaseModel):
     seed: Optional[int] = Field(default=None, ge=0, description="RNG seed")
     environment: Optional[str] = Field(default=None, description="Toolchain/container versions")
     cost: Optional[Cost] = Field(default=None, description="Resource cost telemetry")
+    search_log: Optional[SearchLogRecord] = Field(
+        default=None,
+        description="Literature decisions only: how the search was done -- indexes, "
+        "query strings, per-query status, when (design/parallel-literature-search.md "
+        "§4.4). None = not recorded (older runs, or no --search-log given).",
+    )
 
     @model_validator(mode="before")
     def validate_reproducibility_information(self) -> "EvidenceItem":

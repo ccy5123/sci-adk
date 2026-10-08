@@ -53,6 +53,7 @@ from sci_adk.core.evidence import (
     LiteratureDecision,
     Provenance,
 )
+from sci_adk.core.search_log import SearchLogRecord
 from sci_adk.core.spec import Spec
 from sci_adk.loop.decision_record import write_decision_evidence
 from sci_adk.loop.literature_acquirer import AcquisitionOutcome, LiteratureAcquirer
@@ -106,6 +107,7 @@ def record_novelty_searched(
     dois: Sequence[str],
     found: Literal["nothing", "something"],
     adapter: Optional[PaperforgeAdapter] = None,
+    search_log: Optional[SearchLogRecord] = None,
     email: Optional[str] = None,
     target_id: Optional[str] = None,
     allow_no_email: bool = False,
@@ -157,6 +159,7 @@ def record_novelty_searched(
                      f"manifest={lit.result.artifact_ref or ''}",
             environment=f"novelty decision (High trigger, {kind}-novelty); "
                         "see referenced LITERATURE item for the acquired corpus",
+            search_log=search_log,
         ),
         id_prefix="evi-nov-decision",
         literature_decision=LiteratureDecision(
@@ -312,6 +315,7 @@ def record_contested(
     reason_or_note: str = "",
     dois: Optional[Sequence[str]] = None,
     adapter: Optional[PaperforgeAdapter] = None,
+    search_log: Optional[SearchLogRecord] = None,
     email: Optional[str] = None,
     allow_no_email: bool = False,
     config_root: Optional[Path] = None,
@@ -364,6 +368,7 @@ def record_contested(
             code_ref="contested:record",
             data_ref=data_ref,
             environment="contested record (Medium trigger); recording, not searching",
+            search_log=search_log,
         ),
         id_prefix="evi-con-record",
         literature_decision=LiteratureDecision(

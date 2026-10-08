@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind, Provenance
+from sci_adk.core.search_log import SearchLogRecord
 from sci_adk.core.spec import Spec
 from sci_adk.loop.decision_record import write_decision_evidence
 from sci_adk.loop.literature_acquirer import AcquisitionOutcome, LiteratureAcquirer
@@ -189,6 +190,7 @@ def record_prior_work_searched(
     *,
     dois: Sequence[str],
     adapter: Optional[PaperforgeAdapter] = None,
+    search_log: Optional[SearchLogRecord] = None,
     email: Optional[str] = None,
     target_id: Optional[str] = None,
     allow_no_email: bool = False,
@@ -253,6 +255,7 @@ def record_prior_work_searched(
                      f"manifest={lit.result.artifact_ref or ''}",
             environment="prior-work decision (Spec-time trigger); "
                         "see referenced LITERATURE item for the acquired corpus",
+            search_log=search_log,
         ),
     )
     return outcome

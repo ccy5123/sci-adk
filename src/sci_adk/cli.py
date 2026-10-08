@@ -56,10 +56,60 @@ import json
 import sys
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
+from typing import Optional
 
 from sci_adk.core.spec import Spec
 from sci_adk.loop.checkpoint_loop import run_checkpoint_loop
 from sci_adk.loop.compiler import ResearchCompiler
+
+
+def _add_search_log_arg(parser: argparse.ArgumentParser) -> None:
+    """``--search-log FILE [FILE ...]`` for the literature-decision verbs (searched path)."""
+    parser.add_argument(
+        "--search-log", nargs="+", metavar="FILE", default=None,
+        help="searched path only: search-log JSON file(s) recording HOW the search was "
+             "done (searched_at, queries[{index, query, status ok|failed}], candidates). "
+             "Validated before anything is acquired or written; stored on the decision. "
+             "`verify` fails a novelty found-nothing whose log shows fewer than two "
+             "indexes that answered (design/parallel-literature-search.md §4.4)",
+    )
+
+
+def _load_search_log_arg(
+    args: argparse.Namespace,
+    *,
+    searched: bool,
+    hypothesis_id: Optional[str] = None,
+    kind: Optional[str] = None,
+):
+    """Validate ``--search-log`` BEFORE any acquisition or write (fail-closed).
+
+    Returns ``(record_or_None, None)`` on success, or ``(None, 2)`` after printing a clean
+    error -- the flag on a non-searched path, an unreadable/invalid file, or a file whose
+    ``hypothesis_id``/``kind`` disagrees with the decision being recorded.
+    """
+    paths = getattr(args, "search_log", None)
+    if not paths:
+        return None, None
+    if not searched:
+        print("error: --search-log is only valid on the searched path (--searched); "
+              "a skipped or note-only decision ran no search to log", file=sys.stderr)
+        return None, 2
+    from sci_adk.core.search_log import load_search_logs, search_log_target_mismatches
+
+    paths = [Path(p) for p in paths]
+    try:
+        files, record = load_search_logs(paths)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return None, 2
+    mismatches = search_log_target_mismatches(
+        paths, files, hypothesis_id=hypothesis_id, kind=kind)
+    if mismatches:
+        for line in mismatches:
+            print(f"error: {line}", file=sys.stderr)
+        return None, 2
+    return record, None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -213,6 +263,8 @@ def build_parser() -> argparse.ArgumentParser:
              "searched path requires a contact email (arg/config/$UNPAYWALL_EMAIL)",
     )
 
+    _add_search_log_arg(prior_work)
+
     inquiry = sub.add_parser(
         "inquiry",
         help="record a mid-research emergent-question literature decision (the ad-hoc "
@@ -249,6 +301,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="searched path only: proceed with DEGRADED Open-Access acquisition when "
              "no contact email is set (default: refuse and halt)",
     )
+
+    _add_search_log_arg(inquiry)
 
     novelty = sub.add_parser(
         "novelty",
@@ -296,6 +350,8 @@ def build_parser() -> argparse.ArgumentParser:
              "email is set (default: refuse and halt)",
     )
 
+    _add_search_log_arg(novelty)
+
     contested = sub.add_parser(
         "contested",
         help="record the post-conflict literature decision for a CONTESTED hypothesis "
@@ -322,6 +378,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="searched path only: proceed with DEGRADED OA acquisition when no contact "
              "email is set (default: refuse and halt)",
     )
+
+    _add_search_log_arg(contested)
 
     add_lit = sub.add_parser(
         "add-literature",
@@ -1713,6 +1771,19 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         # IMRaD. Surfaced here, NEVER gated (not in report.passed).
         for note in report.paper_advisory:
             print(f"  publishing advisory: {note} (advisory only -- not gated)")
+    else:
+        # No contract: the per-run advisories (e.g. a found-nothing with no search log)
+        # still reach the reader. Never gated.
+        for note in report.paper_advisory:
+            print(f"  advisory: {note} (advisory only -- not gated)")
+
+    # Search-log gate (design/parallel-literature-search.md §4.4): a novelty found-nothing
+    # whose recorded log shows fewer than two indexes that answered fails the combined gate.
+    if not report.search_log_clean:
+        print("  search log FAILED (a recorded null rests on fewer than two indexes):",
+              file=sys.stderr)
+        for problem in report.search_log_problems:
+            print(f"    - {problem}", file=sys.stderr)
 
     # SPEC-SI-AUTHORING-001 M2 (Pillar C): the RECORD-side deposit-completeness channel --
     # the retained record artifact + a "Data & code availability" statement. Surfaced here,
@@ -1757,6 +1828,10 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
         record_prior_work_skip,
     )
 
+    search_log, rc = _load_search_log_arg(args, searched=bool(args.searched))
+    if rc is not None:
+        return rc
+
     if args.skip:
         if not args.reason or not args.reason.strip():
             print("error: --skip requires a non-empty --reason (a skipped "
@@ -1778,7 +1853,7 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
     try:
         outcome = record_prior_work_searched(
             spec, workspace, dois=args.searched, target_id=args.target_id,
-            allow_no_email=args.allow_no_email)
+            allow_no_email=args.allow_no_email, search_log=search_log)
     except ConfigHalt as e:
         # The generic config message names the env var + config file; add the verb's
         # own escape hatch so the user sees every way to proceed.
@@ -1818,6 +1893,10 @@ def _cmd_inquiry(args: argparse.Namespace) -> int:
 
     from sci_adk.loop.inquiry import record_inquiry_searched, record_inquiry_skip
 
+    search_log, rc = _load_search_log_arg(args, searched=bool(args.searched))
+    if rc is not None:
+        return rc
+
     if args.skip:
         if not args.reason or not args.reason.strip():
             print("error: --skip requires a non-empty --reason (a skipped emergent "
@@ -1840,7 +1919,8 @@ def _cmd_inquiry(args: argparse.Namespace) -> int:
     try:
         outcome = record_inquiry_searched(
             spec, workspace, question=args.question, dois=args.searched,
-            target_id=args.target_id, allow_no_email=args.allow_no_email)
+            target_id=args.target_id, allow_no_email=args.allow_no_email,
+            search_log=search_log)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -1884,6 +1964,11 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
         record_novelty_skip,
     )
 
+    search_log, rc = _load_search_log_arg(
+        args, searched=bool(args.searched), hypothesis_id=args.hypothesis, kind=args.kind)
+    if rc is not None:
+        return rc
+
     if args.skip:
         if not args.reason or not args.reason.strip():
             print("error: --skip requires a non-empty --reason (a skipped novelty "
@@ -1912,7 +1997,8 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
     try:
         outcome = record_novelty_searched(
             spec, workspace, hypothesis_id=args.hypothesis, kind=args.kind,
-            dois=args.searched, found=found, allow_no_email=args.allow_no_email)
+            dois=args.searched, found=found, allow_no_email=args.allow_no_email,
+            search_log=search_log)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
@@ -1953,6 +2039,11 @@ def _cmd_contested(args: argparse.Namespace) -> int:
 
     from sci_adk.loop.literature_triggers import record_contested
 
+    search_log, rc = _load_search_log_arg(
+        args, searched=bool(args.searched), hypothesis_id=args.hypothesis)
+    if rc is not None:
+        return rc
+
     # The searched path uses the polite pool, so it honors the contact-email policy.
     from sci_adk.config import ConfigHalt
 
@@ -1960,7 +2051,7 @@ def _cmd_contested(args: argparse.Namespace) -> int:
         item = record_contested(
             spec, workspace, hypothesis_id=args.hypothesis,
             reason_or_note=args.note or "", dois=args.searched,
-            allow_no_email=args.allow_no_email)
+            allow_no_email=args.allow_no_email, search_log=search_log)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",

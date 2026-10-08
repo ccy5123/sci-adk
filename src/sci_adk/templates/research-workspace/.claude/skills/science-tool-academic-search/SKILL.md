@@ -119,10 +119,28 @@ skipped-over gap.
 
 An index that refuses (HTTP 429), times out or errors was NOT searched. Do not count it
 toward a `found_nothing`. Retry it once later in the session; if it still fails, carry on
-with the others and report, in the `Sources:` list you return, which indexes were
-queried, with which query strings, and which failed. The recording verbs do not yet
-store this, so that list is the only trace — never omit it. An unavailable index weakens
-coverage; it never excuses skipping the search or recording a hollow `found_nothing`.
+with the others. An unavailable index weakens coverage; it never excuses skipping the
+search or recording a hollow `found_nothing`.
+
+Record how the search was done. Write a search log to
+`runs/<id>/literature/search-notes/<hypothesis>-<kind>.json` and pass it to the recording
+verb with `--search-log <file>` (accepted by `prior-work`, `novelty`, `contested` and
+`inquiry`, searched path only). The file is one JSON object:
+
+- `hypothesis_id`, `kind` (`result` | `method`) — must match `--hypothesis` / `--kind`
+  when given; leave them out for a prior-work search.
+- `searched_at` — ISO-8601 UTC, e.g. `2026-10-08T05:12:44Z`.
+- `queries` — every query sent, failed ones included:
+  `{"index": "openalex", "query": "<exact string>", "status": "ok" | "failed",
+  "n_results": 12, "detail": "HTTP 429"}` (`n_results`, `detail` optional).
+- `candidates` — `{"doi", "title", "relevance": "same" | "related" | "unrelated",
+  "basis": "<what matches or differs>"}`; may be empty.
+- `proposed_outcome` — optional, `found-nothing` | `found-prior-art`.
+
+The verb refuses a malformed log and records nothing. `sci-adk verify` FAILS a novelty
+`found_nothing` whose log shows fewer than two distinct indexes that answered
+(`status: ok`); with one index answering, query another or do not record a null. Still list
+the indexes and queries in the `Sources:` list you return.
 
 ### Re-search only on amendment
 

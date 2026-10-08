@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind, Provenance
+from sci_adk.core.search_log import SearchLogRecord
 from sci_adk.core.spec import Spec
 from sci_adk.loop.decision_record import write_decision_evidence
 from sci_adk.loop.literature_acquirer import AcquisitionOutcome, LiteratureAcquirer
@@ -105,6 +106,7 @@ def record_inquiry_searched(
     question: str,
     dois: Sequence[str],
     adapter: Optional[PaperforgeAdapter] = None,
+    search_log: Optional[SearchLogRecord] = None,
     email: Optional[str] = None,
     target_id: Optional[str] = None,
     allow_no_email: bool = False,
@@ -157,6 +159,7 @@ def record_inquiry_searched(
                      f"manifest={lit.result.artifact_ref or ''}",
             environment="emergent-question decision (mid-research trigger); "
                         "see referenced LITERATURE item for the acquired corpus",
+            search_log=search_log,
         ),
         id_prefix=_ID_PREFIX,
     )
