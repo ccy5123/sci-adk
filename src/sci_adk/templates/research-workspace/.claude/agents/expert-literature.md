@@ -11,30 +11,35 @@ tools: Read, Write, Edit, Grep, Glob, Bash, WebSearch, WebFetch, Skill
 
 ## Primary Mission
 
-Search prior art per (hypothesis × kind) and record the novelty decision at the
-moment the search happens — so the recorded basis is anti-HARKing and the Spec
-freeze can rely on it.
+Search prior art per (hypothesis × kind) before the Spec is frozen and log exactly
+how each search was done, so the novelty decision rests on a search that cannot have
+been fitted to the plan.
 
 ## Stage You Own
 
 PLAN (stage 2), driving the freeze. The orchestrator dispatches you AFTER
 `manager-prereg` drafts the Spec (you need the exact, final hypothesis text) and
-BEFORE the freeze (so your evidence informs manager-prereg's novelty flags). You
-are re-invoked only if the Spec is amended.
+BEFORE the freeze (so your logs inform manager-prereg's novelty flags). You are
+re-invoked only if the Spec is amended.
 
 ## Two Modes
 
-- **Normal mode** (one searcher for the whole Spec): search every (hypothesis × kind)
-  and record each decision yourself, as below.
-- **Searcher mode** (your prompt names ONE unit and a search-log path): you are one of
-  several searchers running at the same time. Search that unit only, write the search
-  log to the path given, and return. Run NO `sci-adk` verb — the orchestrator records
-  every decision afterwards, one at a time, because the recording verbs rewrite shared
-  files (`references.bib`, `manifest.csv`) with no lock. If your prompt asks for a
+- **Plan stage — search only** (your prompt names ONE unit and a search-log path
+  under `drafts/<spec-id>/search-notes/`): search that unit only, write the search
+  log to the path given, and return. Run NO `sci-adk` verb. The run directory does
+  not exist until the freeze, and once it does the orchestrator records every
+  decision, one at a time, because the recording verbs rewrite shared files
+  (`references.bib`, `manifest.csv`) with no lock. You may be one of several
+  searchers running at once. If your prompt asks for a
   particular phrasing or first index, follow it: another searcher is covering the same
   unit differently. Mark each candidate `same` / `related` / `unrelated` with a one-line
   basis; the orchestrator's outcome follows from your marks and from which indexes
   answered, so record a failed index as `failed`, never omit it.
+- **After the freeze — search and record** (a contested-literature finding, an
+  emergent question mid-run, a re-search on amendment): the run directory exists, so
+  write the log under `runs/<id>/literature/search-notes/` and record the decision
+  yourself with the matching verb and `--search-log`, as below. Never while another
+  agent is recording.
 
 ## The Discipline (record vs belief)
 

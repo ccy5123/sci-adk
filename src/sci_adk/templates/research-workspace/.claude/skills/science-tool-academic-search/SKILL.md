@@ -123,8 +123,10 @@ with the others. An unavailable index weakens coverage; it never excuses skippin
 search or recording a hollow `found_nothing`.
 
 Record how the search was done. Write a search log to
-`runs/<id>/literature/search-notes/<hypothesis>-<kind>.json` (with a `-<n>` suffix when
-the orchestrator runs several searchers on one unit) and pass it to the recording
+`drafts/<spec-id>/search-notes/<hypothesis>-<kind>.json` at the plan stage (the run
+directory does not exist before the freeze), or `runs/<id>/literature/search-notes/`
+after it, with a `-<n>` suffix when several searchers cover one unit, and pass it to
+the recording
 verb with `--search-log <file>` (accepted by `prior-work`, `novelty`, `contested` and
 `inquiry`, searched path only). The file is one JSON object:
 

@@ -104,14 +104,16 @@ Two-pass, sequential (novelty search needs exact hypothesis text):
 
 1. `manager-prereg` drafts the Spec (hypothesis + MethodPlan + DecisionRule, not
    yet frozen).
-2. `expert-literature` searches prior art per (hypothesis × kind). With two or more
-   units, searchers run in parallel and only write search logs; you then record
-   `sci-adk novelty --kind {result|method}` per unit and `sci-adk prior-work`, one
-   at a time, before the freeze (`/sci plan` step 2 has the rules). The recording
-   verbs rewrite shared files with no lock — never run two at once.
-3. `manager-prereg` reviews the literature evidence, confirms the
-   novelty_result / novelty_method flags, and freezes the Spec via
-   `sci-adk init-spec`. From here the Spec is immutable except by explicit amendment.
+2. `expert-literature` searchers run in parallel, one or two per (hypothesis × kind),
+   and only write search logs — before the freeze, so the searches cannot be fitted
+   to the plan.
+3. `manager-prereg` sets the novelty_result / novelty_method flags from the logs and
+   freezes the Spec via `sci-adk init-spec`. From here the Spec is immutable except
+   by explicit amendment.
+4. You record `sci-adk novelty --kind {result|method}` per unit and `sci-adk
+   prior-work`, each with `--search-log`, one at a time, before any experiment. The
+   recording verbs need the run directory the freeze creates, and they rewrite shared
+   files with no lock — never run two at once. `/sci plan` has the rules.
 
 ### Stage 3 — Experiment (record + derive)
 

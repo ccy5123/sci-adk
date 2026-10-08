@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -531,8 +532,10 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
 
     # Search-log gate (design/parallel-literature-search.md §4.4): a found_nothing novelty
     # decision whose recorded log shows fewer than two indexes that answered fails the run;
-    # one with no log at all is an advisory line only. READ-ONLY, no LLM.
-    search_log_problems, search_log_notes = _check_search_logs(novelty_decisions)
+    # one with no log at all is an advisory line only. A logged search run after the
+    # freeze also fails; a flagged novelty kind with nothing recorded is advisory.
+    # READ-ONLY, no LLM.
+    search_log_problems, search_log_notes = _check_search_logs(novelty_decisions, spec)
     search_log_clean = not search_log_problems
 
     return VerifyReport(
@@ -1022,26 +1025,36 @@ _MIN_OK_INDEXES_FOR_FOUND_NOTHING = 2
 # found_nothing + NO log = advisory only, so runs recorded before the log keep passing.
 # Judged per {hypothesis, kind}, like derive_novelty_status: one sound found_nothing
 # clears the group, because the append-only record can never drop an earlier weak one.
+# Sound = >= 2 answering indexes AND every searched_at at or before the Spec freeze
+# (the verbs need spec.json, so decisions are RECORDED after the freeze; the log is
+# what shows the SEARCH came first). A flagged novelty kind with no found_nothing
+# recorded is an advisory, never gated.
 # Gates NOVELTY_DECISION only; prior-work/inquiry/contested logs are stored, not gated.
 def _check_search_logs(
     novelty_decisions: List[EvidenceItem],
+    spec: Optional[Spec] = None,
 ) -> Tuple[List[str], List[str]]:
     """Return ``(problems, advisory)`` over the ``found_nothing`` novelty decisions.
 
     Decisions are grouped by ``{hypothesis, kind}``, the unit a novelty claim derives
     from (``derive_novelty_status``: SUPPORTED iff ANY found_nothing of that unit). A
-    group with at least one decision whose log shows two or more distinct answering
-    indexes (case-insensitive, ``status: ok``) is clean, whatever else it holds -- the
-    record is append-only, so re-searching soundly must be able to clear an earlier weak
-    null. Otherwise:
+    decision is SOUND when its log shows two or more distinct answering indexes
+    (case-insensitive, ``status: ok``) and, given ``spec``, every ``searched_at`` is at
+    or before ``spec.created_at`` (the freeze). A group with at least one sound decision
+    is clean, whatever else it holds -- the record is append-only, so re-searching
+    soundly must be able to clear an earlier weak null. Otherwise:
 
-    ``problems`` (gated): each decision whose log shows fewer than two answering indexes
-    -- a null that one index produced is not a search of the literature.
+    ``problems`` (gated): each logged decision that is not sound -- a null that one index
+    produced is not a search of the literature, and a search run after the freeze could
+    have been fitted to the pre-registered plan.
     ``advisory`` (never gated): each decision with no search log, so how the null was
-    produced is not on record.
+    produced is not on record; and, given ``spec``, each hypothesis whose
+    ``novelty_result`` / ``novelty_method`` flag is set with no ``found_nothing`` of that
+    kind recorded.
 
     ``found_something`` decisions are not checked: prior art found on one index suffices.
     """
+    frozen_at = _as_utc(spec.created_at) if spec is not None else None
     groups: Dict[Tuple[str, str], List[EvidenceItem]] = {}
     for ev in novelty_decisions:
         decision = ev.literature_decision
@@ -1049,9 +1062,19 @@ def _check_search_logs(
             continue
         groups.setdefault((decision.hypothesis_id, decision.kind), []).append(ev)
 
+    def _late(ev: EvidenceItem) -> List[str]:
+        log = ev.provenance.search_log
+        if log is None or frozen_at is None:
+            return []
+        return [t for t in log.searched_at if _as_utc(_parse_iso(t)) > frozen_at]
+
     def _sound(ev: EvidenceItem) -> bool:
         log = ev.provenance.search_log
-        return log is not None and len(log.ok_indexes()) >= _MIN_OK_INDEXES_FOR_FOUND_NOTHING
+        return (
+            log is not None
+            and len(log.ok_indexes()) >= _MIN_OK_INDEXES_FOR_FOUND_NOTHING
+            and not _late(ev)
+        )
 
     problems: List[str] = []
     advisory: List[str] = []
@@ -1059,12 +1082,37 @@ def _check_search_logs(
         if any(_sound(ev) for ev in group):
             continue
         for ev in group:
-            _append_search_log_finding(ev, problems, advisory)
+            _append_search_log_finding(ev, _late(ev), frozen_at, problems, advisory)
+
+    if spec is not None:
+        for hyp in spec.hypotheses:
+            for kind in ("result", "method"):
+                if getattr(hyp, f"novelty_{kind}", False) and (hyp.id, kind) not in groups:
+                    advisory.append(
+                        f"novelty flag: hypothesis '{hyp.id}' sets novelty_{kind} but no "
+                        f"{kind}-novelty found_nothing is recorded -- record the pre-freeze "
+                        f"search with `sci-adk novelty --kind {kind} ... --search-log` "
+                        "before the experiment."
+                    )
     return problems, advisory
 
 
+def _parse_iso(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp; a trailing ``Z`` is accepted as UTC."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Treat a naive timestamp as UTC so it compares with aware ones."""
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
 def _append_search_log_finding(
-    ev: EvidenceItem, problems: List[str], advisory: List[str]
+    ev: EvidenceItem,
+    late: List[str],
+    frozen_at: Optional[datetime],
+    problems: List[str],
+    advisory: List[str],
 ) -> None:
     """Report one unsound found_nothing decision: a problem if logged, advisory if not."""
     decision = ev.literature_decision
@@ -1080,15 +1128,22 @@ def _append_search_log_finding(
         )
         return
     answered = sorted(log.ok_indexes())
-    failed = sorted(
-        {q.index.lower() for q in log.queries if q.status == "failed"} - set(answered)
-    )
-    problems.append(
-        f"search log: {where} rests on {len(answered)} index(es) that answered "
-        f"({', '.join(answered) or 'none'}; failed: {', '.join(failed) or 'none'})"
-        f" -- a recorded null needs at least {_MIN_OK_INDEXES_FOR_FOUND_NOTHING}. "
-        "Query another index and re-record, or record the search as skipped."
-    )
+    if len(answered) < _MIN_OK_INDEXES_FOR_FOUND_NOTHING:
+        failed = sorted(
+            {q.index.lower() for q in log.queries if q.status == "failed"} - set(answered)
+        )
+        problems.append(
+            f"search log: {where} rests on {len(answered)} index(es) that answered "
+            f"({', '.join(answered) or 'none'}; failed: {', '.join(failed) or 'none'})"
+            f" -- a recorded null needs at least {_MIN_OK_INDEXES_FOR_FOUND_NOTHING}. "
+            "Query another index and re-record, or record the search as skipped."
+        )
+    if late:
+        problems.append(
+            f"search log: {where} was searched at {', '.join(late)}, after the Spec was "
+            f"frozen ({frozen_at.isoformat() if frozen_at else '?'}) -- a novelty null "
+            "must come from a search run before the freeze."
+        )
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> List[str]:

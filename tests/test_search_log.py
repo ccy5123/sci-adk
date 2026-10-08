@@ -489,6 +489,57 @@ def test_verify_unlogged_null_beside_a_sound_one_raises_no_advisory(tmp_path):
     assert not any("search log" in line for line in report.paper_advisory)
 
 
+def _late_record(statuses: list[tuple[str, str]]) -> SearchLogRecord:
+    """A log whose search ran long after any Spec in these tests was frozen."""
+    return SearchLogRecord(
+        searched_at=["2099-01-01T00:00:00Z"],
+        queries=[{"index": idx, "query": "first to show Z", "status": st}
+                 for idx, st in statuses],
+    )
+
+
+def test_verify_found_nothing_searched_after_the_freeze_fails(tmp_path):
+    """The search must precede the freeze, or the null could be fitted to the plan.
+    Recording happens after the freeze (the verbs need spec.json); searched_at is the
+    evidence that the SEARCH did not."""
+    run_dir = _seed_run(tmp_path, "sl-v-late", "found_nothing",
+                        _late_record([("openalex", "ok"), ("arxiv", "ok")]))
+    report = verify_run(run_dir)
+    assert report.passed is False
+    (problem,) = report.search_log_problems
+    assert "after the Spec was frozen" in problem
+    assert "hyp-n" in problem
+
+
+def test_verify_late_null_is_cured_by_a_timely_sound_one(tmp_path):
+    run_dir = _seed_two_decisions(tmp_path, "sl-v-late-cured", [
+        _late_record([("openalex", "ok"), ("arxiv", "ok")]),
+        _record([("openalex", "ok"), ("crossref", "ok")]),
+    ])
+    assert verify_run(run_dir).passed is True
+
+
+def test_verify_flagged_novelty_without_a_found_nothing_record_is_advisory(tmp_path):
+    """novelty_result is set at the freeze from the search logs, then recorded. A flag
+    with no matching found_nothing on record is surfaced, never gated: between the
+    freeze and the recording the gap is legitimate, and a PROPOSED novelty claim is an
+    allowed state."""
+    run_dir = _seed_two_decisions(tmp_path, "sl-v-flag-unrecorded", [])
+    report = verify_run(run_dir)
+    assert report.passed is True
+    lines = [line for line in report.paper_advisory if line.startswith("novelty flag:")]
+    assert len(lines) == 1
+    assert "hyp-n" in lines[0] and "novelty_result" in lines[0]
+
+
+def test_verify_flagged_novelty_with_its_record_raises_no_flag_advisory(tmp_path):
+    run_dir = _seed_two_decisions(tmp_path, "sl-v-flag-recorded", [
+        _record([("openalex", "ok"), ("crossref", "ok")]),
+    ])
+    report = verify_run(run_dir)
+    assert not any(line.startswith("novelty flag:") for line in report.paper_advisory)
+
+
 def test_cli_verify_surfaces_search_log_failure_and_advisory(tmp_path, capsys):
     from sci_adk.cli import main
 

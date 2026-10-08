@@ -40,12 +40,14 @@ verbs and halts) load `Skill("science-foundation-rigor")`; this skill is the HOW
 
 ## Quick Reference (30 seconds)
 
-- **Two passes, sequential**: manager-prereg DRAFTS the Spec → expert-literature
-  searches prior art per (hypothesis × kind) → manager-prereg CONFIRMS the novelty
-  flags and FREEZES via `sci-adk init-spec`.
-- **Why sequential**: the novelty search needs the exact, final hypothesis text. You
-  cannot search before the draft exists, and you cannot freeze before the search
-  records its decision.
+- **Search → freeze → record**: manager-prereg DRAFTS the Spec → expert-literature
+  searches prior art per (hypothesis × kind) and writes search logs → manager-prereg
+  sets the novelty flags from the logs and FREEZES via `sci-adk init-spec` → the
+  orchestrator RECORDS the decisions, before any experiment.
+- **Why this order**: the novelty search needs the exact, final hypothesis text, so it
+  follows the draft; it must precede the freeze so it cannot be fitted to the plan;
+  and the recording verbs need the run directory the freeze creates. The log's
+  `searched_at` is what shows the search came first.
 - **The freeze is the anti-HARKing anchor**: once frozen, the Spec does not change to
   fit the data. A design change after the freeze is an AMENDMENT (a recorded,
   human-checkpointed act), never an in-passing edit.
@@ -59,7 +61,8 @@ A Spec is authored as four panes plus a per-hypothesis DecisionRule:
 1. **RawProposal** — the research goal in the user's own framing.
 2. **Hypotheses[]** — each hypothesis stated precisely, with its `novelty_result` /
    `novelty_method` flags (both default False; a kind is novel only if its own
-   `found_nothing` search lands on record).
+   pre-freeze search found nothing, recorded as `found_nothing` right after the
+   freeze).
 3. **MethodPlan** — how each hypothesis will be tested, INCLUDING the pre-registered
    `bears_on[]` mapping (which result will speak to which hypothesis, and the
    direction). This mapping is fixed now so the experimentalist transcribes it later
@@ -82,14 +85,20 @@ DecisionRule. Do NOT freeze. Return the draft (exact hypothesis text per kind) s
 orchestrator can dispatch the literature search against it.
 
 **Literature pass (expert-literature).** Search prior art per (hypothesis × kind)
-against the draft hypothesis text, as of a recorded search date:
-- `sci-adk prior-work` — records the search + what was found (or none).
-- `sci-adk novelty --kind result` and `sci-adk novelty --kind method` — records the
-  per-kind decision (`found_nothing` or prior-art). The `--kind` flag is REQUIRED;
-  there is no kind-agnostic novelty decision.
+against the draft hypothesis text, BEFORE the freeze, and write a search log per unit
+(`drafts/<spec-id>/search-notes/`, with its `searched_at`). Nothing is recorded yet:
+the recording verbs need `runs/<id>/spec.json`, which only the freeze creates. Return
+a `Sources:` list of surfaced URLs.
+
+**Record (right after the freeze, before any experiment).** From the logs, one at a
+time:
+- `sci-adk novelty --kind result` and `sci-adk novelty --kind method` — the per-kind
+  decision (`found_nothing` or prior-art), each with `--search-log`. The `--kind` flag
+  is REQUIRED; there is no kind-agnostic novelty decision.
+- `sci-adk prior-work` — the Spec-level search + what was found.
 - `sci-adk contested` — if the literature conflicts on the point.
-Record at this trigger moment (pre-registration), never retrofitted. Return a
-`Sources:` list of surfaced URLs.
+The search is never retrofitted: `verify` fails a `found_nothing` whose log was
+searched after the freeze.
 
 **Acquisition halt (some DOI had no OA PDF).** When `prior-work --searched` or
 `novelty --searched` prints `halt (human input needed):` on stderr (a searched DOI
@@ -102,9 +111,11 @@ paper → record the miss as a null and continue. This is how the kernel's
 `AcquisitionHalt` reliably reaches the human instead of depending on the agent
 noticing stderr.
 
-**Pass 2 — freeze (manager-prereg, 2nd call).** Review the literature evidence. Set
-`novelty_result` / `novelty_method` ONLY where a matching `found_nothing` search is
-on record (never auto-carry one kind's result to the other). Each flag gets a
+**Pass 2 — freeze (manager-prereg, 2nd call).** Review the search logs. Set
+`novelty_result` / `novelty_method` ONLY where that unit's logs carry a found-nothing
+outcome — no candidate marked `same`, and at least two distinct indexes answered
+(never auto-carry one kind's result to the other). The matching `found_nothing` is
+recorded right after the freeze; `verify` flags any set flag still without one. Each flag gets a
 one-line recorded basis. Then freeze via `sci-adk init-spec`, which emits
 `spec_id` + `spec_digest` + a checkpoint receipt (S1–S5 enforced). From here the Spec
 is immutable except by explicit amendment.
@@ -147,10 +158,12 @@ amendment, so a weak Spec is never silently accepted. The HARD verdict-gate halt
 
 - `result` and `method` are ORTHOGONAL — search and record each on its own.
 - A `found_nothing` search for one kind NEVER satisfies the other.
-- The flag is anti-HARKing: it is set at pre-registration, from a recorded search,
-  not after seeing whether the experiment "worked".
-- `sci-adk verify` later re-derives the novelty status from the recorded decisions;
-  a flag without a matching `found_nothing` record is a novelty halt.
+- The flag is anti-HARKing: it is set at pre-registration, from a search run before
+  the freeze, not after seeing whether the experiment "worked".
+- `sci-adk verify` re-derives the novelty status from the recorded decisions. It
+  FAILS a `found_nothing` whose log shows fewer than two answering indexes or a search
+  after the freeze, and it reports (never fails) a set flag with no matching
+  `found_nothing` recorded — the novelty claim then stays PROPOSED.
 
 ### Amendment (S5)
 

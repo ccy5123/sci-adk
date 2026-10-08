@@ -121,34 +121,46 @@ needs the exact draft hypothesis text):
 
 1. `Agent(subagent_type: "manager-prereg")` → draft the Spec (goal + hypotheses +
    MethodPlan + per-hypothesis DecisionRule), NOT yet frozen.
-2. **Search in parallel, record in sequence.** Prior-art / novelty search per
+The order is **search → freeze → record**. The searches must run before the freeze, so
+they cannot be fitted to the plan; the recording verbs need `runs/<id>/spec.json`, which
+only the freeze creates, so the decisions are recorded right after it. Each log's
+`searched_at` is what shows the search came first, and `verify` fails a `found_nothing`
+whose log was searched after the freeze.
+
+2. **Search in parallel (before the freeze).** Prior-art / novelty search per
    (hypothesis × kind) against the draft, per the conduct in
    `Skill("science-tool-academic-search")`.
    - **Units.** One unit per (hypothesis × kind) whose novelty flag the draft
-     proposes. No units (no novelty proposed): spawn ONE `expert-literature` in its
-     normal mode for the Spec-level prior-art search and skip the rest of this step.
-   - **Searchers.** Spawn `Agent(subagent_type: "expert-literature")` in SEARCHER mode
-     in a single message (multiple `Agent()` calls), at most 4 at a time (the public
+     proposes. With no units (no novelty proposed), spawn one searcher for the
+     Spec-level prior-art search alone.
+   - **Searchers.** Spawn `Agent(subagent_type: "expert-literature")` searchers in a
+     single message (multiple `Agent()` calls), at most 4 at a time (the public
      indexes rate-limit). With 1 or 2 units, spawn TWO searchers per unit, told to use
      different phrasings and a different first index — with so few units, parallelism
      buys fewer false nulls, not speed. With 3 or more, one per unit. Each searcher's
      prompt names its unit, the exact hypothesis text, and its log path
-     `runs/<id>/literature/search-notes/<hypothesis>-<kind>[-<n>].json`. Searchers run
-     no `sci-adk` verb.
-   - **Recorder (you, sequentially).** After ALL searchers return, per unit read its
-     log file(s):
-     - any candidate marked `same` → `sci-adk novelty --hypothesis <h> --kind <k>
-       --searched <the same DOIs> --outcome found-prior-art --search-log <files>`;
-     - otherwise, if at least 2 distinct indexes answered (`status: ok`) across the
-       unit's logs → `--outcome found-nothing`, passing the `related` DOIs (the
-       nearest work examined) to `--searched`;
+     `drafts/<spec-id>/search-notes/<hypothesis>-<kind>[-<n>].json` (the run
+     directory does not exist yet). Searchers run no `sci-adk` verb.
+   - **Outcome per unit**, from its log file(s), after ALL searchers return:
+     - any candidate marked `same` → **found-prior-art**;
+     - otherwise, at least 2 distinct indexes answered (`status: ok`) across the
+       unit's logs → **found-nothing**;
      - otherwise → re-spawn one searcher for that unit, once; if it still falls
-       short, record `--skip --reason` naming the indexes that failed. Never record a
-       null the logs do not carry.
-     Then record the Spec-level `sci-adk prior-work --searched <all same + related
-     DOIs> --search-log <all log files>`. Do not freeze until every unit is recorded.
-3. `Agent(subagent_type: "manager-prereg")` (2nd call) → review the literature
-   evidence, set `novelty_result` / `novelty_method`, freeze via `sci-adk init-spec`.
+       short, the unit is **not searched** (note the failed indexes for the skip
+       reason). Never call a null the logs do not carry.
+3. `Agent(subagent_type: "manager-prereg")` (2nd call) → give it the outcome per unit
+   and the log paths. It sets `novelty_result` / `novelty_method` ONLY for a unit whose
+   outcome is found-nothing, and freezes via `sci-adk init-spec`.
+4. **Record in sequence (you, right after the freeze, before any experiment).** The
+   recording verbs rewrite shared files with no lock: run them one at a time.
+   - per unit: `sci-adk novelty <run> --hypothesis <h> --kind <k> --searched <DOIs>
+     --outcome {found-prior-art|found-nothing} --search-log <its files>` — pass the
+     `same` DOIs for prior art, or the `related` DOIs (the nearest work examined) for a
+     null; for a unit not searched, `--skip --reason "<indexes that failed>"`;
+   - then the Spec-level `sci-adk prior-work <run> --searched <all same + related
+     DOIs> --search-log <all log files>`.
+   - Then run `sci-adk verify <run>`: a `novelty flag:` advisory means a flagged unit
+     has no `found_nothing` recorded yet — record it before `/sci experiment`.
 
 Return the frozen `spec_id` + `spec_digest` + the novelty flags with their bases.
 

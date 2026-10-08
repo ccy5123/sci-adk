@@ -1,8 +1,8 @@
 # Parallel literature search
 
-> Status: **v0.3 (2026-10-08)** — all of §4 is applied: the search log (§4.4) in the
-> engine, the parallel searchers and the single recorder (§4.1–4.3) in the workspace
-> instructions. §6 decisions all taken. Not yet exercised on a real research run.
+> Status: **v0.4 (2026-10-08)** — §4 applied; §7 records the first real run and the
+> search → freeze → record order it forced, with the two verify checks that replace the
+> old ordering assumption.
 > Cross-references: `design/literature-acquisition.md` (discovery is the agent's job,
 > acquisition is `paperforge`; the trigger model and `found_nothing` as a recorded null),
 > the workspace skill `science-tool-academic-search` (how one search is conducted).
@@ -101,7 +101,10 @@ The orchestrator, alone and in sequence, after all searchers return:
 3. Calls `sci-adk novelty --hypothesis <h> --kind <k> --searched <dois> --outcome ...
    --search-log <notes files>` (see 4.4), then moves to the next unit.
 4. After every unit: one Spec-level `sci-adk prior-work --searched <all same and
-   related DOIs> --search-log <all log files>`. Only then does `manager-prereg` freeze.
+   related DOIs> --search-log <all log files>`.
+
+Corrected by §7: the recorder runs AFTER `manager-prereg` freezes (from the logs), not
+before — the verbs need the run directory the freeze creates.
 
 Applied to the workspace templates: `/sci plan` step 2 (`skills/sci/SKILL.md`),
 `expert-literature` (its searcher mode), `science-orchestrator` Stage 2, and the log path
@@ -127,7 +130,8 @@ optional; evidence written before it existed loads unchanged.
   (`status: ok`) fails the run (`VerifyReport.search_log_problems`, part of `passed`);
 - no log at all produces one advisory line naming the hypothesis and kind
   (`VerifyReport.paper_advisory`); it never affects `passed`, so runs recorded before the
-  flag existed keep passing.
+  flag existed keep passing;
+- (added by §7) a log with any `searched_at` after the Spec's `created_at` fails the run.
 
 The rule is judged per {hypothesis, kind}, the unit a novelty claim derives from
 (`derive_novelty_status`: SUPPORTED if ANY `found_nothing` of that unit exists). One
@@ -140,12 +144,11 @@ are stored and not checked.
 
 ### 4.5 Timing rule
 
-The rule is that the search is recorded at the moment it happens, before the Spec is
-frozen, so its result cannot be fitted to experimental outcomes. Parallel search moves
-the recording a few minutes after the search; it does not move it past the freeze, and
-`searched_at` in the notes (stored by 4.4) keeps the actual search time on record. The
-freeze must not start until every unit is recorded — the orchestrator already waits for
-all searchers before step 4.3.
+The search must happen before the Spec is frozen, so its result cannot be fitted to the
+plan or to experimental outcomes. The recording cannot: the verbs need the run
+directory the freeze creates (§7). So the search runs before the freeze, the decision is
+recorded after it and before any experiment, and `searched_at` (stored by 4.4) is what
+`verify` checks against the freeze time.
 
 ## 5. Not proposed
 
@@ -168,6 +171,55 @@ all searchers before step 4.3.
 3. **Decided: automatic for 1–2 units.** Two searchers per unit when there are one or
    two units; one per unit from three. Applied (§4.1).
 
+## 7. First real run (2026-10-08)
+
+A two-hypothesis proposal (one hypothesis with well-known prior art, one unlikely to
+have any) was run through `/sci plan` in a fresh `init-session` workspace
+(`~/research/lit-search-trial`, run `bcf-kow-primecode`), in its own Claude session.
+
+| Check | Result |
+|---|---|
+| units | 3 (the standard-regression method of hypothesis 1 was not claimed novel) → one searcher each, as specified |
+| searchers concurrent | yes in effect (spawned 12 s apart, finished at 15:19 / 15:24 / 15:30), though not in one message |
+| searchers ran no verb | yes |
+| logs | 3–5 answering indexes per unit; every Semantic Scholar refusal logged as `failed` |
+| outcomes | hypothesis 1 result: found_something (six `same` candidates, earliest 1979); hypothesis 2 result and method: found_nothing |
+| recording | one at a time; `references.bib` 55 entries, no duplicate key, braces balanced |
+| unfetchable PDFs (49 of 55) | surfaced to the user, as specified |
+
+**It exposed a contradiction older than this design.** The recording verbs require
+`runs/<id>/spec.json`, which `init-spec` creates. The pre-registration skill, and §4.3
+above, told the agent to record every decision BEFORE the freeze — never possible. The
+session did the only thing it could: froze, then recorded, writing its logs to
+`drafts/` because the run directory did not exist.
+
+**Resolution: search → freeze → record.** The order in the workspace instructions is
+now: searchers write logs under `drafts/<spec-id>/search-notes/` → `manager-prereg`
+sets the novelty flags from the logs and freezes → the orchestrator records each
+decision with `--search-log`, before any experiment. What the old order was meant to
+guarantee — that the search could not be fitted to the plan — is now checked from the
+record instead of assumed from the sequence:
+
+- `verify` FAILS a `found_nothing` whose log has any `searched_at` later than the
+  Spec's `created_at` (the freeze). This joins the two-index rule as a condition of a
+  sound decision, under the same per-{hypothesis, kind} grouping, so a timely sound
+  search still clears an earlier bad one.
+- `verify` REPORTS, without failing, a hypothesis whose `novelty_result` /
+  `novelty_method` is set with no `found_nothing` of that kind recorded. It cannot be a
+  gate: the gap between the freeze and the recording is legitimate, and a PROPOSED
+  novelty claim is an allowed state.
+
+Applied to the trial run, both checks are silent: every search (06:12–06:29 UTC)
+preceded the freeze (06:45:33), and the one set flag has its record.
+
+Two findings outside this design, not addressed here:
+- `init-spec` cannot carry a numeric decision rule; the session froze through a
+  Python call to the same stage function, with the user's approval. Same gap as
+  `design/reader-facing-prose.md` §13.2.
+- `verify` on a run with no claims exits 1 and prints "at least one claim DIVERGED or
+  is UNRESOLVED", which is false when there are none (`loop/verify.py`,
+  `all_reproduced = bool(outcomes) and ...`).
+
 ---
 
-Version: 0.3
+Version: 0.4
