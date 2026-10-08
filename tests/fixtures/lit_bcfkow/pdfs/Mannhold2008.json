@@ -1,0 +1,58 @@
+{
+  "doi": "10.1002/jps.21494",
+  "title": "Calculation of Molecular Lipophilicity: State-of-the-Art and Comparison of LogP Methods on more than 96,000 Compounds",
+  "author": "Mannhold",
+  "year": "2008",
+  "resolution": {
+    "doi": "10.1002/jps.21494",
+    "source": "semantic_scholar",
+    "pdf_url": "https://bmcchem.biomedcentral.com/counter/pdf/10.1186/1752-153X-3-S1-O7",
+    "landing_url": null,
+    "license": "CCBY",
+    "version": null,
+    "host_type": null,
+    "is_oa": true
+  },
+  "attempts": [
+    {
+      "doi": "10.1002/jps.21494",
+      "source": "unpaywall",
+      "pdf_url": null,
+      "landing_url": null,
+      "license": null,
+      "version": null,
+      "host_type": null,
+      "is_oa": false
+    },
+    {
+      "doi": "10.1002/jps.21494",
+      "source": "openalex",
+      "pdf_url": null,
+      "landing_url": null,
+      "license": null,
+      "version": null,
+      "host_type": null,
+      "is_oa": false
+    },
+    {
+      "doi": "10.1002/jps.21494",
+      "source": "europepmc",
+      "pdf_url": null,
+      "landing_url": null,
+      "license": null,
+      "version": null,
+      "host_type": null,
+      "is_oa": false
+    },
+    {
+      "doi": "10.1002/jps.21494",
+      "source": "semantic_scholar",
+      "pdf_url": "https://bmcchem.biomedcentral.com/counter/pdf/10.1186/1752-153X-3-S1-O7",
+      "landing_url": null,
+      "license": "CCBY",
+      "version": null,
+      "host_type": null,
+      "is_oa": true
+    }
+  ]
+}

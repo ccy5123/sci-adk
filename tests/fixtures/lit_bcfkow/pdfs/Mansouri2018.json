@@ -1,0 +1,28 @@
+{
+  "doi": "10.1186/s13321-018-0263-1",
+  "title": "OPERA models for predicting physicochemical properties and environmental fate endpoints",
+  "author": "Mansouri",
+  "year": "2018",
+  "resolution": {
+    "doi": "10.1186/s13321-018-0263-1",
+    "source": "unpaywall",
+    "pdf_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-018-0263-1",
+    "landing_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-018-0263-1",
+    "license": "cc-by",
+    "version": "publishedVersion",
+    "host_type": "publisher",
+    "is_oa": true
+  },
+  "attempts": [
+    {
+      "doi": "10.1186/s13321-018-0263-1",
+      "source": "unpaywall",
+      "pdf_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-018-0263-1",
+      "landing_url": "https://jcheminf.biomedcentral.com/track/pdf/10.1186/s13321-018-0263-1",
+      "license": "cc-by",
+      "version": "publishedVersion",
+      "host_type": "publisher",
+      "is_oa": true
+    }
+  ]
+}

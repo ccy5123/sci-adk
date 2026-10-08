@@ -30,7 +30,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from sci_adk.search.citation_keys import _BIB_DOI_RE, _BIB_ENTRY_RE, _base_key
+from sci_adk.search.citation_keys import _base_key
 
 SI_SUFFIX = "_SI"
 
@@ -94,13 +94,15 @@ def find_recorded_key(literature_dir: Path, doi: str) -> Optional[str]:
     bib = Path(literature_dir) / "references.bib"
     if not bib.exists():
         return None
+    # Lazy import: literature_merge imports this module at load time. Entries are
+    # split brace-depth aware: Crossref writes each entry on one line.
+    from sci_adk.search.literature_merge import parse_bib_entries
+
     target = normalize_doi(doi)
     keys: list[str] = []
-    for m in _BIB_ENTRY_RE.finditer(bib.read_text(encoding="utf-8")):
-        _head, key, body, _tail = m.groups()
-        doi_match = _BIB_DOI_RE.search(body)
-        if doi_match and normalize_doi(doi_match.group(1)) == target and key not in keys:
-            keys.append(key)
+    for entry in parse_bib_entries(bib.read_text(encoding="utf-8")):
+        if entry.doi == target and entry.key not in keys:
+            keys.append(entry.key)
     if len(keys) > 1:
         raise ValueError(
             f"DOI {doi} appears under more than one references.bib key: {', '.join(keys)}"

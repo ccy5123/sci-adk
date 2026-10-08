@@ -1,0 +1,9 @@
+index,doi,status,source,license,filename,origin,bib,error
+1,10.1139/f79-146,failed,,,,cli,ok,no OA PDF
+7,10.1186/s13321-018-0263-1,success,unpaywall,cc-by,Mansouri2018.pdf,cli,ok,
+13,10.1002/etc.5620170803,failed,,,,cli,ok,no OA PDF
+22,10.1186/s13321-020-00453-4,success,unpaywall,cc-by,Krotko2020.pdf,cli,ok,
+27,10.5772/intechopen.1006120,success,unpaywall,cc-by,DossouOlory2025.pdf,cli,ok,
+31,10.1002/jps.21494,success,semantic_scholar,CCBY,Mannhold2008.pdf,cli,ok,
+36,10.5772/31647,success,unpaywall,cc-by,Taherpour2012.pdf,cli,ok,
+40,10.1021/acs.jcim.4c02013,success,unpaywall,,Sorgun2025.pdf,cli,ok,

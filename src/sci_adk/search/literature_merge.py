@@ -21,9 +21,11 @@ This module makes the store append-only for keys:
 Key rule (extends ``citation_keys``'s ``<Surname><Year>`` + ``a/b`` convention):
 
   * a DOI that already has a key keeps it, with its bib entry text, unchanged;
-  * a newcomer's base is ``<Surname><Year>`` (sidecar author/year, Anon/nd
-    fallbacks) -- or, for a DOI with no PDF, paperforge's bib key minus its
-    trailing ``a/b`` suffix;
+  * a newcomer's base is ``<Surname><Year>`` from its OWN bib entry (first
+    author's family name + year) -- falling back to the sidecar author/year
+    (Anon/nd fallbacks) when the entry has no usable author/year, then to
+    paperforge's bib key minus its trailing ``a/b`` suffix -- so the PDF, sidecar,
+    manifest filename and bib key all carry the one key;
   * the base's *family* is every key or PDF stem already taken that is the base
     plus an optional letter suffix (lower or UPPERCASE provisional, from
     ``add-literature``) and an optional ``_SI``;
@@ -52,6 +54,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from sci_adk.search.citation_keys import (
+    ANON,
     KeyingResult,
     OverwriteCollision,
     _BIB_DOI_RE,
@@ -60,6 +63,8 @@ from sci_adk.search.citation_keys import (
     _sidecar_path,
     _suffix,
     apply_citation_keys,
+    bib_first_author_family,
+    normalize_surname,
 )
 from sci_adk.search.manual_literature import normalize_doi
 from sci_adk.search.paperforge_adapter import AcquisitionRecord
@@ -79,18 +84,18 @@ class BibEntry:
     text: str
 
 
-def parse_bib_entries(bib: str) -> list[BibEntry]:
-    """Split ``bib`` into entries, brace-depth aware, in source order.
+def _entry_spans(bib: str) -> list[tuple[int, int, BibEntry]]:
+    """``(start, end, entry)`` for each entry of ``bib``, brace-depth aware.
 
     An entry runs from its ``@`` to the brace that closes its opening ``{`` -- not to
-    the next ``@`` -- so a field value holding ``{nested}`` braces or an
-    ``@word{...}`` token stays inside its entry.
+    the next ``@`` and not to a newline -- so a one-line entry, a field value holding
+    ``{nested}`` braces, or an ``@word{...}`` token inside a value all stay whole.
     """
     # Lazy import: importing sci_adk.render at module load pulls in the loop
     # package, which imports this module (circular).
     from sci_adk.render.pkgreqs_checks import _entry_close_index
 
-    entries: list[BibEntry] = []
+    spans: list[tuple[int, int, BibEntry]] = []
     pos = 0
     while True:
         m = _ENTRY_HEAD_RE.search(bib, pos)
@@ -100,13 +105,105 @@ def parse_bib_entries(bib: str) -> list[BibEntry]:
         end = _entry_close_index(bib, open_brace)
         text = bib[m.start():end]
         doi_match = _BIB_DOI_RE.search(text)
-        entries.append(BibEntry(
+        spans.append((m.start(), end, BibEntry(
             key=m.group(2),
             doi=normalize_doi(doi_match.group(1)) if doi_match else "",
             text=text,
-        ))
+        )))
         pos = end
-    return entries
+    return spans
+
+
+def parse_bib_entries(bib: str) -> list[BibEntry]:
+    """Split ``bib`` into entries, brace-depth aware, in source order."""
+    return [entry for _start, _end, entry in _entry_spans(bib)]
+
+
+def rekey_bib_text(bib: str, doi_to_key: dict[str, str]) -> str:
+    """``bib`` with each entry whose DOI is mapped re-keyed; all other text verbatim.
+
+    DOIs are compared after :func:`normalize_doi` (case-insensitive, prefix-free).
+    Only the key inside ``@type{KEY,`` changes, whatever the entry's line layout.
+    """
+    wanted = {normalize_doi(d): k for d, k in doi_to_key.items()}
+    out: list[str] = []
+    pos = 0
+    for start, end, entry in _entry_spans(bib):
+        key = wanted.get(entry.doi) if entry.doi else None
+        if key and key != entry.key:
+            out.append(bib[pos:start])
+            out.append(_rekey_entry(entry.text, key))
+            pos = end
+    out.append(bib[pos:])
+    return "".join(out)
+
+
+_FIELD_NAME_RE = re.compile(r"[\s,]*([A-Za-z][\w-]*)\s*=\s*")
+_BARE_VALUE_RE = re.compile(r"[^,}\s]*")
+
+
+def bib_field(entry_text: str, name: str) -> Optional[str]:
+    """The raw value of field ``name`` (case-insensitive) in one entry, or ``None``.
+
+    Walks the entry's ``name = value`` pairs at the top level -- ``{...}`` values by
+    brace depth, ``"..."`` values to the closing quote, bare values (``month=Apr``,
+    ``year=2012``) to the next ``,`` or ``}`` -- so a field name that only appears
+    inside another field's text is never mistaken for that field.
+    """
+    from sci_adk.render.pkgreqs_checks import _entry_close_index  # lazy: circular
+
+    head = _ENTRY_HEAD_RE.match(entry_text)
+    if head is None:
+        return None
+    wanted = name.lower()
+    i, n = head.end(), len(entry_text)
+    while i < n:
+        fm = _FIELD_NAME_RE.match(entry_text, i)
+        if fm is None or fm.end() >= n:
+            return None
+        field_name, i = fm.group(1).lower(), fm.end()
+        if entry_text[i] == "{":
+            end = _entry_close_index(entry_text, i)
+            value, i = entry_text[i + 1:end - 1], end
+        elif entry_text[i] == '"':
+            j, depth = i + 1, 0
+            while j < n and not (entry_text[j] == '"' and depth == 0):
+                depth += {"{": 1, "}": -1}.get(entry_text[j], 0)
+                j += 1
+            value, i = entry_text[i + 1:j], j + 1
+        else:
+            vm = _BARE_VALUE_RE.match(entry_text, i)
+            value, i = vm.group(0), vm.end()
+        if field_name == wanted:
+            return value
+    return None
+
+
+# @MX:NOTE: [AUTO] Key-source rule for a DOI keyed for the FIRST time: the base
+#   <Surname><Year> comes from that DOI's own bib entry (first author's family name
+#   from the BibTeX `author` field, 4-digit `year`) -- the bib entry is the single
+#   source of a key, so the PDF, sidecar, manifest filename and bib key all carry
+#   it. Fallbacks, in order: the sidecar (OpenAlex) author/year when the entry has
+#   no usable author or year, then paperforge's own bib key minus its a/b suffix.
+#   The sidecar is NOT preferred because OpenAlex and Crossref can disagree on the
+#   first author (10.5772/31647: Taherpour vs Arman) or the year (10.1002/jps.21494:
+#   2008 online vs 2009 issue), and the bib key is what a manuscript \cite{}s.
+#   Keys assigned before the call never change (see key_and_merge).
+def bib_entry_base(entry_text: str) -> Optional[str]:
+    """``<Surname><Year>`` from an entry's own author/year, or ``None`` if unusable.
+
+    Unusable: no ``author`` field, a first author whose family name normalizes to
+    nothing, or a ``year`` with no 4-digit run.
+    """
+    author = bib_field(entry_text, "author")
+    year = re.search(r"\d{4}", bib_field(entry_text, "year") or "")
+    if not author or year is None:
+        return None
+    family = bib_first_author_family(author)
+    surname = normalize_surname(family)
+    if not family.strip() or surname == ANON:
+        return None
+    return f"{surname}{year.group(0)}"
 
 
 @dataclass(frozen=True)
@@ -265,15 +362,23 @@ def key_and_merge(
     collisions = [OverwriteCollision(filename=fn, dois=sorted(d))
                   for fn, d in by_filename.items() if len(d) > 1]
 
-    # Bases for DOIs with no key yet: sidecar author/year first, else the bib key.
+    # Bases for DOIs with no key yet: the DOI's own bib entry first (author/year),
+    # else its sidecar, else paperforge's bib key minus its a/b suffix.
+    entry_of: dict[str, BibEntry] = {}
+    for e in new_entries:
+        if e.doi:
+            entry_of.setdefault(e.doi, e)
     bases: dict[str, str] = {}
     for r in keyable:
         doi = normalize_doi(r.doi)
         if doi and doi not in snapshot.doi_keys and doi not in bases:
-            bases[doi] = _base_key(*_read_sidecar_author_year(pdf_dir, r.filename))
-    for e in new_entries:
-        if e.doi and e.doi not in snapshot.doi_keys and e.doi not in bases:
-            bases[e.doi] = _PAPERFORGE_SUFFIX_RE.sub("", e.key) or e.key
+            entry = entry_of.get(doi)
+            bases[doi] = ((bib_entry_base(entry.text) if entry else None)
+                          or _base_key(*_read_sidecar_author_year(pdf_dir, r.filename)))
+    for doi, e in entry_of.items():
+        if doi not in snapshot.doi_keys and doi not in bases:
+            bases[doi] = (bib_entry_base(e.text)
+                          or _PAPERFORGE_SUFFIX_RE.sub("", e.key) or e.key)
 
     taken = set(snapshot.taken)
     doi_keys = {**snapshot.doi_keys, **_assign_newcomers(bases, taken)}

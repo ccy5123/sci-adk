@@ -75,6 +75,8 @@ from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.prior_work import prior_work_open
 from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
+from sci_adk.search.literature_merge import _sidecar_doi, parse_bib_entries
+from sci_adk.search.manual_literature import SI_SUFFIX
 from sci_adk.render.consistency import (
     LatexRefReport,
     check_cross_doc_s_refs,
@@ -538,6 +540,11 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     search_log_problems, search_log_notes = _check_search_logs(novelty_decisions, spec)
     search_log_clean = not search_log_problems
 
+    # Literature key agreement: a PDF in literature/pdfs/ whose name is not a
+    # references.bib key cannot be found from the \cite that names it. ADVISORY ONLY
+    # (routed through paper_advisory, never in `passed`). READ-ONLY, no LLM.
+    literature_key_notes = _literature_key_advisory(run_dir)
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -557,7 +564,8 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_cross_doc_clean=paper_cross_doc_clean,
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
-        paper_advisory=paper_advisory + conclusion_review_notes + search_log_notes,
+        paper_advisory=(paper_advisory + conclusion_review_notes + search_log_notes
+                        + literature_key_notes),
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
         search_log_problems=search_log_problems,
@@ -1014,6 +1022,55 @@ def _conclusion_review_advisory(run_dir: Path) -> List[str]:
             "there is nothing to compare it against."
         ]
     return declaration_disagreements(declarations, review)
+
+
+def _literature_key_advisory(run_dir: Path) -> List[str]:
+    """ADVISORY (never gated): each acquired PDF whose name is not a bib key.
+
+    READ-ONLY. For every ``literature/pdfs/*.pdf`` whose stem is not an entry key of
+    ``literature/references.bib``, one line -- naming the key the bib gives the same
+    DOI (read from the PDF's ``.json`` sidecar) when there is one. A ``<key>_SI``
+    file whose ``<key>`` is a bib key is a supplementary file, not a mismatch. An
+    unreadable bib becomes one advisory line rather than an error.
+    """
+    pdf_dir = run_dir / "literature" / "pdfs"
+    if not pdf_dir.is_dir():
+        return []
+    pdfs = sorted(p for p in pdf_dir.iterdir() if p.suffix.lower() == ".pdf")
+    if not pdfs:
+        return []
+    bib_path = run_dir / "literature" / "references.bib"
+    try:
+        bib = bib_path.read_text(encoding="utf-8") if bib_path.is_file() else ""
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"literature key: could not read {bib_path.name}: {exc}"]
+    entries = parse_bib_entries(bib)
+    keys = {e.key for e in entries}
+    key_of_doi: Dict[str, str] = {}
+    for e in entries:
+        if e.doi:
+            key_of_doi.setdefault(e.doi, e.key)
+
+    notes: List[str] = []
+    for pdf in pdfs:
+        stem = pdf.stem
+        if stem in keys:
+            continue
+        if stem.endswith(SI_SUFFIX) and stem[: -len(SI_SUFFIX)] in keys:
+            continue
+        doi = _sidecar_doi(pdf_dir, stem)
+        if doi and doi in key_of_doi:
+            notes.append(
+                f"literature key: pdfs/{pdf.name} is not a references.bib key; the "
+                f"entry for its DOI {doi} is keyed {key_of_doi[doi]}, so "
+                f"\\cite{{{key_of_doi[doi]}}} and this file name disagree."
+            )
+        else:
+            notes.append(
+                f"literature key: pdfs/{pdf.name} is not a references.bib key and no "
+                f"entry carries its DOI; no \\cite resolves to this file."
+            )
+    return notes
 
 
 # Fewest distinct indexes that must have answered before a found_nothing stands on record.

@@ -1,0 +1,28 @@
+{
+  "doi": "10.1021/acs.jcim.4c02013",
+  "title": "Vertex-Edge-Weighted Molecular Graphs: A Study on Topological Indices and Their Relevance to Physicochemical Properties of Drugs Used in Cancer Treatment",
+  "author": "Sorgun",
+  "year": "2025",
+  "resolution": {
+    "doi": "10.1021/acs.jcim.4c02013",
+    "source": "unpaywall",
+    "pdf_url": "https://arxiv.org/pdf/2408.06367",
+    "landing_url": "https://arxiv.org/pdf/2408.06367",
+    "license": null,
+    "version": "submittedVersion",
+    "host_type": "repository",
+    "is_oa": true
+  },
+  "attempts": [
+    {
+      "doi": "10.1021/acs.jcim.4c02013",
+      "source": "unpaywall",
+      "pdf_url": "https://arxiv.org/pdf/2408.06367",
+      "landing_url": "https://arxiv.org/pdf/2408.06367",
+      "license": null,
+      "version": "submittedVersion",
+      "host_type": "repository",
+      "is_oa": true
+    }
+  ]
+}

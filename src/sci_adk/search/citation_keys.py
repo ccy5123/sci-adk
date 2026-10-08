@@ -32,7 +32,8 @@ This module is acquisition/IO + naming only. It does NOT touch the PDF security
 boundary (``pdf_normalize``), the evidence-validity gate (``core/validity.py``,
 claim updating, data_source/referent), or the kernel core. It uses no LLM and adds
 no third-party dependency: surname normalization is stdlib ``unicodedata``
-(no ``unidecode``) and the ``.bib`` key rewrite is line-based (no ``bibtexparser``).
+(no ``unidecode``) and the ``.bib`` key rewrite splits entries by brace depth (no
+``bibtexparser``).
 
 Reference: src/sci_adk/loop/literature_acquirer.py (caller),
 src/sci_adk/search/paperforge_adapter.py (AcquisitionRecord), design/tool-policy.md.
@@ -275,42 +276,71 @@ def _move_pair(pdf_dir: Path, src_stem: str, dst_stem: str, suffix: str) -> None
         src_sidecar.replace(pdf_dir / f"{dst_stem}.json")
 
 
-# Matches a BibTeX entry head and captures (@type{, oldkey, rest-of-entry-until-})
-# in DOTALL so the body (which spans lines) is captured whole. Non-greedy body so
-# adjacent entries are not merged. The end-anchor allows leading whitespace before
-# the closing brace (``\n\s*\}``) so an entry whose ``}`` is indented still
-# matches. The DOI field inside the body is matched separately to link an entry to
-# a record.
-_BIB_ENTRY_RE = re.compile(
-    r"(@\w+\s*\{)\s*([^,\s]+)\s*,(.*?)(\n\s*\})",
-    re.DOTALL,
-)
+# The DOI field inside an entry, used to link an entry to a record.
 _BIB_DOI_RE = re.compile(r"doi\s*=\s*[{\"]\s*([^}\"]+?)\s*[}\"]", re.IGNORECASE)
 
 
 def _rewrite_bib(bib_path: Path, doi_to_key: dict[str, str]) -> None:
     """Rewrite each ``references.bib`` entry's key to its DOI's citation key.
 
-    Entries are matched to records by their ``doi = {...}`` field (case-folded),
-    NOT by paperforge's original key. An entry whose DOI is not in the mapping is
-    left untouched. A missing bib file is skipped (not an error).
+    Entries are matched to records by their ``doi = {...}`` field (case-insensitive),
+    NOT by paperforge's original key, and are split brace-depth aware -- Crossref
+    returns each entry on ONE line, which a line-anchored pattern never matches. An
+    entry whose DOI is not in the mapping, and all text between entries, is left
+    byte-for-byte. A missing bib file is skipped (not an error).
     """
     if not bib_path.exists():
         return
+    # Lazy import: literature_merge imports this module at load time.
+    from sci_adk.search.literature_merge import rekey_bib_text
+
     text = bib_path.read_text(encoding="utf-8")
-    # Case-fold DOIs for matching (DOIs are case-insensitive).
-    folded = {doi.lower(): key for doi, key in doi_to_key.items()}
+    rewritten = rekey_bib_text(text, doi_to_key)
+    if rewritten != text:
+        bib_path.write_text(rewritten, encoding="utf-8")
 
-    def _sub(m: re.Match) -> str:
-        head, old_key, body, tail = m.groups()
-        doi_match = _BIB_DOI_RE.search(body)
-        if doi_match:
-            key = folded.get(doi_match.group(1).strip().lower())
-            if key:
-                return f"{head}{key},{body}{tail}"
-        return m.group(0)  # no DOI / unmapped -> leave untouched
 
-    bib_path.write_text(_BIB_ENTRY_RE.sub(_sub, text), encoding="utf-8")
+def _split_top_level(text: str, sep: re.Pattern) -> list[str]:
+    """Split ``text`` on ``sep`` matches that sit outside every ``{...}`` group."""
+    parts: list[str] = []
+    depth, start, i = 0, 0, 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(depth - 1, 0)
+        elif depth == 0:
+            m = sep.match(text, i)
+            if m and m.end() > i:
+                parts.append(text[start:i])
+                start = i = m.end()
+                continue
+        i += 1
+    parts.append(text[start:])
+    return parts
+
+
+_AND_RE = re.compile(r"\s+and\s+", re.IGNORECASE)
+_COMMA_RE = re.compile(r",")
+_SPACE_RE = re.compile(r"\s+")
+
+
+def bib_first_author_family(author: str) -> str:
+    """The first author's family name from a BibTeX ``author`` field value.
+
+    Names are ``and``-separated (outside braces). ``Family, Given`` takes the text
+    before the first top-level comma; ``Given Family`` takes the last top-level
+    word; a braced corporate name (``{World Health Organization}``) is kept whole.
+    Braces are stripped from the result; ``""`` when nothing is left.
+    """
+    first = _split_top_level(author.strip(), _AND_RE)[0].strip()
+    if len(_split_top_level(first, _COMMA_RE)) > 1:
+        family = _split_top_level(first, _COMMA_RE)[0]
+    else:
+        words = [w for w in _split_top_level(first, _SPACE_RE) if w]
+        family = words[-1] if words else ""
+    return family.replace("{", "").replace("}", "").strip()
 
 
 def _rewrite_manifest(manifest_path: Path, doi_to_key: dict[str, str]) -> None:
