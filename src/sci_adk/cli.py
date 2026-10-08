@@ -112,6 +112,38 @@ def _load_search_log_arg(
     return record, None
 
 
+def _check_searched_dois(dois: Optional[list[str]]) -> Optional[int]:
+    """Reject any ``--searched`` argument that is not exactly one DOI (exit 2).
+
+    Runs BEFORE any acquisition or write. Catches the shell-quoting mistake of
+    several DOIs joined into one argument, and non-DOI tokens.
+    """
+    from sci_adk.search.manual_literature import is_single_doi
+
+    bad = [d for d in dois or [] if not is_single_doi(d)]
+    for d in bad:
+        print(f"error: --searched argument is not a single DOI: {d!r} (expected "
+              "10.<registrant>/<suffix>, one DOI per argument; a doi.org or doi: "
+              "prefix is allowed)", file=sys.stderr)
+    if bad:
+        print("  nothing was acquired or recorded", file=sys.stderr)
+        return 2
+    return None
+
+
+def _report_tool_error(e: Exception) -> int:
+    """Print an ``AcquisitionToolError`` (returncode + stderr tail); exit 1."""
+    print(f"error: literature acquisition failed: {e}", file=sys.stderr)
+    tail = getattr(e, "stderr_tail", "")
+    if tail:
+        print("  paperforge stderr (last lines):", file=sys.stderr)
+        for line in tail.splitlines():
+            print(f"    {line}", file=sys.stderr)
+    print("  nothing was recorded (no LITERATURE item, no decision); fix the input or "
+          "the paperforge install and re-run", file=sys.stderr)
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sci-adk",
@@ -1922,6 +1954,10 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
     # workspace root holds runs/ (run_dir is <workspace>/runs/<spec.id>).
     workspace = run_dir.parent.parent
 
+    rc = _check_searched_dois(args.searched)
+    if rc is not None:
+        return rc
+
     # Imported here so the kernel CLI stays thin and the import cost is paid only
     # when this verb runs.
     from sci_adk.loop.prior_work import (
@@ -1950,11 +1986,14 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
     # acquisition (refusing the silently degraded OA run that the degraded-acquisition failure rode past).
     # --allow-no-email is the explicit escape hatch to proceed degraded.
     from sci_adk.config import ConfigHalt
+    from sci_adk.search.paperforge_adapter import AcquisitionToolError
 
     try:
         outcome = record_prior_work_searched(
             spec, workspace, dois=args.searched, target_id=args.target_id,
             allow_no_email=args.allow_no_email, search_log=search_log)
+    except AcquisitionToolError as e:
+        return _report_tool_error(e)
     except ConfigHalt as e:
         # The generic config message names the env var + config file; add the verb's
         # own escape hatch so the user sees every way to proceed.
@@ -1992,6 +2031,10 @@ def _cmd_inquiry(args: argparse.Namespace) -> int:
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
     workspace = run_dir.parent.parent
 
+    rc = _check_searched_dois(args.searched)
+    if rc is not None:
+        return rc
+
     from sci_adk.loop.inquiry import record_inquiry_searched, record_inquiry_skip
 
     search_log, rc = _load_search_log_arg(args, searched=bool(args.searched))
@@ -2016,6 +2059,7 @@ def _cmd_inquiry(args: argparse.Namespace) -> int:
         return 0
 
     from sci_adk.config import ConfigHalt
+    from sci_adk.search.paperforge_adapter import AcquisitionToolError
 
     try:
         outcome = record_inquiry_searched(
@@ -2025,6 +2069,8 @@ def _cmd_inquiry(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    except AcquisitionToolError as e:
+        return _report_tool_error(e)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
@@ -2060,6 +2106,10 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
     workspace = run_dir.parent.parent
 
+    rc = _check_searched_dois(args.searched)
+    if rc is not None:
+        return rc
+
     from sci_adk.loop.literature_triggers import (
         record_novelty_searched,
         record_novelty_skip,
@@ -2094,12 +2144,15 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
 
     # same contact-email policy as prior-work (E4).
     from sci_adk.config import ConfigHalt
+    from sci_adk.search.paperforge_adapter import AcquisitionToolError
 
     try:
         outcome = record_novelty_searched(
             spec, workspace, hypothesis_id=args.hypothesis, kind=args.kind,
             dois=args.searched, found=found, allow_no_email=args.allow_no_email,
             search_log=search_log)
+    except AcquisitionToolError as e:
+        return _report_tool_error(e)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",
@@ -2138,6 +2191,10 @@ def _cmd_contested(args: argparse.Namespace) -> int:
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
     workspace = run_dir.parent.parent
 
+    rc = _check_searched_dois(args.searched)
+    if rc is not None:
+        return rc
+
     from sci_adk.loop.literature_triggers import record_contested
 
     search_log, rc = _load_search_log_arg(
@@ -2147,12 +2204,15 @@ def _cmd_contested(args: argparse.Namespace) -> int:
 
     # The searched path uses the polite pool, so it honors the contact-email policy.
     from sci_adk.config import ConfigHalt
+    from sci_adk.search.paperforge_adapter import AcquisitionToolError
 
     try:
         item = record_contested(
             spec, workspace, hypothesis_id=args.hypothesis,
             reason_or_note=args.note or "", dois=args.searched,
             allow_no_email=args.allow_no_email, search_log=search_log)
+    except AcquisitionToolError as e:
+        return _report_tool_error(e)
     except ConfigHalt as e:
         print(f"error: {e}", file=sys.stderr)
         print("  - or pass --allow-no-email to proceed with degraded OA acquisition",

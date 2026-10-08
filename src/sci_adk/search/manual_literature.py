@@ -62,6 +62,24 @@ def normalize_doi(raw: Optional[str]) -> str:
     return doi.strip().strip(_DOI_TRAILING).lower()
 
 
+# DOI syntax (DOI Handbook 2.2): "10." + a registrant code of digits with optional
+# ".<digits>" subdivisions, "/", then a non-empty suffix. Real registrants are 4-9
+# digits, but the grammar does not fix a length, and the test suite uses short
+# fake prefixes ("10.1/x"), so the length is left open.
+_DOI_SHAPE_RE = re.compile(r"10\.\d+(?:\.\d+)*/\S+")
+
+
+def is_single_doi(token: str) -> bool:
+    """True when ``token`` is exactly ONE DOI (a ``doi.org`` / ``doi:`` prefix is allowed).
+
+    Whitespace anywhere in ``token`` rejects it: several DOIs joined into one shell
+    argument must not reach the acquisition tool as a single input.
+    """
+    if any(ch.isspace() for ch in token):
+        return False
+    return _DOI_SHAPE_RE.fullmatch(normalize_doi(token)) is not None
+
+
 # @MX:NOTE: [AUTO] DOI -> citation key comes from references.bib, not manifest.csv:
 # the acquirer writes a bib entry for EVERY DOI, but manifest ``filename`` is empty
 # for a DOI whose PDF was not fetched, and sci-adk never re-keys such an entry. The

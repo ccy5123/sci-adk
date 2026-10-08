@@ -52,9 +52,13 @@ from sci_adk.search.citation_keys import (
     KeyingResult,
     assign_and_apply_citation_keys,
 )
+from sci_adk.search.manual_literature import normalize_doi
 from sci_adk.search.paperforge_adapter import (
+    EXIT_OK,
+    EXIT_SOME_FAILED,
     AcquisitionRecord,
     AcquisitionResult,
+    AcquisitionToolError,
     PaperforgeAdapter,
 )
 from sci_adk.search.pdf_normalize import (
@@ -68,6 +72,33 @@ from sci_adk.search.pdf_normalize import (
 # ``error``. Total attempts = 1 original + PDF_REDOWNLOAD_RETRIES. A user-password
 # lock is NOT retried (a re-download yields the same lock) -- only parse errors.
 PDF_REDOWNLOAD_RETRIES = 2
+
+
+def _require_tool_ran(result: AcquisitionResult, requested: Sequence[str]) -> None:
+    # @MX:WARN: [AUTO] fail-closed gate in front of the append-only Evidence log.
+    # @MX:REASON: [AUTO] every searched literature path (prior-work, novelty,
+    #   contested, inquiry) records through acquire(); a broken tool run that slips
+    #   past here becomes a permanent LITERATURE item plus a decision (e.g. a
+    #   NOVELTY_DECISION found_nothing that derives a SUPPORTED novelty claim) that
+    #   can never be removed. Keep this check before ANY write in acquire().
+    """Raise ``AcquisitionToolError`` unless the tool actually ran on ``requested``.
+
+    Accepted: exit 0 (all acquired) or 1 (some DOIs had no OA PDF -- a recorded
+    null), AND at least one requested DOI has a row in this call's manifest. Anything
+    else is a tool failure (usage error, no DOI parsed, crashed install), and nothing
+    may be recorded for it.
+    """
+    if result.returncode not in (EXIT_OK, EXIT_SOME_FAILED):
+        raise AcquisitionToolError(
+            f"paperforge exited with returncode {result.returncode} (expected 0 or 1)",
+            returncode=result.returncode, stderr=result.stderr)
+    wanted = {normalize_doi(d) for d in requested}
+    seen = {normalize_doi(r.doi) for r in result.records}
+    if not wanted & seen:
+        raise AcquisitionToolError(
+            f"paperforge exited with returncode {result.returncode} but its manifest "
+            f"has no row for any requested DOI ({', '.join(sorted(wanted))})",
+            returncode=result.returncode, stderr=result.stderr)
 
 
 class HaltReason(str, Enum):
@@ -272,6 +303,7 @@ class LiteratureAcquirer:
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
 
         result = self.adapter.fetch(dois, self.literature_dir, **options)
+        _require_tool_ran(result, dois)
 
         # Auto-normalize each acquired PDF: owner/permission-restricted-but-
         # openable PDFs are re-written extractable; a real user-password lock is

@@ -90,6 +90,32 @@ class PaperforgeNotInstalled(RuntimeError):
     """Raised when the paperforge CLI cannot be located on PATH."""
 
 
+class AcquisitionToolError(RuntimeError):
+    """The acquisition tool failed to run, so this call produced no record.
+
+    Distinct from a DOI with no OA PDF (a recorded null, ``EXIT_SOME_FAILED``):
+    this is a broken run -- an exit code outside {0, 1}, or a run whose manifest
+    carries none of the requested DOIs. Raised BEFORE any Evidence is written.
+    """
+
+    STDERR_TAIL_LINES = 10
+
+    def __init__(self, message: str, *, returncode: int, stderr: str = "") -> None:
+        self.returncode = returncode
+        lines = (stderr or "").strip().splitlines()
+        self.stderr_tail = "\n".join(lines[-self.STDERR_TAIL_LINES:])
+        super().__init__(message)
+
+
+def _stat_signature(path: Path) -> Optional[tuple[int, int]]:
+    """``(mtime_ns, size)`` of ``path``, or None when absent -- detects a rewrite."""
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 class PaperforgeAdapter:
     """
     Acquire Open-Access PDFs for a set of DOIs by driving the paperforge CLI.
@@ -243,12 +269,19 @@ class PaperforgeAdapter:
         """
         Acquire OA PDFs for ``dois`` into ``output_dir`` via paperforge.
 
-        A non-zero return code is NOT an error: ``EXIT_SOME_FAILED`` means some
-        DOIs had no downloadable OA PDF -- a valid, recordable outcome (a null
-        result is still a result). The per-DOI verdicts are in
-        ``result.records``; inspect ``result.succeeded`` / ``result.failed``.
-        Only a missing CLI (``PaperforgeNotInstalled``) or a subprocess failure
-        (e.g. ``subprocess.TimeoutExpired``) propagates as an exception.
+        ``EXIT_SOME_FAILED`` is NOT an error: some DOIs had no downloadable OA
+        PDF -- a valid, recordable outcome (a null result is still a result).
+        The per-DOI verdicts are in ``result.records``; inspect
+        ``result.succeeded`` / ``result.failed``. The adapter does not judge the
+        return code; ``LiteratureAcquirer`` rejects a broken run (any other code,
+        or no requested DOI in the manifest) before recording. A missing CLI
+        (``PaperforgeNotInstalled``) or a subprocess failure (e.g.
+        ``subprocess.TimeoutExpired``) propagates as an exception.
+
+        ``records`` holds only a manifest written by THIS call: paperforge
+        rewrites ``manifest.csv`` on every run that reaches its batch, so a file
+        whose mtime/size did not change is a leftover from an earlier call (this
+        run exited before writing) and yields no records.
 
         Args:
             dois: DOIs to resolve (bare DOIs; paperforge also accepts files,
@@ -261,6 +294,8 @@ class PaperforgeAdapter:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         cmd = self.build_command(list(dois), output_dir, **options)
+        manifest_path = output_dir / "manifest.csv"
+        before = _stat_signature(manifest_path)
 
         proc = subprocess.run(
             cmd,
@@ -269,8 +304,12 @@ class PaperforgeAdapter:
             timeout=self.timeout,
         )
 
-        manifest_path = output_dir / "manifest.csv"
-        records = self.parse_manifest(manifest_path)
+        written = _stat_signature(manifest_path)
+        records = (
+            self.parse_manifest(manifest_path)
+            if written is not None and written != before
+            else []
+        )
         provenance = self._capture_provenance(cmd, proc.returncode)
 
         return AcquisitionResult(
