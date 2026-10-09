@@ -70,6 +70,7 @@ from sci_adk.core.validity import (
     derive_novelty_status,
 )
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
+from sci_adk.loop.code_ref import describe_mismatch, resolve_code_ref
 from sci_adk.loop.compiler import deposit_record_path
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.prior_work import prior_work_open
@@ -545,6 +546,11 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # (routed through paper_advisory, never in `passed`). READ-ONLY, no LLM.
     literature_key_notes = _literature_key_advisory(run_dir)
 
+    # Pointer-only bundle: a rendered reproduce.py whose every generating code_ref is a
+    # pointer re-runs nothing. ADVISORY ONLY -- the F3 gate stays fail-open for an honest
+    # pointer. READ-ONLY (stats/hashes the named files, executes nothing), no LLM.
+    reproduction_notes = _reproduction_advisory(run_dir, evidence)
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -565,7 +571,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
         paper_advisory=(paper_advisory + conclusion_review_notes + search_log_notes
-                        + literature_key_notes),
+                        + literature_key_notes + reproduction_notes),
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
         search_log_problems=search_log_problems,
@@ -1312,10 +1318,19 @@ def _check_paper_requirements(
             )
 
     if pubreqs.required_sections:
-        problems.extend(
-            f"missing required section: {name}"
-            for name in required_sections_problems(draft_tex, pubreqs.required_sections)
-        )
+        missing_sections = required_sections_problems(draft_tex, pubreqs.required_sections)
+        problems.extend(f"missing required section: {name}" for name in missing_sections)
+        declared_sections = [n for n in pubreqs.required_sections if n.strip()]
+        if missing_sections and len(missing_sections) == len(declared_sections):
+            # None present is the signature of a render with no prose: the engine emits no
+            # section of its own, only the title and the reference list. Name that cause
+            # once, after the per-section lines.
+            problems.append(
+                f"paper/draft.tex has none of the {len(declared_sections)} required "
+                "sections -- a prose-less skeleton? For the record deposit alone, move "
+                "paper/ aside and render with --record-only (it writes no paper/); "
+                "otherwise render the manuscript with --prose"
+            )
         # P4 (REQ-PG-401/402): section ORDER against the DECLARED order (the required_sections
         # list order is the declared order) -> FAIL on deviation (OD-6: declared order = FAIL).
         problems.extend(section_order_problems(draft_tex, pubreqs.required_sections))
@@ -1444,41 +1459,91 @@ def _reproduction_bundle_problems(
     contract that declares ``reproduction_bundle`` is a real failure: the contract asked for a
     bundle the record cannot back -- the absent ``reproduce.py`` is reported.
 
+      4. A ``code_ref`` that names a file AND records its ``sha256=``, where the file on disk
+         no longer hashes to that value, FAILS (one line per item: the Evidence id, the file,
+         the recorded and actual hashes). Unlike a bare commit, this is not an honest
+         pointer: the record names code the workspace no longer holds, so the bundle cannot
+         reproduce that result. Resolved with the compiler's own reading
+         (:func:`sci_adk.loop.code_ref.resolve_code_ref`) -- the gate re-reads the files,
+         it never executes them.
+
     Returns the failure lines (empty = the bundle satisfies the contract).
     """
-    recorded_refs = sorted(
-        {
-            ref
-            for ev in evidence
-            if ev.kind not in _NON_REPRODUCIBLE_KINDS
-            and (ref := (ev.provenance.code_ref or "").strip())
-        }
-    )
+    reproducible = _reproducible_code_refs(evidence)
+    workspace = run_dir.parent.parent
+    problems = [
+        "reproduction bundle: "
+        + describe_mismatch(ev_id, res)
+        + " -- the bundle cannot run the recorded code (restore that version of the "
+        "file, or re-run and record new Evidence)"
+        for ev_id, ref in reproducible
+        if (res := resolve_code_ref(ref, run_dir, workspace)).hash_mismatch
+    ]
+    recorded_refs = sorted({ref for _ev_id, ref in reproducible})
 
     reproduce = run_dir / "paper" / "reproduce.py"
     if not reproduce.is_file():
         if recorded_refs:
-            return [
+            return problems + [
                 "reproduction bundle: paper/reproduce.py is missing, but the record holds "
                 f"{len(recorded_refs)} code_ref(s) to reproduce from"
             ]
-        return [
+        return problems + [
             "reproduction bundle: declared, but paper/reproduce.py is missing and the "
             "record holds no code_ref to build it from"
         ]
 
     driver = reproduce.read_text(encoding="utf-8")
     if not driver.strip():
-        return ["reproduction bundle: paper/reproduce.py is present but empty"]
+        return problems + ["reproduction bundle: paper/reproduce.py is present but empty"]
 
     # The driver must reference each recorded code_ref (it embeds them in SCRIPTS/POINTERS).
     missing_refs = [ref for ref in recorded_refs if ref not in driver]
     if missing_refs:
-        return [
+        return problems + [
             "reproduction bundle: paper/reproduce.py does not reference recorded "
             f"code_ref(s): {', '.join(missing_refs)}"
         ]
-    return []
+    return problems
+
+
+def _reproducible_code_refs(evidence: List[EvidenceItem]) -> List[Tuple[str, str]]:
+    """``(evidence id, code_ref)`` for each item whose code_ref names generating code.
+
+    Decision meta-records (``_NON_REPRODUCIBLE_KINDS``) carry a decision pointer, not code,
+    and items with no ``code_ref`` carry nothing; both are left out.
+    """
+    return [
+        (ev.id, ref)
+        for ev in evidence
+        if ev.kind not in _NON_REPRODUCIBLE_KINDS
+        and (ref := (ev.provenance.code_ref or "").strip())
+    ]
+
+
+def _reproduction_advisory(run_dir: Path, evidence: List[EvidenceItem]) -> List[str]:
+    """A NON-GATING line when a rendered bundle drives no script at all.
+
+    A bare-commit ``code_ref`` is an honest pointer, so the F3 gate stays fail-open for it.
+    But when EVERY generating-code ``code_ref`` of a run with a rendered
+    ``paper/reproduce.py`` is a pointer, the bundle re-runs nothing -- which is easy to miss
+    when the gate passes. Same reading as the compiler (:func:`resolve_code_ref`). No
+    ``reproduce.py`` (no bundle rendered, e.g. a record-only deposit) or no generating
+    ``code_ref`` -> nothing to say.
+    """
+    if not (run_dir / "paper" / "reproduce.py").is_file():
+        return []
+    reproducible = _reproducible_code_refs(evidence)
+    if not reproducible:
+        return []
+    workspace = run_dir.parent.parent
+    if any(resolve_code_ref(ref, run_dir, workspace).script for _id, ref in reproducible):
+        return []
+    return [
+        f"reproduce.py drives no script: all {len(reproducible)} code_refs are pointers "
+        "(none names an existing script file whose recorded sha256, if any, matches); a "
+        "code_ref names its script as the path, optionally followed by sha256=<hex>"
+    ]
 
 
 # -- package-requirements gate (design/near-submission-package.md §3) --------

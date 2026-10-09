@@ -83,8 +83,10 @@ Two documents, two jobs, and they are not written together:
 | Vocabulary | the record's own, freely | tool-agnostic science |
 
 If you are the session that ran the experiments, your publish job ends at the record:
-render without `--prose`, which deposits `record.tex` and leaves the manuscript an
-empty skeleton. Then stop and hand off.
+`sci-adk render <run> --record-only` deposits `record.tex` and writes nothing under
+`paper/`. Then stop and hand off. Do not use a plain render without `--prose` for this:
+it also writes a skeleton `paper/draft.tex`, `verify` judges any `draft.tex` as the
+manuscript and fails it against the frozen `pubreqs.json`, and the session cannot end.
 
 If you are the paper session, **`record.tex` is your input** — the complete Evidence,
 the numeric tables, the figures, the verdicts with their frozen decision rules. Read
@@ -329,7 +331,8 @@ a worker authors to it but never freezes or relaxes it.
 deterministically-checkable requirement — sections present (`\section{...}` in
 `draft.tex`), the F2 figure font policy + raster DPI, the reference style wired, word
 count ≤ limit, the F3 reproduction bundle present (`paper/reproduce.py` referencing the
-recorded `code_ref`s) — must pass; `advisory` items and `max_pages` (no page count
+recorded `code_ref`s, and each file a `code_ref` names still matching the `sha256=`
+recorded with it) — must pass; `advisory` items and `max_pages` (no page count
 without a compile) are surfaced but NEVER gate. ABSENT `pubreqs.json` → the gate is
 vacuously clean (backward compatible). A gate-bearing field cannot be relaxed after a
 failure except by an explicit re-freeze (anti-moving-the-goalposts).

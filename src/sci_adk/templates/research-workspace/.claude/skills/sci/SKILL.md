@@ -188,12 +188,16 @@ argument addressed to a skeptical peer; the record is what happened. Written in 
 sitting by the agent that ran the experiments, the paper collapses into prose-shaped
 record — that is the failure this split exists to prevent.
 
-- **Session A (this one)** deposits the record: run the steps below through the
-  render, which writes the deterministic dump at `runs/<id>/record.tex` — the
-  complete Evidence, the numeric tables, every figure, the verdicts with their frozen
-  decision rules, and the record-integrity line. Authoring the manuscript narrative
-  here is OPTIONAL and normally skipped: render with no `--prose` deposits the record
-  and leaves the paper an empty skeleton.
+- **Session A (this one)** deposits the record: freeze the publishing requirements
+  (step 1 below), then run `sci-adk render <run> --record-only`, which writes the
+  deterministic dump at `runs/<id>/record.tex` — the complete Evidence, the numeric
+  tables, every figure, the verdicts with their frozen decision rules, and the
+  record-integrity line — and writes nothing under `paper/`. Then run
+  `sci-adk verify <run>`: with no `paper/`, the publishing gate has no manuscript to
+  judge yet. Authoring the manuscript narrative here is OPTIONAL and normally skipped.
+  Do not deposit with a plain render without `--prose`: it also writes a skeleton
+  `paper/draft.tex`, which `verify` judges as the manuscript and fails against the
+  frozen contract, so the Stop hook blocks the end of the session.
 - **Session B (a NEW session)** writes the paper, reading `runs/<id>/record.tex` as
   its input — not this conversation. It authors a `prose.json`, runs
   `sci-adk render <run> --prose prose.json`, records the conclusions in

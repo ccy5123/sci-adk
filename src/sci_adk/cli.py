@@ -805,6 +805,12 @@ def _add_verb_parsers(sub) -> None:
         help="optional JSON file: a PaperFigures object or a bare list of figure specs "
              "(native or image). Same as `run --figures`",
     )
+    render.add_argument(
+        "--record-only", action="store_true",
+        help="deposit only the deterministic record (runs/<id>/record.tex) and write "
+             "nothing under paper/ -- the first session of the two-session publish, before "
+             "the paper is written. Cannot be combined with --prose/--si/--si-prose/--figures",
+    )
 
 
 class _CliError(Exception):
@@ -1065,6 +1071,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for c in result.checkpoints:
             print(f"    - {c.hypothesis_id} ({c.kind}): {c.expression[:60]}")
     print(f"  paper draft: {result.paper_path}")
+    _print_code_ref_warnings(compiler)
     if result.science_findings:
         # Spec-gate science audit (design/science-guards.md): ALWAYS surfaced (never silent),
         # never a halt. The verdict-gate HALTS (strict by default) enforce the same concerns
@@ -1711,12 +1718,25 @@ def _cmd_derive_claim(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_code_ref_warnings(compiler: ResearchCompiler) -> None:
+    """Surface the code_ref hash mismatches the last render found (stderr, non-blocking).
+
+    Each such Evidence item names a file whose sha256 differs from the one it recorded, so
+    the render treated it as a pointer: the reproduction bundle does not ship or run it.
+    """
+    for line in compiler.code_ref_warnings:
+        print(f"  warning: {line} -- the file is not the recorded code, so it was not "
+              "shipped as the reproduction script (kept as a pointer)", file=sys.stderr)
+
+
 def _cmd_render(args: argparse.Namespace) -> int:
     """Render the paper/ artifacts from the recorded spec/evidence/claims (final stage).
 
     Reads spec + evidence + claims from the run dir and runs
     ``ResearchCompiler.stage_render`` with any agent-authored --prose / --si-prose /
-    --figures (the same options as `run`).
+    --figures (the same options as `run`). With ``--record-only`` it runs
+    ``ResearchCompiler.stage_render_record`` instead: the deposit ``record.tex`` and nothing
+    under ``paper/``.
     """
     run_dir = Path(args.run_dir)
     workspace = run_dir.parent.parent
@@ -1729,6 +1749,19 @@ def _cmd_render(args: argparse.Namespace) -> int:
         return e.exit_code
 
     compiler = ResearchCompiler(workspace_dir=workspace)
+    if args.record_only:
+        record_path = compiler.stage_render_record(spec)
+        print(f"render: deposited the record for Spec '{spec.id}' -> {record_path} "
+              "(record only: nothing written under paper/)")
+        _print_code_ref_warnings(compiler)
+        stale_draft = run_dir / "paper" / "draft.tex"
+        if stale_draft.is_file():
+            # Never deleted (an earlier render's output is the user's to keep or move), but
+            # named: verify judges ANY paper/draft.tex as the manuscript.
+            print(f"  note: {stale_draft} from an earlier render is left untouched, and "
+                  "verify still judges it as the manuscript -- move paper/ aside if this "
+                  "session only deposits the record.", file=sys.stderr)
+        return 0
     try:
         paper_path, si_path, record_path, figure_consistency = compiler.stage_render(
             spec, prose=prose, si_prose=si_prose, si=si, figures=figures
@@ -1747,6 +1780,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
     # not the Supporting Information.
     if record_path is not None:
         print(f"  deposit record: {record_path}")
+    _print_code_ref_warnings(compiler)
     fc = figure_consistency
     if fc is not None and not fc.ok:
         print("  figure consistency warnings (non-blocking):")
@@ -2503,6 +2537,21 @@ def main(argv=None) -> int:
     if args.command == "derive-claim":
         return _cmd_derive_claim(args)
     if args.command == "render":
+        # --record-only writes no manuscript, so every manuscript input is a contradiction.
+        # Checked here (not an argparse group): the four inputs combine freely with each
+        # other, and a mutually exclusive group would forbid that.
+        if args.record_only:
+            clashes = [flag for flag, given in (
+                ("--prose", args.prose),
+                ("--si", args.si),
+                ("--si-prose", args.si_prose),
+                ("--figures", args.figures),
+            ) if given]
+            if clashes:
+                parser.error(
+                    f"render: --record-only cannot be combined with {', '.join(clashes)} "
+                    "(it writes no manuscript)"
+                )
         return _cmd_render(args)
     if args.command == "resolve":
         return _cmd_resolve(args)

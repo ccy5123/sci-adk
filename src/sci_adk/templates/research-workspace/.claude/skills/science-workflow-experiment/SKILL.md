@@ -70,6 +70,14 @@ artifacts; the kernel carries no domain code.
   including null and negative results. Each entry carries `bears_on[]` (which
   hypotheses it speaks to, and the direction: supports / contradicts / inconclusive)
   STRICTLY per the Spec MethodPlan's pre-registered mapping.
+- `provenance.code_ref` names the code that produced the result, and the reproduction
+  bundle ships and re-runs the file it names. Write the script's path (workspace- or
+  run-relative), optionally followed by ` sha256=<hex>` of that file as it ran
+  (`sha256sum <file>`); or, for code that is not a workspace file, the commit/ref. One
+  script per `code_ref`: descriptions, the scripts that built its inputs, and notes such
+  as "no git commit" go in the finding. A `code_ref` that does not resolve to a file is
+  kept as a pointer the bundle cannot run, and a file whose sha256 no longer matches is
+  not shipped as the recorded code.
 
 Anti-HARKing rule: a result that bears on a hypothesis the Spec did NOT pre-map for
 it is a finding to report to the orchestrator (possibly an amendment), not a bearing

@@ -43,6 +43,7 @@ from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.core.spec_science import ScienceFinding, audit_spec_science
 from sci_adk.loop.claim_updater import ClaimUpdater, _NOVELTY_KINDS
+from sci_adk.loop.code_ref import describe_mismatch, resolve_code_ref
 from sci_adk.loop.judge import Judge
 from sci_adk.loop.literature_triggers import (
     contested_checkpoint,
@@ -187,6 +188,10 @@ class ResearchCompiler:
         # research entrypoints (`sci-adk run` / `derive-claim`, the sci verb) construct the
         # compiler with strict_science=True so a real run refuses a weak SUPPORTED.
         self.strict_science = strict_science
+        # The code_ref hash mismatches found by the most recent render (one line each:
+        # evidence id, file, recorded vs actual sha256). Such an item is never shipped as the
+        # recorded script; the CLI prints these as warnings.
+        self.code_ref_warnings: List[str] = []
 
     def compile(
         self,
@@ -675,49 +680,24 @@ class ResearchCompiler:
                 si_path = paper_dir / "si.tex"
                 si_path.write_text(si_tex, encoding="utf-8")
 
-        # Deposit record artifact (SPEC-SI-AUTHORING-001 M1, REQ-SA-201/202/203): a
-        # STANDALONE record.tex = the deterministic record dump (every Evidence item, the
-        # numeric data tables, ALL figures, the verdicts + frozen decision rules). It is the
-        # deposit's ONE retained deterministic record, written to the run dir (the deposit)
-        # via deposit_record_path -- OUTSIDE paper/, which holds the belief submission docs.
-        # render_si_latex is reused VERBATIM; only the write target + identity wording moved.
-        #
-        # digest=None on purpose: at COMPILE time the evidence may not yet be persisted to
-        # disk (the loop persists AFTER compile), so record_digest(run_dir) here would
-        # digest an INCOMPLETE run dir. So Phase 2 does NOT embed the digest -- the SI's
-        # integrity section points to `sci-adk verify` (which recomputes the digest over
-        # the persisted run). Embedding the real digest at render time is a later
-        # refinement. (Cross-DOCUMENT main<->SI \ref -- e.g. "Fig. S2" in the main paper
-        # resolving into the SI -- is deferred to Phase 3: separate compiles would need
-        # the `xr` package + a compile-order dependency; the SI is INTERNALLY consistent
-        # here via figure_labels' unique-id enforcement.)
-        # paper_body=paper_tex: the SI shares the SAME global fig<N> body-reference
-        # numbering as the main draft (Figure N here == Figure N there), so si.tex
-        # references the same paper/figures/fig<N> files the compiler co-located above --
-        # one shared file set for both standalone documents.
         # F3 reproduction bundle (design/paper-publishing-requirements.md §3): resolve each
         # Evidence item's provenance.code_ref -> (co-located script | bare-ref pointer),
-        # then (a) inline the listings in the SI's "Reproduction code" section, (b)
+        # then (a) inline the listings in the record's "Reproduction code" section, (b)
         # co-locate the resolvable scripts into paper/code/, and (c) write paper/reproduce.py.
-        # The compiler -- the SOLE filesystem toucher -- does the resolution + fs; the SI
+        # The compiler -- the SOLE filesystem toucher -- does the resolution + fs; the
         # renderer stays pure (it receives the resolved listings). When NO Evidence item
         # carries a code_ref, repro_listings is empty -> no section, no paper/code/, no
         # reproduce.py (the run's paper/ is byte-identical to today; the F3 regression
         # invariant). Resolution is fail-open: a bare commit ref is a POINTER, never an error.
         repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
 
-        # SPEC-SI-AUTHORING-001 REQ-SA-202: the deterministic dump is RELOCATED to the
-        # deposit as record.tex (re-named to read as the record, REQ-SA-203), freeing the
-        # paper/si.tex slot for the authored overflow path (M3). render_si_latex is reused
-        # VERBATIM (REQ-SA-201) -- only the WRITE TARGET changed. Living outside paper/ keeps
-        # the record EXEMPT from the per-run tool-vocab gate by construction (REQ-SA-206).
-        record_tex = render_si_latex(
-            spec, claims_list, evidence_list, figures=si_figures, digest=None,
-            prose=si_prose, paper_body=None, bib_path=bib_path,
-            repro_listings=repro_listings,
+        # The deposit record.tex (SPEC-SI-AUTHORING-001 M1) -- the SAME writer the
+        # record-only render uses, so the two cannot drift.
+        record_path = self._write_record(
+            spec, claims_list, evidence_list, run_dir,
+            repro_listings=repro_listings, figures=si_figures, prose=si_prose,
+            bib_path=bib_path,
         )
-        record_path = deposit_record_path(run_dir)
-        record_path.write_text(record_tex, encoding="utf-8")
 
         # Land the runnable bundle (paper/code/ + paper/reproduce.py) ONLY when at least
         # one code_ref resolved to a co-located script. A pointer-only set (every code_ref
@@ -735,6 +715,80 @@ class ResearchCompiler:
             figure_labels(figures), paper_tex
         )
         return paper_path, si_path, record_path, figure_consistency
+
+    def stage_render_record(
+        self,
+        spec: Spec,
+        *,
+        evidence: Optional[Sequence[EvidenceItem]] = None,
+        claims: Optional[Sequence[Claim]] = None,
+    ) -> Path:
+        """Deposit ONLY the deterministic record ``record.tex`` (``render --record-only``).
+
+        The first half of the two-session publish protocol: the session that ran the
+        experiments deposits the record and stops; a later session writes the paper from
+        it. A full :meth:`stage_render` with no prose would also write a skeleton
+        ``paper/draft.tex``, which ``verify`` judges as the conclusion-bearing manuscript
+        and fails against a frozen ``pubreqs.json`` -- so this stage writes NOTHING under
+        ``paper/`` (no draft, no SI, no figures, no bib copy, no ``reproduce.py``).
+
+        ``record.tex`` is byte-identical to the one a full render writes for the same
+        record: both go through :meth:`_write_record`, and the record's only external
+        reference -- ``\\bibliography{references}`` -- is emitted from the bib's stem, which
+        is ``references`` whether the path is the run's own ``references.bib`` (here) or its
+        ``paper/`` copy (the full render). Figures in the record come only from the
+        library-only ``si_figures`` (never passed here), and reproduction code is inlined
+        verbatim, so the record references no file under ``paper/``.
+
+        Returns the ``record.tex`` path.
+        """
+        evidence_list = (
+            list(evidence) if evidence is not None else self._load_evidence(spec)
+        )
+        claims_list = list(claims) if claims is not None else self._load_claims(spec)
+        run_dir = self.workspace_dir / "runs" / spec.id
+        return self._write_record(
+            spec, claims_list, evidence_list, run_dir,
+            repro_listings=self._resolve_repro_listings(evidence_list, run_dir),
+            figures=None, prose=None, bib_path=self._locate_bib_path(run_dir),
+        )
+
+    @staticmethod
+    def _write_record(
+        spec: Spec,
+        claims: Sequence[Claim],
+        evidence: Sequence[EvidenceItem],
+        run_dir: Path,
+        *,
+        repro_listings: Sequence[ReproListing],
+        figures: Optional[Sequence[AnyFigure]],
+        prose: Optional[SIProse],
+        bib_path: Optional[str],
+    ) -> Path:
+        """Write the deposit's ``record.tex`` (SPEC-SI-AUTHORING-001 M1) and return its path.
+
+        The ONE writer of the record, shared by :meth:`stage_render` and
+        :meth:`stage_render_record`. A STANDALONE document: every Evidence item, the numeric
+        data tables, the supplementary figures, the inlined reproduction code, and the
+        verdicts with their frozen decision rules. It lives at the run root via
+        ``deposit_record_path`` -- OUTSIDE ``paper/``, which holds the belief documents --
+        so the per-run tool-vocabulary gate never scans it (REQ-SA-206, by construction).
+        ``render_si_latex`` is reused verbatim (REQ-SA-201).
+
+        ``digest=None`` on purpose: at compile time the Evidence may not yet be persisted
+        (the loop persists AFTER compile), so a digest here would cover an incomplete run
+        dir; the record's integrity section points to ``sci-adk verify`` instead.
+        ``paper_body=None``: the record is standalone, so its figures are numbered in supply
+        order.
+        """
+        record_tex = render_si_latex(
+            spec, claims, evidence, figures=figures, digest=None,
+            prose=prose, paper_body=None, bib_path=bib_path,
+            repro_listings=repro_listings,
+        )
+        record_path = deposit_record_path(run_dir)
+        record_path.write_text(record_tex, encoding="utf-8")
+        return record_path
 
     # -- disk loaders (the verb path reads its inputs from the run dir) -----
 
@@ -970,16 +1024,22 @@ class ResearchCompiler:
         For each item carrying a ``code_ref``, decide -- DETERMINISTICALLY, no LLM -- one
         of two outcomes (design/paper-publishing-requirements.md §3, OF-4 fail-open):
 
-          - ``script``  -- the ``code_ref``, interpreted as a path RELATIVE TO the run dir
-            (then the workspace), points at an EXISTING READABLE FILE whose body can be
-            safely inlined (:func:`listing_inlinable`). The body is read here (the compiler
-            is the sole filesystem toucher; the renderers stay pure) and the
-            ``paper/code/`` basename is recorded; the script is co-located + driven by
-            ``reproduce.py``.
+          - ``script``  -- :func:`resolve_code_ref` names the recorded script: the
+            ``code_ref`` (or its leading path token, run dir first, then the workspace) is
+            an EXISTING READABLE FILE -- matching its recorded ``sha256=`` when one is given
+            -- whose body can be safely inlined (:func:`listing_inlinable`). The body is
+            read here (the compiler is the sole filesystem toucher; the renderers stay pure)
+            and the ``paper/code/`` basename is recorded; the script is co-located + driven
+            by ``reproduce.py``.
           - ``pointer`` -- everything else: a bare commit/ref (e.g. a 40-hex git hash, the
-            all-pointer shape), a missing path, an unreadable file, OR a body that cannot be
-            safely inlined. Recorded as a POINTER -- NEVER an error (fail-open), honest
-            about holding only the reference.
+            all-pointer shape), a missing path, a file whose sha256 no longer matches the
+            record, an unreadable file, OR a body that cannot be safely inlined. Recorded as
+            a POINTER -- NEVER an error (fail-open), honest about holding only the
+            reference. The ``reproduce.py`` driver embeds the FULL recorded ``code_ref``
+            either way, so the F3 gate's "driver references every recorded code_ref" holds.
+
+        A hash mismatch is also collected into ``self.code_ref_warnings`` (one line per
+        item, reset on every call) for the CLI to surface.
 
         Items with no ``code_ref`` contribute nothing -> an entirely code_ref-free run
         yields ``[]`` (the F3 byte-identical regression invariant). First-seen Evidence
@@ -988,11 +1048,17 @@ class ResearchCompiler:
         """
         out: List[ReproListing] = []
         used_names: set[str] = set()
+        self.code_ref_warnings = []
         for ev in evidence:
             code_ref = (ev.provenance.code_ref or "").strip()
             if not code_ref:
                 continue
-            resolved = self._resolve_code_ref_path(code_ref, run_dir)
+            resolution = resolve_code_ref(code_ref, run_dir, self.workspace_dir)
+            if resolution.hash_mismatch:
+                # The named file is not the code the record names: never shipped as the
+                # recorded script (it stays a pointer below); surfaced by the CLI.
+                self.code_ref_warnings.append(describe_mismatch(ev.id, resolution))
+            resolved = resolution.script
             if resolved is None:
                 out.append(
                     ReproListing(
@@ -1030,27 +1096,6 @@ class ResearchCompiler:
                 )
             )
         return out
-
-    def _resolve_code_ref_path(
-        self, code_ref: str, run_dir: Path
-    ) -> Optional[Path]:
-        """Resolve a ``code_ref`` to an existing readable FILE, or ``None`` (a pointer).
-
-        Interpret ``code_ref`` as a path relative to the run dir first (the natural home of
-        co-located generating code), then the workspace; an absolute path is honored as-is.
-        Returns the :class:`Path` iff it points at an existing regular file. A bare commit
-        hash (no such path) -> ``None`` -> a POINTER. Pure + deterministic; read-only.
-        """
-        candidate = Path(code_ref)
-        roots: List[Path]
-        if candidate.is_absolute():
-            roots = [candidate]
-        else:
-            roots = [run_dir / candidate, self.workspace_dir / candidate]
-        for path in roots:
-            if path.is_file():
-                return path
-        return None
 
     @staticmethod
     def _dedupe_code_filename(name: str, used: set[str]) -> str:

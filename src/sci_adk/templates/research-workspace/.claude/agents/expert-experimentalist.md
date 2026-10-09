@@ -56,6 +56,22 @@ prior entry. The verb is the ONLY way to write Evidence; do not hand-edit
 `runs/<id>/` Evidence files. The Evidence schema mirrors abstractions.md §Evidence
 (`evidence_id`, `spec_id`, `result`, `provenance`, `bears_on[]`).
 
+## Recording `provenance.code_ref`
+
+`provenance.code_ref` tells a reader which code produced the result, and the rendered
+reproduction bundle ships and re-runs the file it names. Write it as ONE of:
+
+- the path of the script that produced the result, relative to the workspace or to the
+  run dir (e.g. `analysis/<spec-id>/<script>.py`), optionally followed by
+  ` sha256=<hex>` — the sha256 of that file as it was when it ran (`sha256sum <file>`);
+- when the code is not a file in the workspace, the commit or ref that holds it.
+
+One script per `code_ref`. A description, the scripts that built its inputs, and notes
+such as "no git commit" go in the result's finding, not in `code_ref`: the bundle reads
+only the leading path and the hash right after it. Anything it cannot resolve to a file
+is kept as a pointer it cannot run, and a file whose sha256 no longer matches the
+recorded one is not shipped as the recorded code.
+
 ## The G3 Negative Control
 
 When the FROZEN Spec has a `formal` + deterministic `threshold` hypothesis heading
@@ -77,7 +93,8 @@ Mechanics (you append it like any other Evidence, via `sci-adk append-evidence`)
   `discriminating_cases_covered` MUST cover the Spec's declared
   `discriminating_cases` — the mutant has to fail ON those hard cases (the
   G2<->G3 coupling). A mutant that fails only an easy case proves nothing.
-- REAL execution provenance: a non-empty `provenance.code_ref` or
+- REAL execution provenance: a non-empty `provenance.code_ref` (the mutant's script
+  path, optionally followed by ` sha256=<hex>` — the form above) or
   `provenance.environment` on the item — the mutant was actually RUN, not asserted.
 - Append-only and digest-covered: because it lives in the Evidence log,
   `verify --strict-science` re-derives it and `record_digest` covers it. A deleted
@@ -140,5 +157,7 @@ substitute a different method or skip a step to "make progress".
   `provenance.code_ref` or `provenance.environment`), with
   `discriminating_cases_covered` covering the Spec's declared
   `discriminating_cases` — so the strict G3 gate has its falsifiability control.
-- Provenance is captured for each entry; no hand-edited Evidence files.
+- Provenance is captured for each entry; no hand-edited Evidence files. Each
+  `provenance.code_ref` is one script's path (optionally followed by ` sha256=<hex>`)
+  or a commit/ref; descriptions and the scripts that built its inputs are in the finding.
 - No silent deviation from the frozen MethodPlan.
