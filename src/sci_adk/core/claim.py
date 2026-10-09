@@ -28,7 +28,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .spec import HypothesisMode, Id
+from .spec import DecisionRuleKind, HypothesisMode, Id
 
 
 class ClaimStatus(str, Enum):
@@ -65,11 +65,24 @@ class ConfidenceType(str, Enum):
         credence: Subjective credence/probability in [0,1]
         posterior: Bayesian posterior probability in [0,1]
         graded: Qualitative graded level (strong/moderate/weak/none)
+        rule: Decided by a fixed pre-registered decision rule (e.g. a threshold or
+            interval test on a statistic). Carries NO degree of belief -- no value and
+            no level; the basis states the rule, the statistic, and its margin.
     """
 
     CREDENCE = "credence"
     POSTERIOR = "posterior"
     GRADED = "graded"
+    RULE = "rule"
+
+
+# Decision-rule kinds whose verdict is a fixed pre-registered test on a statistic: no
+# probability is computed, so the engine records their confidence as
+# ``ConfidenceType.RULE``. A numeric ``credence`` on a claim of one of these kinds was
+# written before that change and is a margin transform, not a probability.
+RULE_CONFIDENCE_KINDS: frozenset[DecisionRuleKind] = frozenset(
+    {DecisionRuleKind.THRESHOLD, DecisionRuleKind.INTERVAL}
+)
 
 
 class ConfidenceLevel(str, Enum):
@@ -116,10 +129,11 @@ class Confidence(BaseModel):
     for the field.
 
     Attributes:
-        type: Type of confidence (credence/posterior/graded)
+        type: Type of confidence (credence/posterior/graded/rule)
         value: Numeric confidence value in [0,1] (for credence/posterior)
         level: Qualitative confidence level (for graded)
-        basis: Natural-language justification (REQUIRED)
+        basis: Natural-language justification (REQUIRED; the only content of a
+            rule confidence)
     """
 
     model_config = {
@@ -152,6 +166,22 @@ class Confidence(BaseModel):
         """Ensure level is present for graded type."""
         if self.type == ConfidenceType.GRADED and self.level is None:
             raise ValueError("graded confidence requires level field")
+        return self
+
+    @model_validator(mode="after")
+    def validate_rule_carries_no_belief(self) -> "Confidence":
+        """A rule verdict is decided, not believed: it carries neither value nor level.
+
+        Without this, a margin transform could again be stored as if it were a degree of
+        belief -- the defect the ``rule`` type exists to remove.
+        """
+        if self.type == ConfidenceType.RULE and (
+            self.value is not None or self.level is not None
+        ):
+            raise ValueError(
+                "rule confidence carries no degree of belief: value and level must be "
+                "empty (the basis states the rule and its margin)"
+            )
         return self
 
     @field_validator("basis")
@@ -484,6 +514,7 @@ __all__ = [
     "ClaimStatus",
     "ConfidenceType",
     "ConfidenceLevel",
+    "RULE_CONFIDENCE_KINDS",
     "EvidenceLinkRole",
     "Confidence",
     "EvidenceLink",

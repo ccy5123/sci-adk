@@ -215,11 +215,14 @@ ClaimStatus = proposed
             | retracted      // withdrawn (e.g. provenance broken, reproduction failed)
 
 Confidence {
-  type        : credence | posterior | graded
+  type        : credence | posterior | graded | rule
   value       : number?                // credence/posterior in [0,1]
   level       : strong | moderate | weak | none ?   // graded fallback
   basis       : text                   // justification (required, recon meta-rule #4)
 }
+// rule (added 2026-10-09): the verdict was decided by a fixed pre-registered rule
+// (a threshold or interval test on a statistic) -- no degree of belief, so no value
+// and no level; the basis states the rule and the margin or interval.
 
 EvidenceLink {
   evidence_id : Id

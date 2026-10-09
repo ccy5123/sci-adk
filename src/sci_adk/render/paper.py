@@ -29,9 +29,9 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from sci_adk.core.claim import Claim, ClaimStatus, ConfidenceType
+from sci_adk.core.claim import RULE_CONFIDENCE_KINDS, Claim, ClaimStatus, ConfidenceType
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
-from sci_adk.core.spec import Hypothesis, Spec
+from sci_adk.core.spec import DecisionRule, Hypothesis, Spec
 from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
@@ -359,21 +359,30 @@ def _confidence_str(claim: Claim) -> str:
     return type_name
 
 
-def _confidence_display(claim: Claim) -> Optional[str]:
+def _confidence_display(
+    claim: Claim, rule: Optional[DecisionRule] = None
+) -> Optional[str]:
     """The confidence string to SHOW, or ``None`` to suppress it (render decision).
 
-    A deterministic threshold verdict produces a ``credence``/``posterior`` confidence
-    whose numeric ``value`` is the uninformative ``0.0`` default (the real judgment lives
-    in ``basis``, C3). Rendering "confidence 0 (credence)" next to a SUPPORTED status reads
-    as incoherent, so that uninformative zero is SUPPRESSED (the basis carries the
-    judgment). A genuine graded level, or a non-zero numeric value, is shown via
+    A verdict decided by a fixed pre-registered rule (threshold / interval) carries no
+    degree of belief: its confidence is ``rule``, with no value, and the basis line
+    (printed separately, C3) states the rule and the margin or interval. Nothing is shown.
+
+    A claim recorded BEFORE the engine emitted ``rule`` carries a ``credence`` whose value
+    is ``1 - exp(-|margin|)`` -- a margin transform, not a probability. When ``rule`` (the
+    hypothesis's frozen decision rule) is one of those kinds, that credence is suppressed
+    too, so an existing run renders cleanly without re-deriving.
+
+    A genuine probability (a bayesian ``posterior``) or a graded level is shown via
     :func:`_confidence_str`. Render-only -- it never changes belief, only what is printed.
     """
     c = claim.confidence
+    if c.type == ConfidenceType.RULE:
+        return None
     if (
-        c.value is not None
-        and c.value == 0.0
-        and c.type in (ConfidenceType.CREDENCE, ConfidenceType.POSTERIOR)
+        c.type == ConfidenceType.CREDENCE
+        and rule is not None
+        and rule.kind in RULE_CONFIDENCE_KINDS
     ):
         return None
     return _confidence_str(claim)
@@ -538,8 +547,13 @@ def render_paper(
         lines.append(f"- Hypothesis id: `{h.id}` ({mode})")
         lines.append(f"- Decision rule ({rule_kind}): {rule.expression}")
         if claim is not None:
-            lines.append(f"- **Status: {_status_str(claim)}** — "
-                         f"confidence {_confidence_str(claim)}")
+            # Same display rule as the record dump: no number for a rule verdict (old
+            # or new); the basis line below carries the rule and its margin.
+            confidence = _confidence_display(claim, rule)
+            status_line = f"- **Status: {_status_str(claim)}**"
+            if confidence is not None:
+                status_line += f" — confidence {confidence}"
+            lines.append(status_line)
             lines.append(f"- Basis: {claim.confidence.basis}")
         else:
             lines.append("- **Status: no claim** (no evidence bore on this hypothesis)")

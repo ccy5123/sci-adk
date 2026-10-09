@@ -43,6 +43,16 @@ A note on the stub Confidence (D8 vs Decision 5):
     marks the stub. The Decision-5 numeric type per kind is recorded separately
     via ``intended_confidence_type`` so Phase D2 can wire it in without
     guessing, and it is verified by the tests today.
+
+A note on rule verdicts (Decision 5, amended 2026-10-09):
+    A ``threshold`` or ``interval`` verdict is decided by the pre-registered rule
+    itself; no probability is computed. It carries ``ConfidenceType.RULE`` -- no
+    value, no level -- and its basis reports the statistic against the threshold
+    (with the margin) or the interval against the null value, in the statistic's
+    own units. These verdicts used to carry a "credence" ``1 - exp(-|margin|)``: a
+    margin transform labelled as a probability, not comparable across hypotheses.
+    Only ``bayesian`` emits a numeric value, because that value IS the recorded
+    posterior probability.
 """
 
 from __future__ import annotations
@@ -109,15 +119,15 @@ class EvidenceForHypothesis(BaseModel):
     )
 
 
-# Decision 5 (design/decision-engine.md §2.3 D4 + Decision 5 table): the
-# ConfidenceType the engine is intended to emit per rule kind once numeric
-# evaluation lands (Phase D2). The stub does not emit these numeric types yet
-# (see the module docstring's D8-vs-Decision-5 note); this mapping pins the
-# contract so Phase D2 wiring is unambiguous.
+# Decision 5 (design/decision-engine.md §2.3 D4 + Decision 5 table, amended
+# 2026-10-09): the ConfidenceType the engine emits for a DECIDED verdict of each rule
+# kind (an inconclusive verdict of any kind is GRADED/NONE). threshold/interval are
+# decided by the rule and carry no degree of belief (RULE, the kinds listed in
+# ``RULE_CONFIDENCE_KINDS``); bayesian carries the posterior probability.
 _INTENDED_CONFIDENCE_TYPE: dict[DecisionRuleKind, ConfidenceType] = {
-    DecisionRuleKind.THRESHOLD: ConfidenceType.CREDENCE,
+    DecisionRuleKind.THRESHOLD: ConfidenceType.RULE,
     DecisionRuleKind.BAYESIAN: ConfidenceType.POSTERIOR,
-    DecisionRuleKind.INTERVAL: ConfidenceType.CREDENCE,
+    DecisionRuleKind.INTERVAL: ConfidenceType.RULE,
     DecisionRuleKind.PROOF: ConfidenceType.GRADED,
     DecisionRuleKind.QUALITATIVE: ConfidenceType.GRADED,
 }
@@ -220,12 +230,10 @@ class DecisionEngine:
 
     def intended_confidence_type(self, kind: DecisionRuleKind) -> ConfidenceType:
         """
-        Return the ``ConfidenceType`` the engine is intended to emit for ``kind``
-        once numeric evaluation lands (Decision 5).
-
-        Phase D1 stubs do not yet emit these numeric types (see the module
-        docstring's D8-vs-Decision-5 note); this accessor pins the mapping so it
-        is verifiable now and so Phase D2 can wire it in without guessing (D4).
+        Return the ``ConfidenceType`` the engine emits for a decided verdict of
+        ``kind`` (Decision 5, D4): RULE for threshold/interval, POSTERIOR for
+        bayesian, GRADED for proof/qualitative. An inconclusive verdict of any kind
+        is GRADED/NONE instead (see the module docstring's D8-vs-Decision-5 note).
         """
         return _INTENDED_CONFIDENCE_TYPE[kind]
 
@@ -239,7 +247,7 @@ class DecisionEngine:
     # are combined first, then the rule is applied once (Decision 7, D6);
     # ``Bearing.weight`` (default 1.0) is the per-result multiplier (Decision 6).
     # The emitted ``Confidence.type`` follows Decision 5 (threshold/interval ->
-    # credence, bayesian -> posterior), matching ``intended_confidence_type``.
+    # rule, bayesian -> posterior), matching ``intended_confidence_type``.
     # ------------------------------------------------------------------
 
     # Supported comparison operators for the threshold kind. Each maps to a pure
@@ -262,7 +270,8 @@ class DecisionEngine:
         ``{"combine": "latest"|"mean"|"pool"}`` (Decision 7, default ``latest``).
         Condition met -> ``supports``; cleanly not met -> ``refutes``; a missing
         operand or required param -> ``inconclusive`` (D1/D3). Confidence is
-        ``credence`` with a margin-based value in [0, 1].
+        ``rule`` (no value): the basis quotes the statistic, op, threshold, and
+        the margin ``|statistic - threshold|`` in the statistic's own units.
         """
         params = rule.params or {}
 
@@ -296,18 +305,15 @@ class DecisionEngine:
         met = op(statistic, threshold)
         direction = BearingDirection.SUPPORTS if met else BearingDirection.REFUTES
 
-        # Margin-based credence: how decisively the statistic clears (or misses)
-        # the threshold. Larger |statistic - threshold| -> higher confidence. The
-        # squashing constant below is a *confidence-shaping* scalar, NOT a metric
-        # threshold (it never decides direction -- direction is purely op(stat,
-        # threshold)); D1 governs metric constants, which all come from params.
+        # The margin says how far the statistic clears (or misses) the threshold, in the
+        # statistic's own units. It is reported in the basis and NOT turned into a
+        # probability-like value: a margin is not comparable across hypotheses.
         margin = abs(statistic - threshold)
-        value = self._squash(margin)
         basis = (
             f"threshold rule: statistic 'point'={statistic:.6g} {op_token} {threshold:.6g} "
             f"is {'met' if met else 'not met'} (combine='{combine}', margin={margin:.6g})"
         )
-        return self._credence_verdict(direction, value, basis)
+        return self._rule_verdict(direction, basis)
 
     def _eval_bayesian(self, rule: DecisionRule, results: EvidenceForHypothesis) -> Verdict:
         """
@@ -393,7 +399,8 @@ class DecisionEngine:
 
         A CI that contains the null -> ``neutral`` (the rule's "includes => null").
         Missing ``null_value`` / ``ci`` -> ``inconclusive`` (D1/D3). Confidence is
-        ``credence`` from the CI's distance from null relative to its width.
+        ``rule`` (no value): the basis quotes the CI and the null value, and the
+        interval itself is the uncertainty statement.
         """
         params = rule.params or {}
 
@@ -436,13 +443,12 @@ class DecisionEngine:
             else:  # "excludes": either side of the null is support, no refute side
                 direction = BearingDirection.SUPPORTS
 
-        value = self._interval_confidence(lower, upper, null_value, contains_null)
         side_text = "contains" if contains_null else ("above" if lower > null_value else "below")
         basis = (
             f"interval rule: CI=[{lower:.6g}, {upper:.6g}] {side_text} null_value={null_value:.6g} "
             f"(support_side='{support_side}', combine='{combine}')"
         )
-        return self._credence_verdict(direction, value, basis)
+        return self._rule_verdict(direction, basis)
 
     # ------------------------------------------------------------------
     # Non-numeric kinds (Phase D3): route to the injected LLM-judge (Decision 4).
@@ -577,8 +583,8 @@ class DecisionEngine:
 
     # ------------------------------------------------------------------
     # Shared numeric helpers (Decision 6 weight, Decision 7 aggregation, and the
-    # confidence-shaping + verdict-building utilities). These hold NO metric
-    # constant: thresholds always arrive via the handlers from ``rule.params``.
+    # verdict-building utilities). These hold NO metric constant: thresholds
+    # always arrive via the handlers from ``rule.params``.
     # ------------------------------------------------------------------
 
     # The combine methods the engine knows (Decision 7). ``pool`` is currently a
@@ -688,53 +694,12 @@ class DecisionEngine:
         return (float(latest_ci[0]), float(latest_ci[1]))
 
     @staticmethod
-    def _squash(margin: float) -> float:
-        """
-        Map a non-negative margin to a continuous credence in [0, 1).
-
-        ``1 - exp(-margin)`` is monotone increasing in the margin, 0 at margin 0,
-        and asymptotes to 1 -- giving "further past/short of the threshold ->
-        higher confidence" (Decision 2) without any metric constant deciding the
-        direction. This is confidence shaping only; direction is decided upstream
-        by the rule's own op/params (D1).
-        """
-        return 1.0 - math.exp(-abs(margin))
-
-    def _interval_confidence(
-        self,
-        lower: float,
-        upper: float,
-        null_value: float,
-        contains_null: bool,
-    ) -> float:
-        """
-        Credence for an interval verdict from the CI's distance from null relative
-        to its width (Decision 2): a narrow CI far from null -> higher confidence.
-
-        Distance is from the nearer endpoint to the null. When the CI contains the
-        null the distance is 0, so confidence is 0 (genuinely uninformative about
-        a directional effect). Width 0 (a degenerate point CI) yields confidence
-        from the distance alone via the squash.
-        """
-        if contains_null:
-            return 0.0
-        distance = min(abs(lower - null_value), abs(upper - null_value))
-        width = abs(upper - lower)
-        # Distance-to-width ratio rewards tight intervals far from null; the raw
-        # ratio is squashed to [0, 1). A zero-width CI collapses to the distance.
-        ratio = distance / width if width > 0 else distance
-        return self._squash(ratio)
-
-    @staticmethod
-    def _credence_verdict(direction: BearingDirection, value: float, basis: str) -> Verdict:
-        """Assemble a CREDENCE verdict (Decision 5 for threshold/interval)."""
+    def _rule_verdict(direction: BearingDirection, basis: str) -> Verdict:
+        """Assemble a RULE verdict (Decision 5 for threshold/interval): decided by the
+        pre-registered rule, so it carries no value and no level -- only the basis."""
         return Verdict(
             direction=direction,
-            confidence=Confidence(
-                type=ConfidenceType.CREDENCE,
-                value=value,
-                basis=basis,
-            ),
+            confidence=Confidence(type=ConfidenceType.RULE, basis=basis),
         )
 
     @staticmethod

@@ -82,13 +82,14 @@ def _rule(kind: DecisionRuleKind) -> DecisionRule:
     raise AssertionError(f"unhandled kind in test helper: {kind}")
 
 
-# Decision 5 mapping (design/decision-engine.md §2.3 D4 + Decision 5 table):
-# the *intended* ConfidenceType the engine will emit per kind once numeric
-# evaluation lands in Phase D2.
+# Decision 5 mapping (design/decision-engine.md §2.3 D4 + Decision 5 table, amended
+# 2026-10-09): the ConfidenceType the engine emits per kind. threshold/interval are
+# decided by a fixed pre-registered rule and carry no degree of belief (RULE);
+# bayesian carries the posterior probability.
 _DECISION5_INTENDED_TYPE = {
-    DecisionRuleKind.THRESHOLD: ConfidenceType.CREDENCE,
+    DecisionRuleKind.THRESHOLD: ConfidenceType.RULE,
     DecisionRuleKind.BAYESIAN: ConfidenceType.POSTERIOR,
-    DecisionRuleKind.INTERVAL: ConfidenceType.CREDENCE,
+    DecisionRuleKind.INTERVAL: ConfidenceType.RULE,
     DecisionRuleKind.PROOF: ConfidenceType.GRADED,
     DecisionRuleKind.QUALITATIVE: ConfidenceType.GRADED,
 }

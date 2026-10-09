@@ -182,9 +182,10 @@ def render_si_latex(
       3. Quantitative data -- a ``tabular`` of the numeric ``Result`` fields for each item
          that has them; all-empty columns are skipped deterministically.
       4. Claims and verdicts -- per Claim: the hypothesis it answers, statement, status,
-         the confidence (type + value/level + the load-bearing **basis**, always present,
-         C3), its supporting/refuting evidence links, and the hypothesis's frozen
-         ``decision_rule`` (what it was judged against).
+         the confidence (value/level + type where it is a degree of belief -- none for a
+         verdict decided by a threshold / interval rule -- and the load-bearing
+         **basis**, always present, C3), its supporting/refuting evidence links, and the
+         hypothesis's frozen ``decision_rule`` (what it was judged against).
       5. Figures -- ALL ``figures`` via :func:`render_figure` (the SI shows every figure,
          native or image), in the SAME global body-reference order + the SAME ``fig<N>``
          identity as the main paper (so ``si.tex`` references the same
@@ -438,10 +439,15 @@ def render_si_latex(
             f"  \\item Answers hypothesis: "
             f"\\texttt{{{_latex_sanitize(str(claim.answers))}}}"
         )
-        # Status + confidence. The uninformative credence/posterior=0 default a
-        # deterministic threshold produces is SUPPRESSED (it would read as "confidence 0"
-        # next to SUPPORTED); the basis below carries the real judgment (C3).
-        confidence = _confidence_display(claim)
+        # Status + confidence. A verdict decided by a fixed pre-registered rule
+        # (threshold / interval) carries no degree of belief, so no confidence number is
+        # printed -- neither the value-less ``rule`` type nor a ``credence`` recorded on
+        # such a claim before the engine stopped emitting one (a margin transform). The
+        # basis below carries the rule and its margin (C3). A posterior is still shown.
+        hyp = hyp_by_id.get(claim.answers)
+        confidence = _confidence_display(
+            claim, hyp.decision_rule if hyp is not None else None
+        )
         status_line = (
             f"  \\item \\textbf{{Status: {_latex_sanitize(_status_str(claim))}}}"
         )
@@ -461,8 +467,7 @@ def render_si_latex(
         # The frozen decision rule this hypothesis was judged against (the spine of
         # anti-HARKing) + the honest evidence-validity label (referent + data_source(s),
         # moved here from the paper -- the structured honesty now lives in the record).
-        # Absent only if the claim answers an unknown hypothesis.
-        hyp = hyp_by_id.get(claim.answers)
+        # Absent only if the claim answers an unknown hypothesis (``hyp`` looked up above).
         if hyp is not None:
             rule = hyp.decision_rule
             rule_kind = (

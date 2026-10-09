@@ -61,7 +61,10 @@ Per hypothesis, from `runs/<id>/`:
 - `spec.json` — the hypothesis statement and its FROZEN `decision_rule` (what was
   pre-registered as counting as an answer, and at what threshold).
 - `evidence/` — the recorded results that bear on it.
-- `claims/` — the derived Claim, for the recorded status and its basis.
+- `claims/` — the derived Claim, for the recorded status and its basis. A claim
+  decided by a threshold or interval rule carries no degree of belief: read the
+  margin in its basis and the interval in `evidence/`. A numeric `confidence.value`
+  on such a claim (an older record) is not a probability.
 - `pubreqs.json` — the frozen `venue`. I need it for my second duty below.
 - the manuscript (`paper/draft.tex` unless the orchestrator names another) — for
   the conclusion sentence in its context. A sentence can read differently in

@@ -546,7 +546,9 @@ class ClaimUpdater:
         computed status DIFFERS from the current one -- threads the move through
         ``Claim.update_status`` (which appends a ``StatusChange``, satisfying C1
         non-monotone movement and C2 append-only history). Confidence is always
-        refreshed from the engine verdict (basis remains required, C3). A
+        REPLACED by the engine verdict's (basis remains required, C3) -- never merged
+        with the old one, so a value or level recorded under a previous verdict (e.g.
+        a pre-RULE ``credence``) cannot leak into the new confidence. A
         ``SUPPORTED -> CONTESTED -> REFUTED`` path is legal and expected, not a
         regression. No spurious StatusChange is appended when the status is stable
         (D5: only NEW evidence that moves the verdict moves the history).
@@ -560,12 +562,7 @@ class ClaimUpdater:
                 note=f"Re-evaluation moved status to {status.value}",
             )
 
-        claim.update_confidence(
-            confidence_type=confidence.type,
-            value=confidence.value,
-            level=confidence.level,
-            basis=confidence.basis,
-        )
+        claim.confidence = confidence
         return claim
 
     def _create_claim(

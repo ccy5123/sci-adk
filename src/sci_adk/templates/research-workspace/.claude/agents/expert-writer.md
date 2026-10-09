@@ -105,7 +105,11 @@ workspace's runs to the near-submission [1] contract — not a per-run `paper/`.
 - **Results** — per logical block: effect size + uncertainty + robustness / domain. Author
   each so that EVERY quantitative statement traces to a recorded Claim and is emitted behind
   the value-fidelity markup (`\evval`/`\status`) so the gate can BIND the number to the
-  record. Confirmatory and exploratory results are clearly SEPARATED.
+  record. Confirmatory and exploratory results are clearly SEPARATED. A verdict decided by
+  a threshold or interval rule carries no degree of belief: report the recorded estimate
+  and its interval against the pre-registered threshold or band (e.g. "ρ = 0.62;
+  threshold 0.5"), never a confidence value and never a margin you computed — a
+  derived number is not in the record and fails the number audit.
 - **Discussion** — interpretation, limits, honest negatives (null / negative / refuted are
   first-class, not buried), and future work.
 - Throughout: NAME THE SCIENCE, not the toolchain (the `paper_tool_clean` rule extends to

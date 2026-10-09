@@ -127,7 +127,7 @@ def test_t1_interval_rule_drives_nonmonotone_demotion(tmp_path):
     support = _ci_evidence("ev-d5-support", 2.0, 5.0, created_at=_T0)
     claim1 = updater.update_claims_from_evidence([support])[0]
     assert claim1.status == ClaimStatus.SUPPORTED
-    assert claim1.confidence.type == ConfidenceType.CREDENCE
+    assert claim1.confidence.type == ConfidenceType.RULE
     assert "interval rule" in claim1.confidence.basis  # the rule drove it, not a vote
 
     # Append a SYNTHETIC refuting result: CI entirely BELOW null, arriving later.

@@ -146,7 +146,7 @@ _T1 = datetime(2026, 6, 15, 11, 0, 0, tzinfo=timezone.utc)
 
 def test_threshold_support_maps_to_supported_with_engine_confidence(tmp_path: Path):
     """A threshold rule met by the evidence -> SUPPORTED; confidence is the
-    engine's CREDENCE (NOT a hardcoded vote-count credence)."""
+    engine's value-less RULE confidence (NOT a hardcoded vote-count credence)."""
     rule = DecisionRule(
         kind=DecisionRuleKind.THRESHOLD,
         expression="point >= 0.9 => support",
@@ -160,9 +160,10 @@ def test_threshold_support_maps_to_supported_with_engine_confidence(tmp_path: Pa
     assert len(claims) == 1
     claim = claims[0]
     assert claim.status == ClaimStatus.SUPPORTED
-    # Engine emits CREDENCE for threshold (Decision 5), with a real numeric value.
-    assert claim.confidence.type == ConfidenceType.CREDENCE
-    assert claim.confidence.value is not None and 0.0 <= claim.confidence.value <= 1.0
+    # Engine emits RULE for threshold (Decision 5, amended): decided by the rule, it
+    # carries no degree of belief -- no numeric value.
+    assert claim.confidence.type == ConfidenceType.RULE
+    assert claim.confidence.value is None
     # The basis must be the engine's (mentions the threshold rule), NOT the old
     # "N supporting, M refuting" vote-count basis.
     assert "threshold rule" in claim.confidence.basis
@@ -203,7 +204,7 @@ def test_interval_support_maps_to_supported(tmp_path: Path):
 
     claim = claims[0]
     assert claim.status == ClaimStatus.SUPPORTED
-    assert claim.confidence.type == ConfidenceType.CREDENCE
+    assert claim.confidence.type == ConfidenceType.RULE
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ def test_threshold_not_met_maps_to_refuted(tmp_path: Path):
 
     claim = claims[0]
     assert claim.status == ClaimStatus.REFUTED
-    assert claim.confidence.type == ConfidenceType.CREDENCE
+    assert claim.confidence.type == ConfidenceType.RULE
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +252,9 @@ def test_mixed_raw_bearings_map_to_contested(tmp_path: Path):
 
     claim = claims[0]
     assert claim.status == ClaimStatus.CONTESTED
-    # Confidence still flows from the engine (a credence for threshold), not a
-    # fabricated contested value.
-    assert claim.confidence.type == ConfidenceType.CREDENCE
+    # Confidence still flows from the engine (the value-less rule confidence for
+    # threshold), not a fabricated contested value.
+    assert claim.confidence.type == ConfidenceType.RULE
     assert claim.confidence.basis  # non-empty (C3)
     # evidence_set is record-keeping (C5): both a supporting and a refuting link.
     roles = {link.role.value for link in claim.evidence_set}

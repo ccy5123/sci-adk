@@ -88,7 +88,12 @@ empty skeleton. Then stop and hand off.
 
 If you are the paper session, **`record.tex` is your input** — the complete Evidence,
 the numeric tables, the figures, the verdicts with their frozen decision rules. Read
-it and work out what was found and what it means. Then:
+it and work out what was found and what it means. A verdict decided by a threshold or
+interval rule carries no degree of belief: report the recorded estimate and its interval
+against the pre-registered threshold or band, never a confidence value and never a margin
+you computed (a derived number is not in the record and fails the number audit; only a
+Bayesian rule's posterior is a probability).
+Then:
 
 1. author the manuscript into a `prose.json` (a `PaperProse`: title / abstract /
    introduction / methods / results / discussion);

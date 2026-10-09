@@ -140,14 +140,42 @@ def test_si_suppresses_uninformative_credence_zero():
     assert "threshold rule" in si
 
 
-def test_si_shows_meaningful_confidence():
+def test_si_hides_a_threshold_claims_credence_at_any_value():
+    """A credence recorded on a threshold-rule claim (before the engine stopped emitting
+    one) is a margin transform, not a probability -- hidden at ANY value, not only 0."""
     hyp = _hyp()
     spec = _spec(hyp)
-    claim = _threshold_claim(hyp, value=0.92)  # a meaningful credence is shown
+    claim = _threshold_claim(hyp, value=0.92)
     ev = _experiment("ev-c", 0.0, '{"collision_count": 0}')
 
     si = render_si_latex(spec, [claim], [ev])
-    assert "confidence 0.92" in si
+    assert "confidence 0.92" not in si
+    assert "threshold rule" in si  # the basis still carries the judgment (C3)
+
+
+def test_si_shows_meaningful_confidence():
+    """A genuine probability -- a Bayesian rule's posterior -- is still shown."""
+    hyp = _hyp().model_copy(
+        update={
+            "decision_rule": DecisionRule(
+                kind=DecisionRuleKind.BAYESIAN,
+                expression="posterior odds >= 10 => support",
+                params={"min_odds": 10.0},
+            )
+        }
+    )
+    spec = _spec(hyp)
+    claim = _threshold_claim(hyp).model_copy(
+        update={
+            "confidence": Confidence(
+                type=ConfidenceType.POSTERIOR, value=0.92, basis="bayesian rule: odds 11.5"
+            )
+        }
+    )
+    ev = _experiment("ev-c", 0.0, '{"collision_count": 0}')
+
+    si = render_si_latex(spec, [claim], [ev])
+    assert "confidence 0.92 (posterior)" in si
 
 
 # -- 3.3 dedup (SI) -----------------------------------------------------------

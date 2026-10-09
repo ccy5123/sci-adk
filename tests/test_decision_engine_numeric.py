@@ -6,8 +6,9 @@ Spec: design/decision-engine.md (CONFIRMED 2026-06-15), focus on
       params -> direction + confidence mappings
     - Decision 3: interval null value comes from params (null_value + support_side);
       absent null_value -> inconclusive (D1), never a default
-    - Decision 5: kind -> ConfidenceType (threshold/interval=credence,
-      bayesian=posterior); basis always required (D2)
+    - Decision 5: kind -> ConfidenceType (threshold/interval=rule -- decided by the
+      pre-registered rule, no degree of belief, no value; bayesian=posterior);
+      basis always required (D2)
     - Decision 6: Bearing.weight is a per-result multiplier (default 1.0)
     - Decision 7: rule-scoped aggregation -- combine the per-result statistics
       first, then apply the rule once; combine method from params, default "latest"
@@ -153,14 +154,14 @@ class TestThreshold:
         assert verdict.direction == BearingDirection.INCONCLUSIVE
         assert "value" in verdict.confidence.basis.lower()
 
-    def test_confidence_type_is_credence_with_value(self, engine):
-        """Decision 5: threshold -> CREDENCE; margin-based numeric value in [0,1]."""
+    def test_confidence_type_is_rule_without_value(self, engine):
+        """Decision 5 (amended): threshold -> RULE. The verdict is decided by the
+        pre-registered rule, so it carries no degree of belief: no value, no level."""
         verdict = engine.evaluate(
             _threshold_rule(">=", 0.5), _results(_evidence_item(_point_result(0.9)))
         )
-        assert verdict.confidence.type == ConfidenceType.CREDENCE
-        assert verdict.confidence.value is not None
-        assert 0.0 <= verdict.confidence.value <= 1.0
+        assert verdict.confidence.type == ConfidenceType.RULE
+        assert verdict.confidence.value is None
         assert verdict.confidence.level is None
 
     def test_basis_quotes_statistic_op_value(self, engine):
@@ -172,15 +173,18 @@ class TestThreshold:
         assert ">=" in basis
         assert "0.5" in basis
 
-    def test_larger_margin_gives_higher_confidence(self, engine):
-        """Margin-based confidence is monotone: further past the threshold -> higher."""
+    def test_margin_is_reported_in_basis_not_as_confidence(self, engine):
+        """How far past the threshold is reported as the margin, in the statistic's own
+        units, in the basis -- never squashed into a probability-like value."""
         near = engine.evaluate(
             _threshold_rule(">=", 0.5), _results(_evidence_item(_point_result(0.55)))
-        ).confidence.value
+        ).confidence
         far = engine.evaluate(
             _threshold_rule(">=", 0.5), _results(_evidence_item(_point_result(0.99)))
-        ).confidence.value
-        assert far > near
+        ).confidence
+        assert near.value is None and far.value is None
+        assert "margin=0.05" in near.basis
+        assert "margin=0.49" in far.basis
 
     def test_supports_with_less_than_operator(self, engine):
         """op '<' is honored: a small statistic meets a '<' threshold -> supports."""
@@ -435,14 +439,14 @@ class TestInterval:
         assert verdict.direction == BearingDirection.INCONCLUSIVE
         assert "null_value" in verdict.confidence.basis.lower()
 
-    def test_confidence_type_is_credence_with_value(self, engine):
-        """Decision 5: interval -> CREDENCE; numeric value in [0,1] from CI vs null."""
+    def test_confidence_type_is_rule_without_value(self, engine):
+        """Decision 5 (amended): interval -> RULE. Whether the CI clears the null is
+        decided by the pre-registered rule: no degree of belief, no value, no level."""
         verdict = engine.evaluate(
             _interval_rule(0.0, "excludes"), _results(_evidence_item(_ci_result(0.2, 0.8)))
         )
-        assert verdict.confidence.type == ConfidenceType.CREDENCE
-        assert verdict.confidence.value is not None
-        assert 0.0 <= verdict.confidence.value <= 1.0
+        assert verdict.confidence.type == ConfidenceType.RULE
+        assert verdict.confidence.value is None
         assert verdict.confidence.level is None
 
     def test_basis_quotes_ci_and_null_value(self, engine):
@@ -453,15 +457,18 @@ class TestInterval:
         assert "0.2" in basis and "0.8" in basis  # the CI
         assert "null" in basis  # the null value reference
 
-    def test_narrower_ci_farther_from_null_gives_higher_confidence(self, engine):
-        """Confidence rises with distance from null and narrowness of the CI."""
+    def test_ci_is_reported_in_basis_not_as_confidence(self, engine):
+        """The interval itself is the uncertainty statement: its bounds are reported in
+        the basis -- never collapsed into a probability-like value from width/distance."""
         near_wide = engine.evaluate(
             _interval_rule(0.0, "excludes"), _results(_evidence_item(_ci_result(0.01, 0.6)))
-        ).confidence.value
+        ).confidence
         far_narrow = engine.evaluate(
             _interval_rule(0.0, "excludes"), _results(_evidence_item(_ci_result(0.5, 0.6)))
-        ).confidence.value
-        assert far_narrow > near_wide
+        ).confidence
+        assert near_wide.value is None and far_narrow.value is None
+        assert "CI=[0.01, 0.6]" in near_wide.basis
+        assert "CI=[0.5, 0.6]" in far_narrow.basis
 
     def test_aggregation_latest_is_default(self, engine):
         """Decision 7: default combine='latest' uses the most-recent CI. Latest CI

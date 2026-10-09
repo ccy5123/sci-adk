@@ -220,8 +220,9 @@ Decisions 3, 4, and 5, which fix *semantics*.
     (D1/D3).
   - Direction: condition met → `supports`; cleanly not met → `refutes`; missing
     operand → `inconclusive`.
-  - Confidence: `type=credence`, `value` a monotone function of margin
-    (how far past/short of threshold), `basis` quotes statistic, op, and value.
+  - Confidence: `type=rule`, no `value` (amended 2026-10-09, see Decision 5);
+    `basis` quotes statistic, op, value, and the margin (how far past/short of
+    threshold, in the statistic's own units).
 - **bayesian.** Compare posterior odds to a params threshold.
   - Reads: `Result.posterior` (a probability in [0,1], `evidence.py:165`).
     Convert to odds `p/(1-p)`. Params: `{"min_odds": <k>}` (the rule's own
@@ -237,9 +238,9 @@ Decisions 3, 4, and 5, which fix *semantics*.
   - Direction: CI entirely above/below null and on the rule's "support" side →
     `supports`; CI contains null → `neutral`/`null` (the rule's "includes 0 =>
     null", `spec.py:109-113`); CI excludes null on the refute side → `refutes`.
-  - Confidence: `type=credence`, `value` from interval width/position relative to
-    null (narrow CI far from null → higher), `basis` quotes the CI and the null
-    value used.
+  - Confidence: `type=rule`, no `value` (amended 2026-10-09, see Decision 5);
+    `basis` quotes the CI and the null value used -- the interval itself is the
+    uncertainty statement.
 
 **Alternatives.**
 1. Parse the numeric thresholds out of `rule.expression` (the human text)
@@ -257,7 +258,9 @@ margin-based confidence keeps `value` continuous (not binary), honoring S3 and
 C-confidence-is-continuous. Confidence: **moderate** — the field mappings are
 sound, but the exact confidence formulas (margin → value) are tuning the human
 may want to weigh in on; they are intentionally simple and documented as
-revisable.
+revisable. (Revised 2026-10-09: the margin → value formulas are removed for
+threshold/interval -- see the Decision 5 amendment; the margin and the CI are
+reported in `basis`.)
 
 ### Decision 3 — Where does an `interval` rule get its null value?
 
@@ -343,10 +346,25 @@ whether the LLM-judge call belongs in the engine or in a separate
 | `DecisionRuleKind` | `ConfidenceType` | `value` / `level` source |
 |--------------------|------------------|--------------------------|
 | `bayesian`         | `posterior`      | `value = Result.posterior` |
-| `threshold`        | `credence`       | `value` from margin past threshold |
-| `interval`         | `credence`       | `value` from CI position vs null |
+| `threshold`        | `rule` (amended) | no `value`/`level`; margin in `basis` |
+| `interval`         | `rule` (amended) | no `value`/`level`; CI vs null in `basis` |
 | `proof`            | `graded`         | `level = strong` (verified) / else routed |
 | `qualitative`      | `graded`         | `level` from LLM-judge / human |
+
+**Amendment (2026-10-09, user decision).** `threshold` and `interval` originally
+mapped to `credence` with `value = 1 - exp(-|margin|)` (threshold) or the same
+squash of distance-to-width (interval). A real run showed the defect: that value
+is a monotone transform of a margin in the statistic's own units, not a
+probability, and not comparable across hypotheses (a SUPPORTED slope hypothesis
+recorded "credence 0.0666" from margin 0.0689, a SUPPORTED correlation hypothesis
+"credence 0.111" from margin 0.1176), yet `record.tex` printed it as a confidence.
+These verdicts are decided by the pre-registered rule and carry no degree of
+belief, so they now emit the additive `ConfidenceType.rule` (no `value`, no
+`level`; the validator rejects either), and the margin / interval stays in
+`basis`. Alternative 2 below ("no new type") is superseded on this point. Claims
+recorded before the change keep their `credence` on disk; render suppresses that
+number for these kinds, `verify` still reproduces them (it compares status), and
+re-deriving replaces the confidence with the `rule` one.
 
 `basis` is **always** populated (D2, mirroring C3, `claim.py:138`). `graded`
 verdicts set `level` and leave `value` null; `posterior`/`credence` set `value`
@@ -589,10 +607,10 @@ Phases are ordered by dependency; no time estimates (per project convention).
 | # | Decision | Recommended answer |
 |---|----------|--------------------|
 | 1 | Dispatcher / location | New `loop/decision_engine.py`; `match` on `rule.kind`; `ClaimUpdater` delegates and only assembles the Claim |
-| 2 | Numeric mapping | threshold←`point`+op/value; bayesian←`posterior`→odds vs `min_odds`; interval←`ci` vs null; margin-based continuous confidence |
+| 2 | Numeric mapping | threshold←`point`+op/value; bayesian←`posterior`→odds vs `min_odds`; interval←`ci` vs null; margin / CI reported in `basis`, no confidence value (amended 2026-10-09, was margin-based continuous confidence) |
 | 3 | Interval null value | Extend `params` (`null_value`+side), require params for `interval`; expression-parse only as fallback; never default to 0 |
 | 4 | Non-numeric kinds | [CONFIRMED, override] BOTH proof & qualitative→LLM-judge (Claude); for proof the judge does a counterexample search + human spot-check on a high-confidence "verified" verdict; human fallback on low confidence; never fabricate a number (D8) |
-| 5 | Confidence.type | bayesian→posterior, threshold/interval→credence, proof/qualitative→graded; `basis` always required |
+| 5 | Confidence.type | bayesian→posterior, threshold/interval→rule (no value; amended 2026-10-09, was credence), proof/qualitative→graded; `basis` always required |
 | 6 | Bearing.weight | Consume it as a per-result multiplier (default 1.0); it is record data, not a global metric |
 | 7 | Aggregation | Rule-scoped: combine statistics then apply rule once; combine method via `params` (default `latest`); proof counterexample is decisive |
 | 8 | Non-monotone | Recompute verdict over full record, map direction→status, thread through `Claim.update_status` so demotion appends `StatusChange` (C1/C2) |

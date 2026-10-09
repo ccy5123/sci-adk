@@ -169,9 +169,9 @@ class TestAutonomousVerdict:
         assert len(result.claims) == 1
         claim = result.claims[0]
         assert claim.status == ClaimStatus.SUPPORTED
-        # The verdict came from the engine's threshold handler (credence basis quotes
-        # the rule), NOT from a judge and NOT from a bearing vote-count.
-        assert claim.confidence.type == ConfidenceType.CREDENCE
+        # The verdict came from the engine's threshold handler (rule confidence whose
+        # basis quotes the rule), NOT from a judge and NOT from a bearing vote-count.
+        assert claim.confidence.type == ConfidenceType.RULE
         assert "threshold rule" in claim.confidence.basis
         # Honest scoping: the claim is exploratory (tested-set support, not a proof).
         assert claim.mode == HypothesisMode.EXPLORATORY

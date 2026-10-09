@@ -81,9 +81,12 @@ itself needs to change, that is a manager-prereg amendment, not your call.
 
 ## Return Contract (to the orchestrator)
 
-- Each Claim derived: hypothesis id → status + confidence + the one-line basis
-  (which Evidence, which `bears_on[]`, applied against which DecisionRule). Make
-  CONTESTED/REFUTED outcomes explicit — they are results, not failures.
+- Each Claim derived: hypothesis id → status + the one-line basis (which Evidence,
+  which `bears_on[]`, applied against which DecisionRule). A verdict decided by a
+  threshold or interval rule carries no degree of belief: report the recorded estimate
+  and its interval against the pre-registered threshold or band, never a confidence
+  value (only a Bayesian rule's posterior is a probability). Make CONTESTED/REFUTED outcomes explicit — they are
+  results, not failures.
 - Any verdict authored (path + what it asserts + its basis).
 - The `sci-adk verify` self-check result (did every Claim reproduce from the record).
 
