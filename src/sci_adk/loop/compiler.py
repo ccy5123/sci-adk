@@ -864,7 +864,7 @@ class ResearchCompiler:
         Two sources (a cited DOI is cited regardless of whether its PDF downloaded):
           (a) ``LITERATURE`` EvidenceItems -- their ``result.finding`` is the JSON
               summary the acquirer writes (``acquired[].doi`` + ``failed[].doi``);
-          (b) the run's ``artifacts/literature/manifest.csv`` (the literature-manifest shape,
+          (b) the run's literature ``manifest.csv`` (see ``_LITERATURE_DIRS``; the shape
               where literature was acquired ad-hoc with no LITERATURE EvidenceItem).
 
         Pure parsing of recorded artifacts -- no acquisition, no network.
@@ -895,8 +895,8 @@ class ResearchCompiler:
                         _add(entry.get("doi"))
 
         # (b) manifest.csv on disk.
-        manifest = run_dir / "artifacts" / "literature" / "manifest.csv"
-        if manifest.exists():
+        manifest = ResearchCompiler._literature_file(run_dir, "manifest.csv")
+        if manifest is not None:
             try:
                 with manifest.open(encoding="utf-8", newline="") as fh:
                     for row in csv.DictReader(fh):
@@ -906,22 +906,39 @@ class ResearchCompiler:
 
         return seen
 
+    # Where a run's literature lives, in lookup order: ``literature/`` is where
+    # LiteratureAcquirer writes (literature_acquirer.py, ``self.literature_dir``);
+    # ``artifacts/literature/`` is the older layout some runs and fixtures still use.
+    _LITERATURE_DIRS: tuple[tuple[str, ...], ...] = (
+        ("literature",),
+        ("artifacts", "literature"),
+    )
+
+    @staticmethod
+    def _literature_file(run_dir: Path, name: str) -> Optional[Path]:
+        """The run's literature file ``name`` from the first layout that has it, or None."""
+        for parts in ResearchCompiler._LITERATURE_DIRS:
+            path = run_dir.joinpath(*parts, name)
+            if path.is_file():
+                return path
+        return None
+
     @staticmethod
     def _locate_bib_path(run_dir: Path) -> Optional[str]:
-        """Return the run's ``artifacts/literature/references.bib`` path when present.
+        """Return the run's ``references.bib`` path when present (see ``_LITERATURE_DIRS``).
 
         The renderer wires an EXISTING ``.bib`` (it never generates one); this just
         locates it. ``None`` when absent -> the renderer emits no ``\\bibliography``.
         """
-        bib = run_dir / "artifacts" / "literature" / "references.bib"
-        return str(bib) if bib.exists() else None
+        bib = ResearchCompiler._literature_file(run_dir, "references.bib")
+        return str(bib) if bib is not None else None
 
     @classmethod
     def _colocate_bib(cls, run_dir: Path, paper_dir: Path) -> Optional[str]:
         """Copy the run's ``references.bib`` next to ``draft.tex`` and return its path.
 
         Overleaf self-containment: when ``_locate_bib_path`` finds the run's
-        ``artifacts/literature/references.bib``, copy it verbatim to
+        ``references.bib`` (see ``_LITERATURE_DIRS``), copy it verbatim to
         ``paper/references.bib`` so uploading the ``paper/`` folder as-is resolves
         ``\\bibliography{references}``. The returned path's stem is ``references``, so
         the (pure) renderer emits exactly that ``\\bibliography`` key. ``None`` when no
