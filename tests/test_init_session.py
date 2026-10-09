@@ -49,10 +49,11 @@ _FILE_ASSETS = (
     ".claude/agents/expert-literature.md",
     # v2-promoted worker (1)
     ".claude/agents/expert-replicator.md",
-    # v1 guard agents (3)
+    # guard agents (4)
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
+    ".claude/agents/evaluator-conclusions.md",
     # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
@@ -77,6 +78,27 @@ _HOOK_SHELL_SCRIPTS = (
     ".claude/hooks/sci-adk/reanchor.sh",
 )
 _SETTINGS = ".claude/settings.json"
+
+
+def test_every_shipped_claude_asset_is_installed():
+    """The install list is hand-maintained; the template tree is the source of truth.
+
+    evaluator-conclusions.md was added to the template kit without being added to the
+    install list (or to the two lockstep copies in the tests), so no workspace ever
+    received it while the publish skill told the orchestrator to spawn it. Derive the
+    expectation from the tree so a new agent, skill or command cannot be left out again.
+    """
+    import sci_adk.init_session as init_session_mod
+
+    kit = Path(init_session_mod.__file__).parent / "templates" / "research-workspace"
+    shipped = {
+        p.relative_to(kit).as_posix()
+        for p in (kit / ".claude").rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
+    }
+    shipped.discard(_SETTINGS)  # merged into the user's settings, not copied
+    missing = sorted(shipped - set(init_session_mod._PLAIN_ASSETS))
+    assert not missing, f"shipped in the template kit but never installed: {missing}"
 
 
 def _settings(target: Path) -> dict:

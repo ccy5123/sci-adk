@@ -77,10 +77,11 @@ _PLAIN_ASSETS = (
     ".claude/agents/expert-literature.md",
     # v2-promoted worker (1) -- independent replication
     ".claude/agents/expert-replicator.md",
-    # v1 guard agents (3) -- advisory; sci-adk verify is the sole verdict
+    # guard agents (4) -- advisory; sci-adk verify is the sole verdict
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
+    ".claude/agents/evaluator-conclusions.md",
     # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
