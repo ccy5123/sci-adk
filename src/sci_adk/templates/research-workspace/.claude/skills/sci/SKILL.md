@@ -200,8 +200,11 @@ record — that is the failure this split exists to prevent.
   frozen contract, so the Stop hook blocks the end of the session.
 - **Session B (a NEW session)** writes the paper, reading `runs/<id>/record.tex` as
   its input — not this conversation. It authors a `prose.json`, runs
+  `sci-adk numbers draft <run> --prose prose.json` and completes `runs/<id>/numbers.json`
+  (every number the paper states, bound to its recorded source), runs
   `sci-adk render <run> --prose prose.json`, records the conclusions in
-  `declarations.json`, and runs `sci-adk verify`. Give it the run id, the path to
+  `declarations.json`, and runs `sci-adk verify`. A number with no recorded home comes
+  back to the experiment stage — the paper session never adds a value to the record. Give it the run id, the path to
   `record.tex`, and the `venue` from the frozen `pubreqs.json` — the paper is judged
   against THAT venue's readers, and a term that is standard in one is opaque in
   another. Warn it that `record.tex` is the machinery's own document: a word being in
@@ -230,22 +233,28 @@ the engine can catch it.
    + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`). Pass the frozen
    `pubreqs.json` path in the spawn prompt. The writer ALSO records the paper's
    conclusions in `runs/<id>/declarations.json` — per conclusion, the hypothesis, the
-   status it is written to, and the sentence VERBATIM. The manuscript itself carries no
-   markup for this: what is submitted is the `.tex` source, so the binding lives beside
-   the paper, not inside it. Optionally `Agent(subagent_type: "evaluator-rigor")` for the
-   paper-consistency pre-check.
+   status it is written to, and the sentence VERBATIM — and declares every number the
+   paper states in `runs/<id>/numbers.json` (proposed by `sci-adk numbers draft`). The
+   manuscript itself carries no markup for either: what is submitted is the `.tex` source,
+   so the binding lives beside the paper, not inside it. If the writer returns numbers with
+   no recorded home, route them back to `/sci experiment` to be recorded as named values.
+   Optionally `Agent(subagent_type: "evaluator-rigor")` for the paper-consistency pre-check.
 3. Optionally `Agent(subagent_type: "evaluator-conclusions")` → a BLIND reading of each
    declared conclusion (which status does the sentence assert?), written to
    `runs/<id>/review.json`, plus a cold read of the opening against the frozen `venue`
    for terms that venue's readers would not know. Do NOT pass it the declared statuses
-   or the path to `declarations.json` — its independence is the whole value. `verify`
-   computes the disagreement and surfaces it as a NON-GATING advisory, so a faithful
-   paper is silent and a model can never fail a run.
+   or the path to `declarations.json` — its independence is the whole value. DO pass it
+   the identifier entries of `numbers.json` (text, document, context): it notes any that
+   reads, in its sentence, as a reported quantity. `verify` computes the disagreement and
+   surfaces it and the notes as NON-GATING advisories, so a faithful paper is silent and
+   a model can never fail a run.
 4. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
    declared sections, F2 font/DPI policy, reference style, max-words, F3 reproduction
-   bundle) and the `declarations_clean` gate (each declared status still matches the
+   bundle), the `declarations_clean` gate (each declared status still matches the
    record, each declared sentence is still in the manuscript, every decided hypothesis is
-   declared) as HARD gates; `advisory` items, `max_pages`, and the conclusion-review
+   declared) and the `numbers_clean` gate (every number in the paper is in `numbers.json`,
+   and each entry's source prints as the number) as HARD gates; `advisory` items,
+   `max_pages`, stale number entries, the identifier listing and the conclusion-review
    disagreements are surfaced, never gated.
 
 ### package — Assemble the workspace submission

@@ -230,10 +230,29 @@ def declaration_disagreements(
     return sorted(lines)
 
 
+def review_note_lines(review: ConclusionReview) -> list[str]:
+    """ADVISORY: each identifier the reviewer read as a reported quantity, as written.
+
+    PURE. The number list exempts ``identifier`` entries from the record and lists them
+    (design/declared-numbers.md §4.3); the reviewer, given those entries, notes the ones
+    that read as a count, a measurement or a statistic in their sentence. Nothing is
+    computed against them -- a note summons a person to read the sentence, and it can
+    never gate.
+    """
+    return sorted(
+        f"conclusion review: a reader took the identifier '{note.text}' in "
+        f"{note.document} as a reported quantity"
+        + (f" ({note.note})" if note.note else "")
+        + ". Advisory only -- if it is one, give it a recorded source in numbers.json."
+        for note in review.notes
+    )
+
+
 __all__ = [
     "status_mismatches",
     "unanchored_sentences",
     "undeclared_hypotheses",
     "declaration_problems",
     "declaration_disagreements",
+    "review_note_lines",
 ]

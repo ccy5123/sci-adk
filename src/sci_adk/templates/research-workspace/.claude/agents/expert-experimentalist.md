@@ -72,6 +72,32 @@ only the leading path and the hash right after it. Anything it cannot resolve to
 is kept as a pointer it cannot run, and a file whose sha256 no longer matches the
 recorded one is not shipped as the recorded code.
 
+## Record The Numbers A Paper Will State — As Values
+
+The paper is written later, in another session, from the record, and every number it
+states must name the recorded field it comes from (`runs/<id>/numbers.json`, checked by
+`sci-adk verify`). A number that exists only inside a prose finding has no field to name,
+so the paper cannot state it and the writer sends it back to this stage.
+
+So record every count, constant and quoted value a paper may state as a NAMED NUMBER in
+the finding JSON — an object with a `summary` string plus one key per value — not only
+in prose:
+
+```json
+{"summary": "Inclusion filters, applied in the pre-registered order.",
+ "n_input": 1200, "n_after_quality": 870, "n_after_scope": 640}
+```
+
+- One key per number, named for what it is (`n_after_scope`, not `value2`): counts after
+  each step, sample and subset sizes, fitted coefficients and their standard errors,
+  fractions, subset means — whatever the analysis printed that a reader will want.
+- Record the value the analysis printed, at full precision; the paper rounds it.
+- A value quoted from another study (a published slope, a reference count) is recorded
+  the same way, when it is read: an `observation` whose finding names the study each value
+  comes from. The contested-literature note is prose and cannot hold named values.
+- The `summary` carries what a reader needs to understand the values; the record renders
+  it first and each value after it as `key = value`.
+
 ## The G3 Negative Control
 
 When the FROZEN Spec has a `formal` + deterministic `threshold` hypothesis heading
@@ -160,4 +186,6 @@ substitute a different method or skip a step to "make progress".
 - Provenance is captured for each entry; no hand-edited Evidence files. Each
   `provenance.code_ref` is one script's path (optionally followed by ` sha256=<hex>`)
   or a commit/ref; descriptions and the scripts that built its inputs are in the finding.
+- Every count, constant and quoted value a paper may state is a named number in a finding
+  JSON (`{"summary": ..., "<name>": <value>}`), not only prose.
 - No silent deviation from the frozen MethodPlan.

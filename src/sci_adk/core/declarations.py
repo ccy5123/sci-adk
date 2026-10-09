@@ -162,6 +162,28 @@ class ReadConclusion(BaseModel):
     basis: Optional[str] = Field(default=None, description="one-line justification")
 
 
+class ReviewNote(BaseModel):
+    """An identifier the reviewer read as a reported quantity (design/declared-numbers.md
+    §7, decision 4).
+
+    The number list (:mod:`sci_adk.core.numbers`) exempts ``identifier`` entries from any
+    check against the record, and lists them so the exemptions are seen. The reviewer is
+    given those entries and, reading each in its sentence, notes the ones a reader would
+    take for a count, a measurement or a statistic. Surfaced as written, never gated.
+
+    Attributes:
+        text: the identifier literal, as listed in ``numbers.json``.
+        document: the manuscript it is in (``draft.tex`` unless noted).
+        note: the reviewer's one-line reason (reported, never parsed).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    text: str = Field(min_length=1, description="the identifier literal")
+    document: str = Field(default=DEFAULT_DOCUMENT, description="manuscript file")
+    note: Optional[str] = Field(default=None, description="one-line reason")
+
+
 class ConclusionReview(BaseModel):
     """An independent reviewer's blind reading of the paper's conclusions (design §11.4).
 
@@ -174,6 +196,8 @@ class ConclusionReview(BaseModel):
         spec_id: the run this reading belongs to.
         reviewer: free-text identifier of who/what produced it (reported, never parsed).
         readings: one entry per conclusion read.
+        notes: identifiers the reviewer read as reported quantities (optional; a
+            ``review.json`` written before this field existed loads unchanged).
     """
 
     model_config = {"extra": "forbid"}
@@ -181,6 +205,7 @@ class ConclusionReview(BaseModel):
     spec_id: str
     reviewer: Optional[str] = Field(default=None, description="who produced this reading")
     readings: List[ReadConclusion] = Field(default_factory=list)
+    notes: List[ReviewNote] = Field(default_factory=list)
 
 
 def load_review(run_dir: Path) -> Optional[ConclusionReview]:
@@ -206,6 +231,7 @@ __all__ = [
     "Declarations",
     "load_declarations",
     "ReadConclusion",
+    "ReviewNote",
     "ConclusionReview",
     "load_review",
 ]

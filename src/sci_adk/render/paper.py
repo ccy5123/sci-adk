@@ -125,6 +125,7 @@ _UNICODE_MAP: dict[str, str] = {
     # Relations / operators.
     "≥": r"$\geq$", "≤": r"$\leq$", "≠": r"$\neq$",
     "±": r"$\pm$", "×": r"$\times$", "÷": r"$\div$",
+    "−": "$-$",  # U+2212 minus sign (was rendered as "?")
     "≈": r"$\approx$", "≡": r"$\equiv$", "∝": r"$\propto$",
     "·": r"$\cdot$", "∙": r"$\cdot$",
     # Big operators / analysis.
@@ -916,14 +917,23 @@ def _summarize_finding(finding: str) -> str:
 
     A JSON object -> ``key=value; ...`` of structured per-field summaries (so the DOI /
     source / license / filename of a literature finding read cleanly, design feedback
-    3.1). A JSON array -> a count. Non-JSON prose -> the text, truncated at a word
-    boundary with the ellipsis OUTSIDE (never mid-token). The caller escapes the result.
+    3.1). A JSON object with a ``summary`` string -- the experiment stage's convention for
+    a finding that carries the values a paper may state (design/declared-numbers.md
+    §4.4) -- reads as that text, capped like prose, then ``key = value`` for each value.
+    A JSON array -> a count. Non-JSON prose -> the text, truncated at a word boundary with
+    the ellipsis OUTSIDE (never mid-token). The caller escapes the result.
     """
     text = finding.strip()
     try:
         data = json.loads(text)
     except (json.JSONDecodeError, TypeError, ValueError):
         return f"finding={_truncate_words(text, 200)}"
+    if isinstance(data, dict) and isinstance(data.get("summary"), str):
+        values = "; ".join(
+            f"{k} = {_summarize_value(v)}" for k, v in data.items() if k != "summary"
+        )
+        head = f"finding={_truncate_words(data['summary'], 200)}"
+        return f"{head}; {values}" if values else head
     if isinstance(data, dict):
         bits = "; ".join(f"{k}={_summarize_value(v)}" for k, v in data.items())
         return f"finding=({bits})" if bits else "finding=()"
@@ -1000,7 +1010,9 @@ _PAPER_TOOL_PROPER_RE = re.compile(r"\bSpec\b")
 _PAPER_ARTIFACT_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bevi-[A-Za-z0-9][A-Za-z0-9._-]*"),          # Evidence ids
     re.compile(r"\bclaim-(?:hyp|novelty)-[A-Za-z0-9._-]+"),   # derived Claim ids
-    re.compile(r"\b(?:spec|pubreqs|pkgreqs|declarations|review)\.json\b"),
+    re.compile(
+        r"\b(?:spec|pubreqs|pkgreqs|declarations|review|numbers(?:\.draft)?)\.json\b"
+    ),
     re.compile(r"\b(?:checkpoints|science)\.md\b"),
 )
 

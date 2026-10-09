@@ -78,6 +78,14 @@ artifacts; the kernel carries no domain code.
   as "no git commit" go in the finding. A `code_ref` that does not resolve to a file is
   kept as a pointer the bundle cannot run, and a file whose sha256 no longer matches is
   not shipped as the recorded code.
+- **Record the numbers a paper will state as values, not only prose.** Every count,
+  constant and quoted value a paper may state goes into the finding JSON as a named
+  number: `{"summary": "<what was done>", "<name>": <value>, ...}` (counts after each
+  step, sample sizes, coefficients and their standard errors, fractions). The paper
+  session binds each number it states to a recorded field (`runs/<id>/numbers.json`,
+  checked by `verify`); a number that exists only in prose has no field, and the paper
+  comes back here for it. A value quoted from another study is recorded the same way, when
+  it is read, in an `observation` whose finding names the study each value comes from.
 
 Anti-HARKing rule: a result that bears on a hypothesis the Spec did NOT pre-map for
 it is a finding to report to the orchestrator (possibly an amendment), not a bearing

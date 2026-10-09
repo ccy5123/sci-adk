@@ -49,6 +49,7 @@ externally and you reference it.
 
 | Verb | When | What it does |
 |---|---|---|
+| `sci-adk numbers draft` | After authoring `prose.json`, before render | Proposes `runs/<id>/numbers.draft.json`: for each number in the prose, the recorded field(s) it equals at its printed precision |
 | `sci-adk render` | After authoring the hooks | Renders `paper/{draft.tex, si.tex, figures/, references.bib}` deterministically from the record |
 | `sci-adk verify` | As a read-only consistency self-check | Runs the paper-consistency gate (`\ref`↔`\label`, novelty markup, figure sources) AND — when `runs/<id>/pubreqs.json` is frozen — the `paper_requirements_clean` gate (declared sections, font/DPI policy, reference style, max-words, reproduction bundle) over the rendered `.tex` |
 
@@ -68,6 +69,35 @@ exit non-zero even if the Claims reproduce.
 - A `\novelty{result|method}{hyp}{text}` marker is HARD-gated: it may only be
   emitted for a kind whose novelty flag is supported on the record (a
   `found_nothing` search exists). Do not assert novelty the record does not back.
+
+## Numbers — Declared Beside the Paper
+
+Every number the paper states is bound to where it comes from in `runs/<id>/numbers.json`
+(beside `spec.json`, never submitted). `verify` fails a number in `draft.tex` / `si.tex`
+that the list does not cover, and an entry whose source does not print as the number at
+its precision. The manuscript itself stays plain LaTeX.
+
+1. After authoring `prose.json` (and `si.json` / `figures.json` if any), run
+   `sci-adk numbers draft <run> --prose prose.json [--si si.json] [--figures figures.json]`.
+   It reads the prose exactly as render will and writes `runs/<id>/numbers.draft.json`:
+   one proposal per number — a `source` when exactly one recorded field matches,
+   `candidates` when several do, `unresolved` when none does.
+2. Complete `runs/<id>/numbers.json` from it, covering EVERY number:
+   - a single match is a proposal, not a decision: check it is the quantity the sentence
+     states (a count can equal an unrelated coefficient at two digits);
+   - from `candidates`, pick the field that IS the quantity;
+   - one text with two roles (a "13" that is a count here and a label there) gets one entry
+     per role, each with a `context` quoting the words around it;
+   - role `identifier` for what is not a quantity — a registry number, a version, a date,
+     a label — listed by `verify`, never checked;
+   - a reference year: `{"bib": "<key>", "field": "year"}`; a value computed from recorded
+     ones: `formula` + `operands` (e.g. `"100 * a"` for a percentage).
+3. Render, record the conclusions in `declarations.json`, then `sci-adk verify`.
+
+[HARD] You never add a value to the record. A number with no recorded home — `unresolved`
+and not an identifier — is a BLOCKER: return it to the orchestrator with the sentence it
+is in, for the experiment stage to record as a named value. Never point it at a field that
+merely happens to print the same, and never relabel a quantity as an identifier to pass.
 
 ## Frozen-Spec Reference
 
@@ -164,3 +194,5 @@ failure, and do not assert a Claim the record does not support.
   (declared sections present, font/DPI policy, reference style, max-words,
   reproduction bundle) — or any failure is returned as a blocker, not papered over.
 - The narrative matches the derived Claim statuses — nothing over-stated.
+- `runs/<id>/numbers.json` covers every number in the paper and `verify`'s number checks
+  pass — or the numbers with no recorded home are returned as a blocker.

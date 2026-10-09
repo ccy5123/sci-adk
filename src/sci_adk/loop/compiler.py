@@ -603,13 +603,7 @@ class ResearchCompiler:
         # novelty claims (``claim-novelty-<kind>-<hyp>``) share ``answers == hyp`` and must
         # not mark a hypothesis resolved when only a novelty axis -- not the experiment claim
         # the checkpoint tracks -- has been decided.
-        resolved_main_claim_ids = {
-            c.id for c in claims_list if c.is_supported() or c.is_refuted()
-        }
-        pending_dicts = [
-            c.__dict__ for c in checkpoints_list
-            if f"claim-{c.hypothesis_id}" not in resolved_main_claim_ids
-        ]
+        pending_dicts = self._open_checkpoints(claims_list, checkpoints_list)
         cited_dois = self._gather_cited_dois(evidence_list, run_dir)
 
         paper_dir = run_dir / "paper"
@@ -752,6 +746,68 @@ class ResearchCompiler:
             repro_listings=self._resolve_repro_listings(evidence_list, run_dir),
             figures=None, prose=None, bib_path=self._locate_bib_path(run_dir),
         )
+
+    def render_texts(
+        self,
+        spec: Spec,
+        *,
+        prose: Optional[PaperProse] = None,
+        si: Optional[AuthoredSI] = None,
+        figures: Optional[Sequence[AnyFigure]] = None,
+    ) -> tuple[str, Optional[str]]:
+        """The ``draft.tex`` and authored ``si.tex`` text :meth:`stage_render` would write
+        for these inputs -- written nowhere.
+
+        For ``sci-adk numbers draft`` (design/declared-numbers.md §4.4), which must read the
+        paper exactly as render will produce it before render has run: the same recorded
+        Evidence and Claims, the same still-open checkpoints, the same pure renderers and
+        sanitizer. The bibliography is located rather than co-located; its stem -- all the
+        renderer uses -- is the same, so the text is byte-identical to what render writes.
+        Returns ``(draft_tex, si_tex)``; ``si_tex`` is ``None`` when ``si`` is.
+
+        Raises:
+            ValueError: a fact macro the record cannot back, or a malformed figure spec
+                (the renderers fail loud, exactly as in a render).
+        """
+        evidence_list = self._load_evidence(spec)
+        claims_list = self._load_claims(spec)
+        checkpoints_list = self._load_checkpoints(spec, evidence_list)
+        run_dir = self.workspace_dir / "runs" / spec.id
+        draft_tex = render_paper_latex(
+            spec, claims_list, evidence_list,
+            pending=self._open_checkpoints(claims_list, checkpoints_list),
+            prose=prose,
+            cited_dois=self._gather_cited_dois(evidence_list, run_dir),
+            bib_path=self._locate_bib_path(run_dir),
+            figures=list(figures or []),
+        )
+        si_tex: Optional[str] = None
+        if si is not None:
+            si_bib = (
+                str(run_dir / "paper" / "references_SI.bib")
+                if self._si_bib_subset(run_dir, si) else None
+            )
+            si_tex = render_authored_si_latex(
+                si, spec, claims_list, evidence_list, bib_path=si_bib
+            )
+        return draft_tex, si_tex
+
+    @staticmethod
+    def _open_checkpoints(
+        claims: Sequence[Claim], checkpoints: Sequence["Checkpoint"]
+    ) -> List[dict]:
+        """The checkpoints a rendered paper still lists as pending (see :meth:`stage_render`).
+
+        A hypothesis whose MAIN experiment Claim (``claim-<hyp>``) is SUPPORTED or REFUTED is
+        no longer pending; novelty sub-claims share ``answers`` and must not count.
+        """
+        resolved_main_claim_ids = {
+            c.id for c in claims if c.is_supported() or c.is_refuted()
+        }
+        return [
+            c.__dict__ for c in checkpoints
+            if f"claim-{c.hypothesis_id}" not in resolved_main_claim_ids
+        ]
 
     @staticmethod
     def _write_record(
@@ -971,6 +1027,17 @@ class ResearchCompiler:
         verify gate to surface, never silently dropped. Returns the co-located path (stem
         ``references_SI``) or ``None``.
         """
+        subset = cls._si_bib_subset(run_dir, si)
+        if not subset:
+            return None
+        dest = paper_dir / "references_SI.bib"
+        dest.write_text(subset, encoding="utf-8")
+        return str(dest)
+
+    @classmethod
+    def _si_bib_subset(cls, run_dir: Path, si: AuthoredSI) -> Optional[str]:
+        """The cited-only SI bibliography text (see :meth:`_colocate_si_bib`), or ``None``
+        when there is no pool, no cited key, or no cited key in the pool. Writes nothing."""
         src = cls._locate_bib_path(run_dir)
         if src is None:
             return None
@@ -978,12 +1045,7 @@ class ResearchCompiler:
         if not keys:
             return None
         pool = Path(src).read_text(encoding="utf-8")
-        subset = bib_subset(pool, keys)
-        if not subset:
-            return None
-        dest = paper_dir / "references_SI.bib"
-        dest.write_text(subset, encoding="utf-8")
-        return str(dest)
+        return bib_subset(pool, keys) or None
 
     def _colocate_figures(
         self, figures: Sequence[AnyFigure], paper_dir: Path, paper_body: str

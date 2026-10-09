@@ -52,6 +52,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.declarations import load_declarations, load_review
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
+from sci_adk.core.numbers import NUMBERS_FILE, load_numbers
 from sci_adk.core.pkgreqs import (
     DEFAULT_REQUIRED_SECTIONS as PKG_DEFAULT_REQUIRED_SECTIONS,
 )
@@ -71,12 +72,12 @@ from sci_adk.core.validity import (
 )
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.code_ref import describe_mismatch, resolve_code_ref
-from sci_adk.loop.compiler import deposit_record_path
+from sci_adk.loop.compiler import ResearchCompiler, deposit_record_path
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.prior_work import prior_work_open
 from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
-from sci_adk.search.literature_merge import _sidecar_doi, parse_bib_entries
+from sci_adk.search.literature_merge import _sidecar_doi, bib_field, parse_bib_entries
 from sci_adk.search.manual_literature import SI_SUFFIX
 from sci_adk.render.consistency import (
     LatexRefReport,
@@ -87,6 +88,7 @@ from sci_adk.render.factref import find_unresolved_factrefs
 from sci_adk.render.declaration_checks import (
     declaration_disagreements,
     declaration_problems,
+    review_note_lines,
 )
 from sci_adk.render.novelty import find_unsupported_novelty
 from sci_adk.render.number_audit import (
@@ -94,6 +96,7 @@ from sci_adk.render.number_audit import (
     number_audit_problems,
     pool_from_record,
 )
+from sci_adk.render.number_checks import NumberRecord, number_list_checks
 from sci_adk.render.paper import check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
@@ -144,6 +147,14 @@ _PACKAGE_DOCS: tuple[str, ...] = (_PACKAGE_MAIN, _PACKAGE_SI)
 # The authored package si.tex's OWN bibliography (SPEC-SI-AUTHORING-001 M6): a cited-only
 # subset of the package pool the SI cite-resolution gate resolves si.tex's \cite* against.
 _REFERENCES_SI_BIB: str = "references_SI.bib"
+
+# The one advisory line a run WITHOUT numbers.json gets while the pattern audit still judges
+# its numbers (design/declared-numbers.md §5). Never gated.
+_NUMBER_LIST_ADVICE: str = (
+    "numbers: this run has no numbers.json, so its paper's numbers were checked by the "
+    "pattern audit -- `sci-adk numbers draft <run>` proposes a list that binds each "
+    "number to its recorded source, and the list then replaces the audit."
+)
 
 # Per-hypothesis audit results. Strings (not an enum) keep the report trivially
 # printable/serializable; the set is closed and small.
@@ -224,6 +235,15 @@ class VerifyReport:
             sentence OVERSTATES its declared status is semantic and is never decided here.
         declarations_clean: True iff the declaration list is faithful (True vacuously when
             the run declares nothing). Part of the HARD gate.
+        number_problems: the declared-number failures (design/declared-numbers.md §4.3) of
+            a run that HAS ``numbers.json``: a literal in draft.tex / si.tex that no entry
+            covers, or an entry whose source does not resolve or does not print as the
+            literal. For such a run these checks REPLACE the pattern-based number audit
+            (whose lines would otherwise sit in ``paper_requirements_problems``); a
+            malformed list is a loud failure here. EMPTY when clean, or when the run has
+            no ``numbers.json`` (opt-in: the run keeps the pattern audit, unchanged). The
+            stale-entry and identifier listings go to ``paper_advisory``.
+        numbers_clean: True iff ``number_problems`` is empty. Part of the HARD gate.
         paper_cross_doc_refs: every plain-text "Figure S<n>" / "Table S<n>" the MAIN paper
             (``draft.tex``) cites that points past the SI's float count -- a silent dangling
             cross-document reference (the SI renumbers its floats ``S1, S2, ...`` and a real
@@ -266,8 +286,8 @@ class VerifyReport:
         search_log_clean: True iff ``search_log_problems`` is empty. Part of the HARD gate.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
-            declarations_clean and paper_cross_doc_clean and paper_requirements_clean and
-            search_log_clean``.
+            declarations_clean and numbers_clean and paper_cross_doc_clean and
+            paper_requirements_clean and search_log_clean``.
             This is what the CLI exits
             on; ``all_reproduced`` alone is the claim signal.
     """
@@ -286,6 +306,8 @@ class VerifyReport:
     paper_novelty_clean: bool = field(default=True)
     declaration_problems_found: List[str] = field(default_factory=list)
     declarations_clean: bool = field(default=True)
+    number_problems: List[str] = field(default_factory=list)
+    numbers_clean: bool = field(default=True)
     paper_cross_doc_refs: List[str] = field(default_factory=list)
     paper_cross_doc_clean: bool = field(default=True)
     paper_requirements_problems: List[str] = field(default_factory=list)
@@ -480,6 +502,13 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     )
     declarations_clean = not declaration_problems_found
 
+    # Declared numbers (design/declared-numbers.md §4.3): a run WITH numbers.json is checked
+    # literal by literal against its declared sources -- INSTEAD of the pattern-based number
+    # audit, which _check_paper_requirements then skips. Coverage + resolution gate; stale
+    # entries and the identifier listing are advisory. READ-ONLY, no LLM.
+    number_problems, number_notes = _check_numbers(run_dir, evidence)
+    numbers_clean = not number_problems
+
     # Conclusion review (design §11.4): an independent BLIND reading of what each conclusion
     # sentence asserts, compared to what the author declared. ADVISORY ONLY -- routed through
     # paper_advisory below, so a model can never fail a run.
@@ -566,12 +595,14 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_novelty_clean=paper_novelty_clean,
         declaration_problems_found=declaration_problems_found,
         declarations_clean=declarations_clean,
+        number_problems=number_problems,
+        numbers_clean=numbers_clean,
         paper_cross_doc_refs=paper_cross_doc_refs,
         paper_cross_doc_clean=paper_cross_doc_clean,
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
-        paper_advisory=(paper_advisory + conclusion_review_notes + search_log_notes
-                        + literature_key_notes + reproduction_notes),
+        paper_advisory=(paper_advisory + number_notes + conclusion_review_notes
+                        + search_log_notes + literature_key_notes + reproduction_notes),
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
         search_log_problems=search_log_problems,
@@ -583,6 +614,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             and paper_tool_clean
             and paper_novelty_clean
             and declarations_clean
+            and numbers_clean
             and paper_cross_doc_clean
             and paper_requirements_clean
             and search_log_clean
@@ -1018,16 +1050,78 @@ def _conclusion_review_advisory(run_dir: Path) -> List[str]:
         return [str(exc)]
     if review is None:
         return []
+    # Identifier notes (design/declared-numbers.md §7 decision 4): an identifier the
+    # reviewer read as a reported quantity. Surfaced as written; never compared, never gated.
+    notes = review_note_lines(review)
     try:
         declarations = load_declarations(run_dir)
     except ValueError:
-        return []  # the declaration gate already reports this loudly
+        return notes  # the declaration gate already reports this loudly
     if declarations is None:
+        if notes and not review.readings:
+            return notes
         return [
             "conclusion review: a reading exists but the run declares no conclusions -- "
             "there is nothing to compare it against."
-        ]
-    return declaration_disagreements(declarations, review)
+        ] + notes
+    return declaration_disagreements(declarations, review) + notes
+
+
+def load_number_record(
+    run_dir: Path, evidence: Optional[List[EvidenceItem]] = None
+) -> NumberRecord:
+    """What a declared number may come from, read from a run dir (READ-ONLY).
+
+    The raw ``spec.json`` (JSON paths address it as written), the recorded Evidence, and
+    the year of every entry of the run's ``references.bib`` -- located where the acquirer
+    writes it (``literature/``, or the older ``artifacts/literature/``), not the copy
+    render places beside the paper. Shared by verify and ``sci-adk numbers draft`` so the
+    helper proposes exactly what verify will accept.
+    """
+    run_dir = Path(run_dir)
+    spec_json = json.loads((run_dir / "spec.json").read_text(encoding="utf-8"))
+    if evidence is None:
+        evidence = _load_evidence(run_dir)
+    bib_years: Optional[Dict[str, Optional[str]]] = None
+    bib_path = ResearchCompiler._literature_file(run_dir, "references.bib")
+    if bib_path is not None:
+        try:
+            bib = bib_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            bib = ""
+        bib_years = {e.key: bib_field(e.text, "year") for e in parse_bib_entries(bib)}
+    return NumberRecord(spec_json=spec_json, evidence=evidence, bib_years=bib_years)
+
+
+def _check_numbers(
+    run_dir: Path, evidence: List[EvidenceItem]
+) -> Tuple[List[str], List[str]]:
+    """Run the declared-number checks (design/declared-numbers.md §4.3): ``(problems, advisory)``.
+
+    READ-ONLY: reads ``run_dir/numbers.json``, the rendered ``paper/draft.tex`` and
+    ``paper/si.tex`` (whichever exist), and the record (:func:`load_number_record`). For a
+    run that has the list these checks REPLACE the pattern-based number audit
+    (:func:`_check_paper_requirements` skips it), so a number is judged by its declared
+    source and never by a guess about what kind of number it is.
+
+    Opt-in at the RUN level: no ``numbers.json`` -> ``([], [])`` and the run keeps the
+    pattern audit, unchanged. A malformed list is a LOUD failure naming the bad entries,
+    never a silent skip. The list is checked even before the paper is rendered: every
+    source must still resolve, and the entries for an unrendered document are reported as
+    stale (advisory).
+    """
+    try:
+        numbers = load_numbers(run_dir)
+    except ValueError as exc:
+        return [f"numbers: {exc}"], []
+    if numbers is None:
+        return [], []
+    documents = {
+        name: (run_dir / "paper" / name).read_text(encoding="utf-8")
+        for name in _PAPER_DOCS
+        if (run_dir / "paper" / name).is_file()
+    }
+    return number_list_checks(numbers, documents, load_number_record(run_dir, evidence))
 
 
 def _literature_key_advisory(run_dir: Path) -> List[str]:
@@ -1309,13 +1403,18 @@ def _check_paper_requirements(
     # P2 number-audit (REQ-PG-201/202/204): every quantitative token in draft.tex + si.tex
     # traces to the recorded-value pool (Claim statistics + Evidence scalars). Compares ONLY
     # against recorded values (record vs belief, REQ-PG-203).
-    pool = pool_from_record(claims or [], evidence, spec)
-    for name in _PAPER_DOCS:
-        doc = run_dir / "paper" / name
-        if doc.is_file():
-            problems.extend(
-                number_audit_problems(doc.read_text(encoding="utf-8"), pool, source=name)
-            )
+    # design/declared-numbers.md §5 (opt-in per run): a run WITH numbers.json is checked by
+    # the declared-number checks (verify_run -> _check_numbers) INSTEAD of this audit; a run
+    # without one keeps the audit unchanged and gets one advisory line recommending the list.
+    if not (run_dir / NUMBERS_FILE).is_file():
+        pool = pool_from_record(claims or [], evidence, spec)
+        for name in _PAPER_DOCS:
+            doc = run_dir / "paper" / name
+            if doc.is_file():
+                problems.extend(
+                    number_audit_problems(doc.read_text(encoding="utf-8"), pool, source=name)
+                )
+        warnings.append(_NUMBER_LIST_ADVICE)
 
     if pubreqs.required_sections:
         missing_sections = required_sections_problems(draft_tex, pubreqs.required_sections)

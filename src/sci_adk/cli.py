@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Optional
@@ -810,6 +811,37 @@ def _add_verb_parsers(sub) -> None:
         help="deposit only the deterministic record (runs/<id>/record.tex) and write "
              "nothing under paper/ -- the first session of the two-session publish, before "
              "the paper is written. Cannot be combined with --prose/--si/--si-prose/--figures",
+    )
+
+    # numbers: the paper's declared number list (design/declared-numbers.md).
+    numbers = sub.add_parser(
+        "numbers",
+        help="the paper's number list (runs/<id>/numbers.json): every number the paper "
+             "states, bound to its recorded source and checked by `verify`",
+    )
+    numbers_sub = numbers.add_subparsers(dest="numbers_command", required=True)
+    numbers_draft = numbers_sub.add_parser(
+        "draft",
+        help="propose a number list: for each number in the paper, the recorded field(s) "
+             "it equals at its printed precision. Writes runs/<id>/numbers.draft.json, "
+             "never numbers.json. Deterministic, no network",
+    )
+    numbers_draft.add_argument("run_dir", help="path to an existing runs/<spec.id>/ dir")
+    numbers_draft.add_argument(
+        "--prose", default=None, metavar="PATH",
+        help="read the paper from this PaperProse JSON, rendered in memory exactly as "
+             "`render --prose` will render it (before render; nothing is written to paper/). "
+             "Without --prose/--si the rendered paper/draft.tex and paper/si.tex are read",
+    )
+    numbers_draft.add_argument(
+        "--si", default=None, metavar="PATH",
+        help="read the authored Supporting Information from this AuthoredSI JSON, rendered "
+             "in memory as `render --si` will render it",
+    )
+    numbers_draft.add_argument(
+        "--figures", default=None, metavar="PATH",
+        help="the figure specs `render --figures` will get, so their captions are read too "
+             "(needs --prose)",
     )
 
 
@@ -1806,6 +1838,91 @@ def _cmd_render(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_numbers_draft(args: argparse.Namespace) -> int:
+    """Propose ``runs/<id>/numbers.draft.json`` (design/declared-numbers.md §4.4).
+
+    Reads the paper the way ``verify`` will: the rendered ``paper/draft.tex`` /
+    ``paper/si.tex``, or -- with ``--prose`` / ``--si`` -- the prose JSON rendered in memory
+    by the same render path (``ResearchCompiler.render_texts``), so the literals are the
+    ones render will produce. For each literal it proposes the recorded field(s) it equals
+    at its printed precision (:func:`sci_adk.render.number_draft.propose_numbers`).
+    Writes only the draft file -- never ``numbers.json``, never ``paper/``. Deterministic,
+    no network, no model.
+    """
+    run_dir = Path(args.run_dir)
+    workspace = run_dir.parent.parent
+    try:
+        spec = _load_run_spec(run_dir)
+        prose, _si_prose, figures = _load_prose(args)
+        si = _load_authored_si(args)
+    except _CliError as e:
+        print(f"error: {e.message}", file=sys.stderr)
+        return e.exit_code
+
+    from sci_adk.core.numbers import NUMBERS_DRAFT_FILE, NUMBERS_FILE
+    from sci_adk.loop.verify import load_number_record
+    from sci_adk.render.number_draft import propose_numbers
+
+    documents: dict[str, str] = {}
+    if prose is not None or si is not None:
+        compiler = ResearchCompiler(workspace_dir=workspace)
+        try:
+            draft_tex, si_tex = compiler.render_texts(
+                spec, prose=prose, si=si, figures=figures
+            )
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        if prose is not None:
+            documents["draft.tex"] = draft_tex
+        if si_tex is not None:
+            documents["si.tex"] = si_tex
+        read_from = "the prose JSON, rendered in memory as render will"
+    else:
+        for name in ("draft.tex", "si.tex"):
+            path = run_dir / "paper" / name
+            if path.is_file():
+                documents[name] = path.read_text(encoding="utf-8")
+        if not documents:
+            print(f"error: {run_dir / 'paper'} holds no draft.tex or si.tex -- render the "
+                  "paper first, or pass --prose (and --si) to read the prose JSON the way "
+                  "render will", file=sys.stderr)
+            return 2
+        read_from = "paper/" + " + paper/".join(documents)
+
+    draft, summary = propose_numbers(documents, load_number_record(run_dir), spec.id)
+    out_path = run_dir / NUMBERS_DRAFT_FILE
+    out_path.write_text(json.dumps(draft, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+    print(f"numbers draft: {sum(summary.values())} literal(s) from {read_from} -> {out_path}")
+    print(f"  {summary['resolved']} resolved (one recorded source), "
+          f"{summary['ambiguous']} ambiguous (candidates listed, none chosen), "
+          f"{summary['unresolved']} unresolved")
+    unresolved = [f"{e['text']} ({e['document']})" for e in draft["numbers"]
+                  if e.get("unresolved")]
+    if unresolved:
+        print("  unresolved: " + ", ".join(unresolved))
+        print("    each needs a recorded home -- the experiment stage records it as a named "
+              "value in a finding JSON -- or, if it is not a quantity, role \"identifier\"")
+    # A proposal is one entry per text, so it covers EVERY occurrence of that text. Where a
+    # text occurs more than once, a second role may hide behind the one match found.
+    from sci_adk.render.number_literals import find_literals
+
+    counts = {
+        name: Counter(lit.text for lit in find_literals(text, name))
+        for name, text in documents.items()
+    }
+    repeated = [f"{e['text']} x{counts[e['document']][e['text']]}"
+                for e in draft["numbers"]
+                if "source" in e and counts[e["document"]][e["text"]] > 1]
+    if repeated:
+        print("  resolved but stated more than once -- check every use is the same "
+              "quantity, else split the entry with a context: " + ", ".join(repeated))
+    print(f"  next: decide every proposal, save the list as {run_dir / NUMBERS_FILE}, "
+          f"render, then `sci-adk verify {run_dir}`")
+    return 0
+
+
 def _cmd_resolve(args: argparse.Namespace) -> int:
     """Drive the checkpoint loop over an existing run dir (design §7.1)."""
     run_dir = Path(args.run_dir)
@@ -1947,6 +2064,15 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("  conclusions FAILED (a declared conclusion no longer matches the record "
               "or the manuscript):", file=sys.stderr)
         for problem in report.declaration_problems_found:
+            print(f"    - {problem}", file=sys.stderr)
+
+    # Declared-number gate (design/declared-numbers.md §4.3): for a run with numbers.json, a
+    # literal in the paper that no entry covers, or an entry whose source does not resolve
+    # or does not print as the literal. Stale entries + identifiers are advisory (below).
+    if not report.numbers_clean:
+        print("  numbers FAILED (a number in the paper is not in numbers.json, or does not "
+              "match its recorded source):", file=sys.stderr)
+        for problem in report.number_problems:
             print(f"    - {problem}", file=sys.stderr)
 
     # Cross-document gate: a main-paper "Figure/Table S<n>" that points past the SI's float
@@ -2553,6 +2679,11 @@ def main(argv=None) -> int:
                     "(it writes no manuscript)"
                 )
         return _cmd_render(args)
+    if args.command == "numbers":
+        if args.figures and not args.prose:
+            parser.error("numbers draft: --figures needs --prose (figures render with the "
+                         "manuscript)")
+        return _cmd_numbers_draft(args)
     if args.command == "resolve":
         return _cmd_resolve(args)
     if args.command == "verify":

@@ -1,7 +1,8 @@
 # Declared numbers: binding every number in a paper to its source
 
-> Status: **v0.1 DRAFT (2026-10-09)** — design only; nothing here is built.
-> Replaces, when adopted, the pattern-based number audit of
+> Status: **v0.2 (2026-10-09)** — §7 decided; phase 1 (the per-run list) built, see §8.
+> The package stage (§5, second paragraph) is phase 2 and not built.
+> Replaces, per run that adopts it, the pattern-based number audit of
 > `design/paper-writing-enforcement.md` (P2, OD-2/OD-3). Mirrors the conclusion
 > declaration list of `design/reader-facing-prose.md` §11.3.
 
@@ -153,16 +154,102 @@ second phase: the same schema with run-qualified sources and data-cell sources.
 - Binding numbers with macros in the submitted source (rejected by OD-7: reviewers read
   the `.tex`).
 
-## 7. Open decisions
+## 7. Decisions (taken 2026-10-09)
 
-1. Opt-in now and required later, or required at once for papers rendered after this
-   ships (OD-8 chose immediate refusal for P2 itself).
-2. Identifier entries: unconstrained but listed (proposed), or limited to shapes such as
-   hyphen-joined groups (reintroduces a pattern).
-3. The `draft` helper in the first phase (proposed) or later.
-4. Whether the blind conclusions reviewer (§11.4 of reader-facing-prose) also receives
-   the identifier list.
+1. **Opt-in per run.** A run with `runs/<id>/numbers.json` is checked by §4.3 instead of
+   the pattern audit; a run without one keeps the audit byte for byte and gets one
+   advisory line recommending the list. No existing run changes verdict. Making the list
+   required stays a later decision.
+2. **Identifier entries are unconstrained** and every one is listed by `verify`
+   (advisory). No shape rule.
+3. **The `draft` helper is in phase 1.**
+4. **The blind conclusions reviewer receives the identifier list** and may note any
+   identifier that reads, in its sentence, as a reported quantity. Advisory only.
+
+## 8. Phase 1 as built
+
+Code: `src/sci_adk/core/numbers.py` (schema, loader, JSON paths, safe formula
+evaluator), `src/sci_adk/render/number_literals.py` (tokenizer),
+`src/sci_adk/render/number_checks.py` (§4.3 checks), `src/sci_adk/render/number_draft.py`
+(helper), wired in `src/sci_adk/loop/verify.py` (`number_problems` / `numbers_clean`,
+advisories in `paper_advisory`) and `src/sci_adk/cli.py` (`sci-adk numbers draft`, verify
+output). The pattern audit (`render/number_audit.py`) is unchanged.
+
+**Schema.** Entry keys are exactly `text`, `document` (`draft.tex` | `si.tex`), `role`,
+`source`, `formula`, `operands`, `context`; anything else is rejected, and a load error
+names the entry index and its text. The role, when omitted, follows from the entry: a bib
+source makes a citation, any other source a recorded value, a formula a derived value.
+Choices beyond §4.1:
+
+- `finding.<key>` accepts a path (`finding.counts.total`), the same syntax as `spec`.
+- A bib source reads `year` only.
+- A derived entry's operands are evidence or spec values (a text occurrence or a year has
+  no single numeric value); every operand must appear in the formula and vice versa.
+- `spec_text` compares the literal's text with the numbers written in the named field
+  (`95` matches "95% interval"; `0.50` does not match "0.5").
+
+**Tokenizer.** As in §4.2, plus these lexical rules, none field-specific:
+
+- Masked as non-prose: comments; the arguments of `\ref`-like, `\cite`-like (with up to
+  two `[...]` options), `\label`, `\input`, `\include`, `\includegraphics`,
+  `\bibliography(style)`, `\usepackage`, `\documentclass`, `\pgfplotsset`; `\texttt`,
+  `\path`, `\url`, `\nolinkurl`, `\verb`, the URL argument of `\href`; macro definitions
+  and `#N` (an escaped `\#3` stays prose); the two identifier arguments of `\novelty`;
+  the `coordinates {...}` of `\addplot` (plotted values come from the record by Evidence
+  id); superscripts and subscripts in math, `\textsuperscript`, `\textsubscript`.
+- Section titles and captions are prose (the pattern audit stripped section arguments).
+- A minus negates only when unary: not after a digit, letter, underscore or closing
+  bracket. So `criterion-5` is the literal 5, and `n - 2` is 2. `-`, U+2212 and `$-$`
+  count; a run of hyphens (`--`, `---`) never does.
+- A digit run continuing a word (`log10`, `CO2`) is part of the word, as in the pattern
+  audit. Digit groups joined by two or more dots are one literal (`2025.09.4`).
+- A hyphen-joined range (`1-6`) is one literal with no value; a range needs an en dash.
+
+**Precision.** The slack in `|v - literal| <= 0.5·10^-d` is relative to that tolerance
+(`× (1 + 1e-9)`), not an absolute 1e-9, so a literal such as `1.2e-12` is not matched by
+every value within 1e-9.
+
+**Helper.** `sci-adk numbers draft <run> [--prose P] [--si S] [--figures F]` reads
+`paper/draft.tex` / `si.tex`, or, given the JSON, renders it in memory through
+`ResearchCompiler.render_texts` (the same render path, byte-identical to what `render`
+writes). All recorded fields are searched together, with no preference between them: one
+match fills `source`, several are listed as `candidates`, none is `unresolved`.
+Undecided proposals also carry `where` snippets and do not load as entries until decided.
+Spec bookkeeping (`id`, `version`, `created_at`) is not searched. The summary names
+resolved literals stated more than once, because one entry covers every occurrence of its
+text and a second role can hide behind a single match.
+
+**Reviewer.** `review.json` gained an optional `notes` list (`text`, `document`,
+`note`); a file without it loads unchanged. Notes reach `paper_advisory` as written.
+
+**Experiment stage.** The experimentalist instructions now require every count, constant
+and quoted value a paper may state as a named number in a finding JSON
+(`{"summary": ..., "<name>": <value>}`), and `record.tex` renders such a finding as the
+summary followed by `key = value`. Values quoted from another study go in an
+`observation` naming the study, not the contested-literature record of §4.4: that verb
+records a prose note and cannot hold named values.
+
+**Also.** `numbers.json` / `numbers.draft.json` join the internal file names a paper may
+not mention (tool-vocabulary check). Nothing reads the run root's JSON files by glob, and
+the record digest covers only `spec.json`, `evidence/` and `verdicts/`, so neither file
+changes a digest or is mistaken for a record.
+
+**On the first paper (run SPEC-BCFKOW-001, a copy).** From the session's `prose.json`
+the helper found 87 distinct literals: 26 resolved, 12 ambiguous, 49 unresolved. Every
+unresolved literal is either in section A of that session's list of numbers without a
+structured home (42: the filter counts, the fit's intercept, standard error and R², the
+residual subsets, the literature values) or an identifier (the three registry numbers and
+four software versions). The section-A numbers not marked unresolved are small integers
+and literature values that also occur in Spec text or print like a recorded value; three
+single matches were coincidences the author must reject: 0.77 (a published slope) matched
+the run's own slope 0.768932, and 7 and 8 matched "pH 7" and a SMARTS substructure query
+(`[#7,#8,#16]`) in Spec text. 13 matched the prime list although one of its three uses is
+a record count. After one observation recorded four counts as named values, 341 and 404
+resolved, 13 became ambiguous between its two roles, and 50 gained the recorded count
+beside nine Spec text candidates. Rendered with a list of the 27 then-resolved proposals and seven identifiers,
+`verify` reported no resolution failure, no stale entry, and 53 coverage failures — the
+13 ambiguous and 40 unresolved literals still to decide.
 
 ---
 
-Version: 0.1
+Version: 0.2

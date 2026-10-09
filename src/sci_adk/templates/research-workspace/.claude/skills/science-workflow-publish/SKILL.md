@@ -93,16 +93,18 @@ the numeric tables, the figures, the verdicts with their frozen decision rules. 
 it and work out what was found and what it means. A verdict decided by a threshold or
 interval rule carries no degree of belief: report the recorded estimate and its interval
 against the pre-registered threshold or band, never a confidence value and never a margin
-you computed (a derived number is not in the record and fails the number audit; only a
-Bayesian rule's posterior is a probability).
+you computed (the margin is the rule's bookkeeping, not a finding; only a Bayesian rule's
+posterior is a probability).
 Then:
 
 1. author the manuscript into a `prose.json` (a `PaperProse`: title / abstract /
    introduction / methods / results / discussion);
-2. `sci-adk render <run> --prose prose.json` — this also re-deposits the identical
+2. `sci-adk numbers draft <run> --prose prose.json` and complete `runs/<id>/numbers.json`
+   from the proposals it writes (below) — every number the paper states;
+3. `sci-adk render <run> --prose prose.json` — this also re-deposits the identical
    `record.tex`, since the record inputs have not changed;
-3. record the conclusions in `runs/<id>/declarations.json` (below);
-4. `sci-adk verify <run>`.
+4. record the conclusions in `runs/<id>/declarations.json` (below);
+5. `sci-adk verify <run>`.
 
 **No gate can tell whether you actually did this in a separate session.** The
 separation is a discipline, not a check. What the engine can see is whether the
@@ -159,9 +161,51 @@ What these do NOT check is whether your sentence overstates the status it declar
 is a judgement, and no gate makes it — an independent reviewer does, and its finding goes
 to a human.
 
-Numbers need no markup either: `verify` audits every quantitative token in the manuscript
-against the recorded values, so a plain `1.6` is bound exactly as tightly as a macro would
-bind it.
+### Declare the numbers beside the paper
+
+Numbers need no markup either. Their binding lives in a second side file that is never
+submitted, `runs/<id>/numbers.json`: every number literal the paper states, its role, and
+where it comes from. No checker can tell from the text whether "47" is a page, a prime or
+a count, so the role is stated, not guessed:
+
+```json
+{"spec_id": "<id>", "numbers": [
+  {"text": "0.62", "source": {"evidence": "<evidence id>", "field": "point"}},
+  {"text": "31", "source": {"evidence": "<evidence id>", "field": "finding.n_sites"}},
+  {"text": "0.5", "source": {"spec": "hypotheses[0].decision_rule.params.value"}},
+  {"text": "95", "source": {"spec_text": "hypotheses[0].decision_rule.expression"}},
+  {"text": "2006", "source": {"bib": "<key>", "field": "year"}},
+  {"text": "71.4", "formula": "100 * a",
+   "operands": {"a": {"evidence": "<evidence id>", "field": "finding.fraction"}}},
+  {"text": "4.2.1", "role": "identifier"},
+  {"text": "13", "context": "13 of the records", "source": {"evidence": "<evidence id>",
+   "field": "finding.n_rescored"}}
+]}
+```
+
+- `text` is the number as written, without unit or `%` (`95\%` is `95`); `document` is
+  `draft.tex` unless it says `si.tex`. Write a range with an en dash (`0.71–0.83`): two
+  hyphen-joined numbers read as one label.
+- A source is an Evidence field (`point`, `effect_size`, `ci[0]`, `ci[1]`, `p_value`,
+  ..., `finding.<key>` of a JSON finding), a numeric field of the frozen Spec, a number
+  written in one Spec text field (`spec_text`), or a reference's year.
+- `role: "identifier"` is for what is not a quantity — a registry number, a version, a
+  date, a label. It is checked against nothing and LISTED by `verify`, so every exemption
+  is seen.
+- `context` quotes the words around an occurrence; it is needed only when one text has two
+  roles in the same document.
+
+`sci-adk numbers draft <run> --prose prose.json` proposes the list: a source where exactly
+one recorded field prints as the number, `candidates` where several do, `unresolved` where
+none does. A single match is a proposal, not a decision — check it is the quantity the
+sentence states. **You never add a value to the record**: a number with no recorded home
+goes back to the experiment stage, to be recorded there as a named value.
+
+Two HARD checks in `verify`, neither of which reads meaning: every number in the paper is
+covered by an entry, and every entry's source exists and, rounded to the printed
+precision, equals the number (`0.769` matches a recorded 0.768932; `0.768` does not).
+An entry that no longer matches anything, and every identifier, is reported as advisory.
+A run without `numbers.json` is still checked by the older pattern audit.
 
 ### Write for readers who were not in the room
 
@@ -205,7 +249,7 @@ the sentence built around a concept the new word does not carry, and reads worse
 original. Read the passage, work out what it is doing, write it again.
 
 **Then check two things the rewrite can break.** Re-verify that every number and claim
-survived it — `verify` does this for you (the number audit and the declaration checks) and
+survived it — `verify` does this for you (the number list and the declaration checks) and
 will refuse if it did not. And **read the opening cold**: the abstract and the first
 paragraphs are where an unexplained term does the most damage and where it is most often
 left in place.
@@ -376,3 +420,5 @@ acquisition design — render-time emission of `\novelty` should survive into th
   `verify` computes the disagreement and surfaces it as a non-gating advisory, so a
   faithful paper produces silence. It catches both overstatement and understatement,
   and it can never fail a run. Run it before close; do not show it the declaration list.
+  Give it the identifier entries of `numbers.json`: it notes any that reads, in its
+  sentence, as a reported quantity (advisory, like its readings).
