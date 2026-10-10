@@ -42,9 +42,10 @@ by giving the authored SI its OWN bibliography file, `references_SI.bib`, symmet
 - **The per-run literature pool (the subset source).**
   `src/sci_adk/loop/compiler.py:814` (`_locate_bib_path`) — the run's ONE literature pool is
   `runs/<id>/artifacts/literature/references.bib`. `compiler.py:582,832` (`_colocate_bib`)
-  copies it verbatim to `paper/references.bib` (stem `references`) for the main paper. There
-  is exactly ONE literature pool per run; `references_SI.bib` is a SUBSET of it, not a
-  separate acquisition.
+  copied it verbatim to `paper/references.bib` (stem `references`) for the main paper. Since
+  2026-10-10 it writes a LaTeX-safe copy instead and reads the pool from `literature/` first
+  (see §7). There is exactly ONE literature pool per run; `references_SI.bib` is a SUBSET of
+  it, not a separate acquisition.
 - **The package path ships ONE shared bib.**
   `src/sci_adk/render/package.py` — `01_manuscript/` gets `main.tex + si.tex +
   references.bib`; the single `references.bib` is copied from `package_src/references.bib`
@@ -198,9 +199,56 @@ decisions; both harden their mechanism.
   failure (thin/absent SI, no-pool run stay clean per REQ-SA-606/615). The user's requirement:
   "references는 _SI도 따로 있기에 둘 다 검정해야함" — both bibs are validated, not just cite-resolution.
 
+## 7. LaTeX-safe copy (2026-10-10)
+
+The trial run's manuscript did not compile: entry `oki2005` in the run's pool has U+2212 MINUS
+SIGN in its title, and the verbatim copy carried it into `paper/references.bib`.
+
+- **The copy.** `paper/references.bib` is `latex_safe_bib(pool)` (`render/bib_latex.py`), and
+  `paper/references_SI.bib` is the cited-only subset of that copy, so an SI entry stays byte-for-byte
+  equal to its main-bib entry. Only field values change, plus one token: a bare month name
+  BibTeX does not define (`month = June`, `sept`; BibTeX warns and drops the month) becomes its
+  macro (`jun`, `sep`). In a value, running text, math (`$...$`) and verbatim arguments
+  (`\url{...}`) are told apart. In text, HTML entities and the known tags (HTML face markup,
+  Crossref's `scp`/`tt`/`ovl`/`font`, namespaced `mml:*`/`jats:*`) become LaTeX, any other `<` or
+  `>` becomes `\textless{}`/`\textgreater{}`, a bare `&`, `%`, `#`, `_` is escaped and a bare `^`
+  becomes `\textasciicircum{}` (measured: it prints U+005E; `\^{}` prints a raised accent). In
+  math, `&`, `%`, `#` are escaped and `<`, `>` stay comparisons. A character pdflatex cannot
+  typeset goes through render's prose map -- in math its form without the `$`, so no `$` is
+  nested -- or becomes accent commands on the fully decomposed letter (`ǚ` → `{\v{\"{u}}}`,
+  `ȩ́` → `{\'{\c{e}}}`, `Ș` → `{\textcommabelow{S}}`; boxed in `\mbox` inside math). `url` and
+  `doi` values are left as they are apart from XML's own escapes: plainnat typesets them
+  verbatim, so an escape there prints its backslash. Fields no style prints (`abstract`,
+  `keywords`, `file`, `annote`, `timestamp`, ...: `bib_latex.UNPRINTED_FIELDS`, an exclusion list so
+  an unknown field is still treated as printed) are copied as acquired. A character with no
+  LaTeX form (a letter with a horn or hook above, CJK) is kept whole, never dropped or stripped
+  of a mark. Keys are never touched, and the pool keeps the bytes it was acquired with.
+- **The preamble.** The preambles sci-adk writes (paper draft, record, authored SI, package
+  `record.tex`, and the package `main.tex`/`si.tex` skeletons) load `\usepackage[T1]{fontenc}`
+  and `\usepackage{lmodern}` after inputenc. With inputenc alone pdflatex runs in OT1, where 22
+  characters the copy keeps (« » ‹ › ‚ „ Ð Þ ð þ Ą ą Đ đ Ę ę Į į Ŋ ŋ Ų ų,
+  `bib_latex.T1_ONLY_CHARS`) and the ogonek command `\k` stop the compile. One test compiles
+  every character the copy keeps with the preamble a render emits; another compiles them in
+  OT1 and pins the T1-only set.
+- **The gate.** `sci-adk verify` fails a run whose `paper/references.bib` or
+  `paper/references_SI.bib` still holds, in a printed field, an entity, a tag, a bare special,
+  a `$` nested inside math or left open, or a character pdflatex cannot typeset, naming file,
+  key and character with the LaTeX form to use, or -- where there is none -- saying to replace
+  the character in the literature store with an ASCII approximation or a LaTeX form. A run
+  rendered before this change passes again once re-rendered. The package gate runs the same
+  check on `01_manuscript/` and names the `package_src/` file to fix, since the package copies
+  its bibliographies from there. An author-supplied package `main.tex` or `si.tex` that loads
+  no T1 (and no fontspec) fails only when a bibliography it loads holds a T1-only character;
+  the line names the characters and entries and the `\usepackage[T1]{fontenc}` line to add.
+  A month name BibTeX does not define in a package bib is an advisory line.
+- **`record.tex`.** The deposit record emits `\bibliography{references}`, which resolves to a
+  `references.bib` beside `record.tex` at the run root. No render writes one there, so the
+  record's bibliography never reaches the pool's raw bib; a record that cites (only through
+  `--si-prose`) shows its citations unresolved where it lies. Left as is.
+
 ---
 
-Version: 1.2.0
+Version: 1.3.0
 Status: DECIDED (2026-07-01)
 History:
 - v1.0.0 (2026-07-01): the four confirmed decisions (cited-only subset, both paths, SI cite gate,
@@ -213,6 +261,11 @@ History:
   embedded `@word{...}` token in a field value) + dual-bib brace-integrity verify gate over BOTH
   `references.bib` and `references_SI.bib` (per-run + package). Mechanism hardening only; the four
   decisions are UNCHANGED.
+- v1.3.0 (2026-10-10): §7 — the paper bibliographies are a LaTeX-safe copy of the pool (no longer
+  verbatim), every emitted preamble loads T1 + Latin Modern, and verify's bib check covers what the
+  copy cannot fix. Same day, after a second review: math-aware copy (no nested `$`), printed fields
+  only, known tags only, `^` and month names, fully decomposed accents, and the package T1 check.
+  The four decisions are UNCHANGED.
 Decomposed by: SPEC-SI-AUTHORING-001 M6 (REQ-SA-6xx), revised in SPEC v0.3.1.
 Extends: design/si-belief-record-split.md (v0.4, FROZEN — single source for the SI split)
 Related: design/paper-figures-and-si.md, design/paper-publishing-requirements.md,

@@ -95,8 +95,10 @@ when a per-run render is invoked as a stand-in for the submission:
 ## The Verdict Rule [HARD]
 
 - The Stop hook runs `sci-adk verify` and **that CLI exit code is the sole verdict.**
-- Guard agents (`evaluator-rigor` / `evaluator-novelty` / `evaluator-validity`) are
-  ADVISORY soft pre-checks. A guard score never decides pass/fail.
+- The guard agents are ADVISORY, all five: the pre-close soft pre-checks
+  `evaluator-rigor` / `evaluator-novelty` / `evaluator-validity`, and the two that run
+  in the paper session, `evaluator-conclusions` (advisory) and `evaluator-paper`
+  (advisory). A guard's output never decides pass/fail.
 - Going straight to `sci-adk verify` (skipping guards) is fully legitimate; the
   skip appends one audit line to `runs/<id>/orchestrator.log`.
 - No conclusion reaches the report without passing `sci-adk verify`. A null result
@@ -198,17 +200,21 @@ record — that is the failure this split exists to prevent.
   Do not deposit with a plain render without `--prose`: it also writes a skeleton
   `paper/draft.tex`, which `verify` judges as the manuscript and fails against the
   frozen contract, so the Stop hook blocks the end of the session.
-- **Session B (a NEW session)** writes the paper, reading `runs/<id>/record.tex` as
-  its input — not this conversation. It authors a `prose.json`, runs
-  `sci-adk numbers draft <run> --prose prose.json` and completes `runs/<id>/numbers.json`
-  (every number the paper states, bound to its recorded source), runs
-  `sci-adk render <run> --prose prose.json`, records the conclusions in
-  `declarations.json`, and runs `sci-adk verify`. A number with no recorded home comes
-  back to the experiment stage — the paper session never adds a value to the record. Give it the run id, the path to
-  `record.tex`, and the `venue` from the frozen `pubreqs.json` — the paper is judged
-  against THAT venue's readers, and a term that is standard in one is opaque in
-  another. Warn it that `record.tex` is the machinery's own document: a word being in
-  its input is not a reason to use it in the paper.
+- **Session B (a NEW top-level session)** is the one running `/sci publish` for the
+  paper, and its input is `runs/<id>/record.tex` — not this conversation. It spawns
+  `expert-writer` to author the paper (step 2): the writer authors a `prose.json`, runs
+  `sci-adk numbers draft <run> --prose prose.json` and completes
+  `runs/<id>/numbers.json` (every number the paper states, bound to its recorded
+  source), runs `sci-adk render <run> --prose prose.json`, records the conclusions in
+  `declarations.json`, and runs `sci-adk verify`. Once that passes, Session B — the
+  session driving `/sci publish` — runs the audit itself (step 5 below): it spawns the
+  readers and refuters and writes the audit file, and the writer revises from that
+  file. A number with no recorded home comes back to the experiment stage — the paper
+  session never adds a value to the record. Session B gives the writer the run id, the
+  path to `record.tex`, and the `venue` from the frozen `pubreqs.json` — the paper is
+  judged against THAT venue's readers, and a term that is standard in one is opaque in
+  another — and warns it that `record.tex` is the machinery's own document: a word
+  being in its input is not a reason to use it in the paper.
 
 Tell the user plainly when Session A is done and what Session B needs (the run id and
 `record.tex`). Do NOT continue into the manuscript in this session because the record
@@ -242,12 +248,13 @@ the engine can catch it.
 3. Optionally `Agent(subagent_type: "evaluator-conclusions")` → a BLIND reading of each
    declared conclusion (which status does the sentence assert?), written to
    `runs/<id>/review.json`, plus a cold read of the opening against the frozen `venue`
-   for terms that venue's readers would not know. Do NOT pass it the declared statuses
-   or the path to `declarations.json` — its independence is the whole value. DO pass it
-   the identifier entries of `numbers.json` (text, document, context): it notes any that
-   reads, in its sentence, as a reported quantity. `verify` computes the disagreement and
-   surfaces it and the notes as NON-GATING advisories, so a faithful paper is silent and
-   a model can never fail a run.
+   for terms that venue's readers would not know, written to the `opening_notes` list of
+   the same `review.json`. Do NOT pass it the declared statuses or the path to
+   `declarations.json` — its independence is the whole value. DO pass it the identifier
+   entries of `numbers.json` (text, document, context): it notes, in the `notes` list,
+   any that reads, in its sentence, as a reported quantity. `verify` computes the
+   disagreement and surfaces it and both lists of notes as NON-GATING advisories, so a
+   faithful paper is silent and a model can never fail a run.
 4. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
    declared sections, F2 font/DPI policy, reference style, max-words, F3 reproduction
    bundle), the `declarations_clean` gate (each declared status still matches the
@@ -256,6 +263,52 @@ the engine can catch it.
    and each entry's source prints as the number) as HARD gates; `advisory` items,
    `max_pages`, stale number entries, the identifier listing and the conclusion-review
    disagreements are surfaced, never gated.
+5. **The paper audit, after `sci-adk verify` passes** (Session B). The session driving
+   `/sci publish` (the orchestrator) spawns the readers and refuters and writes the
+   audit file — a worker cannot spawn agents; the writer only revises from the audit
+   file. `verify` checks digits and declared statuses, not what a sentence means;
+   independent readers check that, each through one lens:
+   - What each side can see: the writer runs in its own worktree. Give the readers and
+     refuters the manuscript path in the tree they read — the workspace, after the
+     writer's output is merged back — and give the writer the audit file's content or
+     its absolute path, to read and never edit.
+   - Spawn `Agent(subagent_type: "evaluator-paper")` once per lens, in parallel:
+     `number-sources`, `claims-vs-design`, `position-and-proportion`,
+     `reader-vocabulary`, `result-fidelity`, `structure-and-methods`. Each prompt names
+     the run and its one lens, never another reader's findings. With a long
+     `numbers.json` (more than about 25 entries), split `number-sources` into index
+     ranges of about 25 entries each, one reader per range, and give each range reader
+     its range and an id prefix (`number-sources-r1`, `number-sources-r2`, ...): its
+     findings are numbered `number-sources-r2-<n>`, so the pooled findings have unique
+     ids before any refuter sees them.
+   - Give each lens's findings to three refuters (`evaluator-paper` in refute mode,
+     spawned in parallel, none shown another's judgement). Keep a finding when
+     a majority of its refuters (at least two of three) uphold it; a refuter that
+     returns nothing usable counts as not upholding (no reply, a blocker, or no
+     judgement for that finding). A lens that returns no findings gets no refuters; a
+     `number-sources` lens split into index ranges counts as one lens, its readers'
+     findings going to one set of three refuters.
+   - Spawn in waves of at most about 10 agents at a time, one message per wave — the
+     readers first, then the refuters.
+   - Write the survivors to `drafts/<spec-id>/paper/audit-<date>.md` — major first,
+     merged across lenses, each with location, quote, issue, record evidence, fix and
+     its upheld count; the refuted ones listed after — and hand that file to
+     `Agent(subagent_type: "expert-writer")` to revise, then re-render and re-verify. A
+     number a fix needs that has no recorded home goes back to the experiment stage
+     (`/sci experiment`) first, never into `numbers.json`. When the writer returns, mark
+     each upheld finding it did not fix as open, with its reason: upheld-but-unfixed
+     findings stay listed in the audit file as open, never deleted.
+   - After the revision passes `verify`, if any declared sentence or the opening changed,
+     re-run `evaluator-conclusions` (step 3) on the revised paper, then `sci-adk verify`
+     to surface its readings — the earlier reading was of the old text.
+   - The full audit runs once per publish session. After the revision passes `verify`
+     again, re-run only the lenses whose findings were fixed, through the same read,
+     refute and write steps, to check the fixes; the other lenses are not read again.
+     The re-run writes a new file, never overwriting the first: a same-day re-run writes
+     `drafts/<spec-id>/paper/audit-<date>-2.md`. Its surviving findings go to the writer
+     once, and then the audit ends; what that revision does not fix stays listed as open.
+   - The audit is advisory: nothing in it reaches `sci-adk verify`, whose exit code
+     remains the verdict.
 
 ### package — Assemble the workspace submission
 

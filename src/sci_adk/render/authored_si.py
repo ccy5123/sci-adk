@@ -65,7 +65,7 @@ from sci_adk.render.novelty import (
     has_novelty_markup,
     novelty_scope_suffix,
 )
-from sci_adk.render.paper import _latex_sanitize
+from sci_adk.render.paper import T1_FONT_LINES, _latex_sanitize
 from sci_adk.render.prose import AuthoredSI
 
 
@@ -197,6 +197,7 @@ def render_authored_si_latex(
     has_image = any(f.kind == "image" for f in figures)
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
+    lines.extend(T1_FONT_LINES)
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")

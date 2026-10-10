@@ -184,6 +184,34 @@ class ReviewNote(BaseModel):
     note: Optional[str] = Field(default=None, description="one-line reason")
 
 
+class OpeningNote(BaseModel):
+    """A term in the opening that a reader of the frozen venue would not know unaided
+    (design/reader-facing-prose.md, "the opening, cold").
+
+    The reviewer reads the title, abstract and first paragraphs as a reader of the
+    recorded ``venue`` would, with no knowledge of the run, and names the terms that
+    reader would stumble on -- vocabulary borrowed from the record document, file or
+    script names used as concepts. It names the term and why; it proposes no replacement,
+    because the repair is the author's rewrite. Kept apart from :class:`ReviewNote`: a
+    term is not an identifier read as a quantity, and each is surfaced in its own words.
+    Surfaced as written, never gated.
+
+    Attributes:
+        term: the term, as it appears in the manuscript.
+        document: the manuscript it is in (``draft.tex`` unless noted).
+        sentence: the sentence (or the title) it appears in, quoted (optional).
+        reason: the reviewer's one-line reason the venue's reader would stumble
+            (reported, never parsed; optional).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    term: str = Field(min_length=1, description="the term, as written")
+    document: str = Field(default=DEFAULT_DOCUMENT, description="manuscript file")
+    sentence: Optional[str] = Field(default=None, description="the sentence it is in")
+    reason: Optional[str] = Field(default=None, description="one-line reason")
+
+
 class ConclusionReview(BaseModel):
     """An independent reviewer's blind reading of the paper's conclusions (design §11.4).
 
@@ -198,6 +226,9 @@ class ConclusionReview(BaseModel):
         readings: one entry per conclusion read.
         notes: identifiers the reviewer read as reported quantities (optional; a
             ``review.json`` written before this field existed loads unchanged).
+        opening_notes: terms in the opening a reader of the venue would not know
+            unaided (optional; a ``review.json`` written before this field existed loads
+            unchanged).
     """
 
     model_config = {"extra": "forbid"}
@@ -206,6 +237,7 @@ class ConclusionReview(BaseModel):
     reviewer: Optional[str] = Field(default=None, description="who produced this reading")
     readings: List[ReadConclusion] = Field(default_factory=list)
     notes: List[ReviewNote] = Field(default_factory=list)
+    opening_notes: List[OpeningNote] = Field(default_factory=list)
 
 
 def load_review(run_dir: Path) -> Optional[ConclusionReview]:
@@ -232,6 +264,7 @@ __all__ = [
     "load_declarations",
     "ReadConclusion",
     "ReviewNote",
+    "OpeningNote",
     "ConclusionReview",
     "load_review",
 ]

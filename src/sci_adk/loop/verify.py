@@ -88,6 +88,7 @@ from sci_adk.render.factref import find_unresolved_factrefs
 from sci_adk.render.declaration_checks import (
     declaration_disagreements,
     declaration_problems,
+    opening_note_lines,
     review_note_lines,
 )
 from sci_adk.render.novelty import find_unsupported_novelty
@@ -101,12 +102,15 @@ from sci_adk.render.paper import check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
     bib_latex_safety_problems,
+    bib_month_advisories,
+    bibliography_stems,
     body_word_range_problems,
     citation_disambiguation_problems,
     citation_key_shape_problems,
     cite_resolution_problems,
     deposit_completeness_problems,
     figure_presence_problems,
+    font_encoding_problems,
     layout_problems,
     package_record_path,
     readme_submission_readiness_problems,
@@ -1051,8 +1055,10 @@ def _conclusion_review_advisory(run_dir: Path) -> List[str]:
     if review is None:
         return []
     # Identifier notes (design/declared-numbers.md §7 decision 4): an identifier the
-    # reviewer read as a reported quantity. Surfaced as written; never compared, never gated.
-    notes = review_note_lines(review)
+    # reviewer read as a reported quantity. Opening notes: a term the reviewer, reading the
+    # opening cold, found the venue's reader would not know. Each surfaced as written in its
+    # own wording; never compared, never gated, and neither needs a declaration list.
+    notes = review_note_lines(review) + opening_note_lines(review)
     try:
         declarations = load_declarations(run_dir)
     except ValueError:
@@ -1468,7 +1474,6 @@ def _check_paper_requirements(
     problems.extend(cite_resolution_problems(draft_tex, bib))
     problems.extend(citation_key_shape_problems(draft_tex, bib))
     problems.extend(citation_disambiguation_problems(draft_tex, bib))
-    problems.extend(bib_latex_safety_problems(bib))
     warnings.extend(unpublished_citation_warnings(draft_tex, bib))
 
     # SPEC-SI-AUTHORING-001 M6 (REQ-SA-611/612/614): the authored si.tex has its OWN
@@ -1489,12 +1494,19 @@ def _check_paper_requirements(
     # (the user's "_SI도 따로 있기에 둘 다 검정" requirement), naming the offending file. A MISSING
     # bib is NOT a failure (thin/absent SI, no-pool run stay clean, REQ-SA-606/615); only a
     # PRESENT-but-malformed bib fails. REUSE the existing _braces_balanced helper (no new balancer).
+    # Beside it, the LaTeX-safety check over the same two files: what render's LaTeX-safe copy
+    # left unsafe in a field a style prints (a raw HTML entity or tag, a bare special, a '$'
+    # that breaks math, a character pdflatex cannot typeset with the preamble render emits)
+    # FAILS, naming the file, the entry key and the character. A run rendered before the copy
+    # existed fails until it is re-rendered.
     for _bib_name in ("references.bib", "references_SI.bib"):
         _bib_file = run_dir / "paper" / _bib_name
-        if _bib_file.is_file() and not _braces_balanced(
-            _bib_file.read_text(encoding="utf-8")
-        ):
+        if not _bib_file.is_file():
+            continue
+        _bib_text = _bib_file.read_text(encoding="utf-8")
+        if not _braces_balanced(_bib_text):
             problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
+        problems.extend(bib_latex_safety_problems(_bib_text, source=_bib_name))
 
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
@@ -1700,6 +1712,31 @@ def _run_index_runs(package_dir: Path) -> Optional[List[str]]:
     return runs
 
 
+def _package_bib_source(workspace_dir: Path, bib_name: str) -> str:
+    """The file an author fixes for a problem in ``package/01_manuscript/<bib_name>``.
+
+    The assembler (``render/package.py`` ``_ensure_manuscript``) copies
+    ``package_src/references.bib`` and ``package_src/references_SI.bib`` unchanged; without an
+    author ``references_SI.bib`` it cuts the SI bibliography from the main one; without an
+    author ``references.bib`` it keeps the one already in ``01_manuscript/``.
+    """
+    src = workspace_dir / "package_src"
+    if (src / bib_name).is_file():
+        return f"package_src/{bib_name}, which the package copies unchanged"
+    cut = f", which the package cuts {bib_name} from" if bib_name == _REFERENCES_SI_BIB else ""
+    if (src / "references.bib").is_file():
+        return f"package_src/references.bib{cut}"
+    return f"package/01_manuscript/references.bib{cut} (there is no package_src/ copy)"
+
+
+def _package_tex_source(workspace_dir: Path, tex_name: str) -> str:
+    """The file an author edits for a preamble problem in ``package/01_manuscript/<tex_name>``:
+    the assembler copies ``package_src/<tex_name>`` unchanged when the author supplied one."""
+    if (workspace_dir / "package_src" / tex_name).is_file():
+        return f"package_src/{tex_name}, which the package copies unchanged"
+    return f"package/01_manuscript/{tex_name}"
+
+
 def _check_package_requirements(
     workspace_dir: Path,
     package_dir: Path,
@@ -1788,7 +1825,6 @@ def _check_package_requirements(
         problems.extend(cite_resolution_problems(main_tex, bib))
         problems.extend(citation_key_shape_problems(main_tex, bib))
         problems.extend(citation_disambiguation_problems(main_tex, bib))
-        problems.extend(bib_latex_safety_problems(bib))
         warnings.extend(unpublished_citation_warnings(main_tex, bib))
 
     # SPEC-SI-AUTHORING-001 M6 (REQ-SA-613/614): the authored package si.tex has its OWN
@@ -1808,12 +1844,42 @@ def _check_package_requirements(
     # .bib actually COMPILES (a brace-unbalanced entry is a hard LaTeX error the cite gate misses).
     # BOTH 01_manuscript/references.bib (main) AND references_SI.bib (SI) are validated (둘 다 검정),
     # naming the offending file; a MISSING bib is not a failure. REUSE _braces_balanced.
+    # Beside it, the same LaTeX-safety check as the per-run gate, over both files -- its lines
+    # name the package source file to fix, since the package copies its bibliographies from
+    # there unchanged and re-rendering a run never touches them.
+    # A bare month name BibTeX does not define (month = June) is advisory: BibTeX only warns,
+    # but the reference list loses the month (render's per-run copy writes the macro itself).
     for _bib_name in ("references.bib", _REFERENCES_SI_BIB):
         _bib_file = manuscript_dir / _bib_name
-        if _bib_file.is_file() and not _braces_balanced(
-            _bib_file.read_text(encoding="utf-8")
-        ):
+        if not _bib_file.is_file():
+            continue
+        _bib_text = _bib_file.read_text(encoding="utf-8")
+        _bib_source = _package_bib_source(workspace_dir, _bib_name)
+        if not _braces_balanced(_bib_text):
             problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
+        problems.extend(
+            bib_latex_safety_problems(_bib_text, source=_bib_name, package_source=_bib_source)
+        )
+        warnings.extend(
+            bib_month_advisories(_bib_text, source=_bib_name, package_source=_bib_source)
+        )
+
+    # The character policy behind that check assumes the T1 font encoding, which the
+    # main.tex/si.tex skeletons sci-adk writes load. An author-supplied manuscript may run in
+    # OT1: it FAILS only when a bibliography it loads holds a character that needs T1.
+    for _tex_name, _tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
+        for _stem in bibliography_stems(_tex or ""):
+            _bib_file = manuscript_dir / f"{_stem}.bib"
+            if _bib_file.is_file():
+                problems.extend(
+                    font_encoding_problems(
+                        _tex,
+                        _bib_file.read_text(encoding="utf-8"),
+                        tex_name=_tex_name,
+                        bib_name=_bib_file.name,
+                        fix_in=_package_tex_source(workspace_dir, _tex_name),
+                    )
+                )
 
     # 4. Tool-agnostic: main.tex + si.tex carry no toolchain noun. SPEC-SI-AUTHORING-001 M5
     #    (REQ-SA-507): the package si.tex is now AUTHORED belief (a sibling of main.tex), so the

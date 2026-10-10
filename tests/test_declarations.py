@@ -46,6 +46,7 @@ from sci_adk.loop.verify import verify_run
 from sci_adk.render.declaration_checks import (
     declaration_disagreements,
     declaration_problems,
+    opening_note_lines,
     status_mismatches,
     unanchored_sentences,
     undeclared_hypotheses,
@@ -462,3 +463,138 @@ def test_no_review_is_silent(tmp_path):
            _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE)))
     report = verify_run(run_dir)
     assert not any("conclusion review" in n for n in report.paper_advisory)
+
+
+# --------------------------------------------------------------------------- #
+# the reviewer's cold reading of the opening -- its own list, its own wording
+# --------------------------------------------------------------------------- #
+#
+# The reviewer's second duty (read the title, abstract and opening as a reader of the
+# frozen venue, and name terms that reader would not know unaided) had no field: `notes`
+# holds only identifiers read as quantities, so a vocabulary finding was dropped or shown
+# under the identifier wording. `opening_notes` is its own list. Advisory, never gated.
+
+_TERM = "criterion-5 tissue score"
+_OPENING = "Records failing the criterion-5 tissue score were excluded."
+
+
+def _opening_review(*notes: dict, readings=()) -> ConclusionReview:
+    return ConclusionReview.model_validate({
+        "spec_id": "sp-decl", "reviewer": "evaluator-conclusions",
+        "readings": list(readings), "opening_notes": list(notes),
+    })
+
+
+def test_a_review_written_before_opening_notes_existed_loads_unchanged():
+    # The shape the trial run's review.json has today: readings plus an empty notes list.
+    review = ConclusionReview.model_validate({
+        "spec_id": "s", "reviewer": "evaluator-conclusions",
+        "readings": [{"hypothesis_id": "H1", "reads_as": "supported", "basis": "b"}],
+        "notes": [],
+    })
+    assert review.opening_notes == []
+
+
+def test_an_opening_note_names_the_term_its_sentence_and_the_reason():
+    review = _opening_review({
+        "term": _TERM, "document": "draft.tex", "sentence": _OPENING,
+        "reason": "a label from another paper's scoring scheme, never explained",
+    })
+    lines = opening_note_lines(review)
+    assert len(lines) == 1
+    line = lines[0]
+    assert f"'{_TERM}'" in line and _OPENING in line and "draft.tex" in line
+    assert "never explained" in line
+    assert "advisory" in line.lower()
+    # Not the identifier wording: a term is not "a reported quantity".
+    assert "reported quantity" not in line and "numbers.json" not in line
+
+
+def test_an_opening_note_needs_only_the_term():
+    review = _opening_review({"term": "PHYSPROP"})
+    lines = opening_note_lines(review)
+    assert len(lines) == 1 and "'PHYSPROP'" in lines[0] and "draft.tex" in lines[0]
+
+
+def test_an_opening_note_without_a_term_is_not_a_note():
+    with pytest.raises(ValueError, match=r"opening_notes\.0\.term"):
+        _opening_review({"term": "", "reason": "x"})
+
+
+def test_a_sentence_wrapped_across_lines_surfaces_on_one_line():
+    review = _opening_review({"term": _TERM,
+                              "sentence": "Records failing the\n  criterion-5 tissue score."})
+    (line,) = opening_note_lines(review)
+    assert "\n" not in line and "Records failing the criterion-5 tissue score." in line
+
+
+def test_no_opening_notes_is_silent():
+    assert opening_note_lines(_review(("hyp-001", ClaimStatus.SUPPORTED, "b"))) == []
+
+
+def test_verify_surfaces_an_opening_note_and_never_gates(tmp_path):
+    run_dir = _seeded_run(tmp_path)
+    _write(run_dir, f"\\section{{Results}}\n{_SENTENCE}\n",
+           _decls(("hyp-001", ClaimStatus.SUPPORTED, _SENTENCE)))
+    before = verify_run(run_dir)
+    (run_dir / "review.json").write_text(json.dumps({
+        "spec_id": "sp-decl", "reviewer": "evaluator-conclusions",
+        "readings": [{"hypothesis_id": "hyp-001", "reads_as": "supported", "basis": "b"}],
+        "opening_notes": [{"term": _TERM, "sentence": _OPENING,
+                           "reason": "a label the venue's reader cannot decode"}],
+    }), encoding="utf-8")
+    after = verify_run(run_dir)
+    lines = [n for n in after.paper_advisory if _TERM in n]
+    assert len(lines) == 1
+    # The reading agreed with the declaration, so the opening note is the only line.
+    assert not any("declared" in n for n in after.paper_advisory if "conclusion review" in n)
+    assert after.passed == before.passed
+    assert after.declarations_clean is True
+    assert after.declaration_problems_found == before.declaration_problems_found
+
+
+def test_opening_notes_surface_when_the_run_declares_no_conclusions(tmp_path):
+    """A cold reading of the opening needs no declaration list to be worth reading."""
+    run_dir = _seeded_run(tmp_path)
+    _write(run_dir, f"\\section{{Results}}\n{_SENTENCE}\n", None)
+    (run_dir / "review.json").write_text(
+        _opening_review({"term": _TERM}).model_dump_json(), encoding="utf-8")
+    review_lines = [n for n in verify_run(run_dir).paper_advisory
+                    if n.startswith("conclusion review")]
+    assert len(review_lines) == 1 and _TERM in review_lines[0]
+
+
+def test_identifier_and_opening_notes_keep_their_own_wording(tmp_path):
+    run_dir = _seeded_run(tmp_path)
+    _write(run_dir, f"\\section{{Results}}\n{_SENTENCE}\n", None)
+    (run_dir / "review.json").write_text(json.dumps({
+        "spec_id": "sp-decl", "reviewer": "evaluator-conclusions", "readings": [],
+        "notes": [{"text": "5", "note": "reads as a count of criteria"}],
+        "opening_notes": [{"term": _TERM}],
+    }), encoding="utf-8")
+    advisory = verify_run(run_dir).paper_advisory
+    identifier = [n for n in advisory if "'5'" in n]
+    opening = [n for n in advisory if _TERM in n]
+    assert len(identifier) == 1 and "reported quantity" in identifier[0]
+    assert len(opening) == 1 and "reported quantity" not in opening[0]
+
+
+def test_the_agent_output_contract_loads_and_routes_each_duty_to_its_own_list():
+    """The reviewer writes what its template shows; that example must load, and must put
+    the second duty (the opening) and the third (identifiers) in different lists."""
+    import re as _re
+    from pathlib import Path as _Path
+
+    import sci_adk
+
+    template = (_Path(sci_adk.__file__).parent / "templates" / "research-workspace"
+                / ".claude" / "agents" / "evaluator-conclusions.md").read_text(encoding="utf-8")
+    contract = template.split("## Output Contract", 1)[1]
+    example = _re.search(r"```json\n(.*?)\n```", contract, _re.DOTALL).group(1)
+    review = ConclusionReview.model_validate(json.loads(example))
+    assert review.opening_notes and review.notes
+    assert "`opening_notes`" in contract and "`notes`" in contract
+    second = template.split("## Second Duty", 1)[1].split("## Third Duty", 1)[0]
+    third = template.split("## Third Duty", 1)[1].split("## How To Read", 1)[0]
+    assert "`opening_notes`" in second
+    assert "`notes`" in third and "`opening_notes`" not in third

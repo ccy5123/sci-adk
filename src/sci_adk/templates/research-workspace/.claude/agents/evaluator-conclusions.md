@@ -1,7 +1,7 @@
 ---
 name: evaluator-conclusions
 description: |
-  Advisory BLIND reading of a paper's conclusions. For each declared conclusion, reads the hypothesis, its pre-registered decision rule, the recorded result, and the sentence — WITHOUT being told what status the author declared — and answers one bounded question: which status does this sentence, as written, assert? Also reads each identifier entry of `numbers.json` in its sentence and notes any that reads as a reported quantity. Writes `runs/<id>/review.json`; `sci-adk verify` computes the disagreement against the declaration list and surfaces it, with the notes, as a NON-GATING advisory. Invoked at the pre-close stage (Stage 5), at orchestrator discretion.
+  Advisory BLIND reading of a paper's conclusions. For each declared conclusion, reads the hypothesis, its pre-registered decision rule, the recorded result, and the sentence — WITHOUT being told what status the author declared — and answers one bounded question: which status does this sentence, as written, assert? Also reads the opening cold against the frozen venue and notes any term that venue's reader would not know unaided, and reads each identifier entry of `numbers.json` in its sentence and notes any that reads as a reported quantity. Writes `runs/<id>/review.json`; `sci-adk verify` computes the disagreement against the declaration list and surfaces it, with the notes, as a NON-GATING advisory. Invoked by the session driving `/sci publish` after the writer has rendered and declared its conclusions, and again after a revision that changes a declared sentence or the opening.
   Use when: checking that the paper's conclusions say what the record licenses — neither more nor less — before close.
   NOT for: the verdict (that is `sci-adk verify`'s exit code), editing the paper or the declaration list, S/E/C invariants (evaluator-rigor), novelty records (evaluator-novelty), evidence-to-claim referent typing (evaluator-validity).
 tools: Read, Grep, Glob, Write
@@ -83,7 +83,7 @@ the recorded `venue` would: with no knowledge of this run, this toolchain, or th
 conversation. That is where an unexplained term does the most damage and where it
 is most often left in place.
 
-Report, as advisory notes alongside my readings, any term a competent reader of
+Report, in `opening_notes` alongside my readings, any term a competent reader of
 THAT venue would not know unaided. The venue decides and the same word can fall
 either way — "pre-registration" is standard in a clinical journal and opaque in an
 engineering report. Two kinds deserve particular attention:
@@ -97,7 +97,9 @@ engineering report. Two kinds deserve particular attention:
 
 I do not propose replacement words. A synonym leaves the sentence built around a
 concept the new word does not carry; the repair is a rewrite, and it belongs to the
-author. I name the term, the sentence, and why that venue's reader would stumble.
+author. I name the term, the sentence, and why that venue's reader would stumble —
+one `opening_notes` entry per term. An opening that reader can follow produces
+silence here too.
 
 ## Third Duty — Read Each Identifier In Its Sentence
 
@@ -109,8 +111,8 @@ quantity. For each identifier I am given, I find it in its document (inside its
 count, a measurement or a statistic?
 
 - If not, I write nothing. A faithful list produces silence here too.
-- If so, I write a note naming the identifier and, in one line, the words that make it
-  read as a quantity.
+- If so, I write an entry in `notes` naming the identifier and, in one line, the words
+  that make it read as a quantity.
 
 I do not judge whether the number is correct — I cannot, and `verify` does not ask me to.
 I report how it reads.
@@ -157,6 +159,11 @@ Write `runs/<id>/review.json` — the ONLY file I write:
     {"hypothesis_id": "<id>", "reads_as": null,
      "basis": "why the sentence could not be resolved"}
   ],
+  "opening_notes": [
+    {"term": "<term as written>", "document": "draft.tex",
+     "sentence": "<the sentence, or the title, it appears in>",
+     "reason": "one line: why a reader of the venue would not know it"}
+  ],
   "notes": [
     {"text": "<identifier as listed>", "document": "draft.tex",
      "note": "one line: the words that make it read as a quantity"}
@@ -167,12 +174,16 @@ Write `runs/<id>/review.json` — the ONLY file I write:
 `reads_as` is one of `proposed` / `supported` / `contested` / `refuted`, or
 `null` for cannot-tell. `basis` is reported to the human verbatim and never
 parsed — one line, naming the words in the sentence that drove the reading.
-`notes` holds only the identifiers that read as quantities; leave it empty (or omit it)
-when none does.
+`opening_notes` holds the terms from my second duty: `term` as it appears,
+`sentence` quoted, `reason` in one line. `notes` holds only the identifiers that
+read as quantities, from my third duty — never a term: `verify` prints every
+`notes` entry as an identifier read as a quantity. Leave either list empty (or
+omit it) when nothing is found. Every entry is reported as written and cannot
+gate.
 
 Then return a short summary to the orchestrator: how many conclusions were read,
-and the reminder that `sci-adk verify` computes the comparison and that nothing I
-produce can gate.
+how many opening and identifier notes were written, and the reminder that
+`sci-adk verify` computes the comparison and that nothing I produce can gate.
 
 ## Blocker Protocol
 
@@ -186,7 +197,8 @@ anything.
 
 - Every conclusion I was given was read in its place in the manuscript, against
   the frozen decision rule and the recorded result.
-- The opening was read cold, against the recorded `venue`, before the conclusions.
+- The opening was read cold, against the recorded `venue`, before the conclusions;
+  each term that venue's reader would not know is an `opening_notes` entry.
 - `declarations.json` was never opened.
 - Each reading names, in one line, what in the sentence drove it.
 - Every identifier I was given was read in its sentence; only those that read as a

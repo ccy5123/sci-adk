@@ -16,8 +16,9 @@ overwritten); the Stop / UserPromptSubmit hooks are matched by their ``command``
 and APPENDED to the user's existing event arrays (never reordered, never duplicated).
 
 The ``/research`` command and the ``researcher`` persona were removed in the
-sci-adk-as-moai pivot: the sole installed persona is ``science-orchestrator`` and no
-command is installed by this verb (the ``/sci`` entry point lands in a later step).
+sci-adk-as-moai pivot: the sole installed persona is ``science-orchestrator``, and the
+entry point is ``/sci`` -- the ``sci`` hub Skill plus its thin command routers under
+``.claude/commands/``, all installed by this verb (``_FILE_ASSETS`` below).
 """
 
 from __future__ import annotations
@@ -34,9 +35,10 @@ from sci_adk.init_session import InstallReport, install_session
 # The plain file assets the kit installs (relative to the target dir). CLAUDE.md
 # and settings.json have their own special handling and are asserted separately.
 # As of the sci-adk-as-moai Phase C upgrade the verb installs the FULL kit: the two
-# enforcement hooks, the science-orchestrator output style, the 9 worker/guard
-# agents (8 v1 + the v2-promoted expert-replicator), the 8 sci/science-* Skills, and
-# the 8 /sci command routers. Kept in lockstep with init_session._PLAIN_ASSETS.
+# enforcement hooks, the science-orchestrator output style, the 11 worker/guard
+# agents (6 workers, including the v2-promoted expert-replicator, and 5 advisory
+# guards), the 8 sci/science-* Skills, and the 8 /sci command routers. Kept in
+# lockstep with init_session._PLAIN_ASSETS.
 _FILE_ASSETS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
@@ -49,11 +51,12 @@ _FILE_ASSETS = (
     ".claude/agents/expert-literature.md",
     # v2-promoted worker (1)
     ".claude/agents/expert-replicator.md",
-    # guard agents (4)
+    # guard agents (5)
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
     ".claude/agents/evaluator-conclusions.md",
+    ".claude/agents/evaluator-paper.md",
     # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
@@ -131,7 +134,7 @@ def test_install_into_empty_dir_lays_down_every_asset(tmp_path):
     report = install_session(tmp_path)
 
     assert isinstance(report, InstallReport)
-    # every plain asset (hooks + output style + 8 agents + 5 Skills + 7 commands)
+    # every plain asset (2 hooks + output style + 11 agents + 8 Skills + 8 commands)
     # + CLAUDE.md present
     for rel in _FILE_ASSETS:
         assert (tmp_path / rel).is_file(), f"missing asset: {rel}"
@@ -182,8 +185,9 @@ _COMMAND_ASSETS = (
 
 
 def test_install_lays_down_the_full_kit_agents_skills_commands(tmp_path):
-    # Phase C (sci-adk-as-moai §10.3): a fresh install must place all 8 agents, the
-    # 5 sci/science-* Skills, and the 7 /sci command routers -- the install loop
+    # Phase C (sci-adk-as-moai §10.3): a fresh install must place the spot-checked
+    # agents (8 of 11), sci/science-* Skills (5 of 8) and /sci command routers (7 of
+    # 8) above -- the full inventory is _FILE_ASSETS -- and the install loop
     # creates .claude/agents/, .claude/skills/<name>/ and .claude/commands/sci/ on
     # the fly (no per-asset special-casing).
     report = install_session(tmp_path)

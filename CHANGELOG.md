@@ -10,6 +10,33 @@ The public surface (CLI + curated Python API) is frozen as the 1.0 contract
 
 ## [Unreleased]
 
+### Changed
+
+- `sci-adk render` writes a LaTeX-safe copy of the run's literature bib into
+  `paper/references.bib` and `paper/references_SI.bib` instead of a verbatim one: HTML
+  entities and tags (`<i>`, `<sub>`, `<span>`, `<jats:p>` ...) become LaTeX, any other `<` or
+  `>` prints as itself, a bare `&`, `%`, `#` (and `_` or `^` outside math) is escaped, and
+  characters pdflatex cannot typeset go through render's character map (inside `$...$`
+  without a second pair of `$`) or become accent commands. A bare month name BibTeX does not
+  define (`month = June`, `sept`) becomes its macro (`jun`, `sep`). Keys, `url`/`doi` values
+  and fields no style prints (`abstract`, `keywords`, `file`, `annote`, `timestamp` ...) are
+  untouched; the literature store is never rewritten.
+- `sci-adk verify` fails a run whose `paper/references.bib` or `paper/references_SI.bib`
+  still holds, in a field a style prints, a character pdflatex cannot typeset, an HTML entity
+  or tag, a bare special, or a `$` nested inside math or left open. Each line names the file,
+  the entry key and the character, and either the LaTeX form to use or, where there is none,
+  that the character must be replaced in the literature store. A run rendered before this
+  change fails until it is rendered again: re-run `sci-adk render` for it. The package gate
+  runs the same check, names the `package_src/` file to fix, and advises on month names
+  BibTeX does not define.
+- The preambles sci-adk writes (paper draft, record, authored SI, the package `record.tex`,
+  and the package `main.tex` and `si.tex` skeletons written when the author supplies none)
+  load `\usepackage[T1]{fontenc}` and `\usepackage{lmodern}` after inputenc. In the default
+  OT1 encoding letters such as Ð, þ, Ę, Ų and the guillemets stopped pdflatex. An
+  author-supplied package `main.tex` or `si.tex` is not changed: the package gate fails it
+  only when it loads no T1 and the bibliography it loads holds such a character, naming the
+  characters and the line to add.
+
 ## [0.3.0] - 2026-06-30
 
 ### Added

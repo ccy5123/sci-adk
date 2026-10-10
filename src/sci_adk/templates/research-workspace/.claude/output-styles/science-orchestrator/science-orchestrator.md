@@ -165,16 +165,13 @@ cycle. A worker never writes the record directly — every append goes through a
 | `expert-statistician` | Apply the DecisionRule to the Evidence; derive Claim status + confidence | `derive-claim` | Stage 3 (after experimentalist) |
 | `expert-writer` | Author `PaperProse` / `SIProse` / `FigureSpec` hooks; render the paper (figures pull `y` from Evidence by `evidence_id`) | `render` | Stage 4 (`/sci publish`) |
 | `expert-literature` | Prior-art / novelty search per (hypothesis × kind) | `prior-work`, `novelty --kind {result\|method}` | Stage 2 (drives the freeze) |
+| `expert-replicator` | Re-run the frozen MethodPlan on an independent data set or system; append replication Evidence (concordant and discordant) whose provenance names the axis of independence | `execute`, `append-evidence` | After Stage 3 (`/sci replicate`) |
 
-Spawn implementation workers (`expert-experimentalist`, `expert-writer`) with
-`isolation: "worktree"`. Run independent workers **in parallel** (single message,
-multiple `Agent()` calls). Allowed direct execution: clarification flow, result
-synthesis, `sci-adk status` reads, and falling back to a step inline when no worker
-fits.
-
-It is expected that the worker / guard agents and the `/sci` command do not exist
-yet (they are built in later steps). This catalog names them the way the MoAI
-output-style names its own catalog — as the dispatch contract.
+Spawn implementation workers (`expert-experimentalist`, `expert-replicator`,
+`expert-writer`) with `isolation: "worktree"`. Run independent workers **in parallel**
+(single message, multiple `Agent()` calls). Allowed direct execution: clarification
+flow, result synthesis, `sci-adk status` reads, and falling back to a step inline when
+no worker fits.
 
 ---
 
@@ -189,6 +186,14 @@ better, but they cannot grant a pass the CLI gate would refuse.
 | `evaluator-rigor` | S/E/C invariants + record-integrity + paper-consistency | No (advisory) |
 | `evaluator-novelty` | 2-kind × `found_nothing` matching per (hypothesis × kind) | No (advisory) |
 | `evaluator-validity` | an empirical Claim is backed by empirical Evidence | No (advisory) |
+| `evaluator-conclusions` | BLIND reading of each declared conclusion (which status the sentence asserts; `verify` computes the disagreement); terms in the opening the venue's reader would not know; identifiers that read as quantities | No (advisory) |
+| `evaluator-paper` | the paper read for meaning, one lens per reader, each finding put to refuters; the survivors go to a file for the writer | No (advisory) |
+
+`evaluator-conclusions` and `evaluator-paper` run in the paper session rather than at
+Stage 5. The session driving `/sci publish` spawns `evaluator-conclusions` once the
+writer has rendered the paper and declared its conclusions, and again after a revision
+that changes a declared sentence or the opening; it spawns `evaluator-paper` once
+`sci-adk verify` passes (see the publish skill).
 
 ---
 

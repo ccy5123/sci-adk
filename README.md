@@ -189,10 +189,14 @@ This lays down (non-clobbering, idempotent):
   research workers, and gates every conclusion through `sci-adk verify`.
 - **Worker agents** — `manager-prereg` (author + freeze the Spec), `expert-experimentalist`
   (run experiments → Evidence), `expert-statistician` (apply the `DecisionRule` → Claims),
-  `expert-writer` (render the paper), `expert-literature` (prior-art / novelty search).
+  `expert-writer` (render the paper), `expert-literature` (prior-art / novelty search),
+  `expert-replicator` (re-run a frozen Spec on an independent data set or system).
 - **Guard agents** (advisory) — `evaluator-rigor` / `evaluator-novelty` /
-  `evaluator-validity`: soft pre-checks that catch problems early. They never grant a
-  pass — `sci-adk verify` (run by the Stop hook) is the sole verdict.
+  `evaluator-validity`: soft pre-checks that catch problems early; `evaluator-conclusions`
+  (a blind reading of the paper's declared conclusions and a cold reading of its opening)
+  and `evaluator-paper` (the paper read for meaning, one lens per reader, after `verify`
+  passes). They never grant a pass — `sci-adk verify` (run by the Stop hook) is the sole
+  verdict.
 - **`/sci` commands** — `plan` / `experiment` / `publish` / `verify` / `status` / `replicate` / `package` routing through the `sci` orchestration Skill.
 - **Enforcement hooks** — a Stop gate (`sci-adk verify`) and a per-turn re-anchor.
 

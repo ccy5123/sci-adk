@@ -668,7 +668,8 @@ a *virtue* to advertise, not a term to hide.
   abstract and first paragraphs as a reader of the frozen `venue`, BEFORE any declared
   conclusion, and reports terms that venue's reader would not know. It proposes no
   replacement words — a synonym leaves the sentence built around the old concept, so the
-  repair is the author's rewrite.
+  repair is the author's rewrite. The terms go to `opening_notes` in `review.json` (term,
+  document, sentence, reason), which `verify` prints as non-gating advisories.
 - **D → the floor + the reviewer.** "State the strongest conclusion the record supports,
   plainly" already forbids reciting the criterion in place of the finding, and the blind
   reviewer (§11.4) reads for exactly this: a sentence that recites a threshold asserts

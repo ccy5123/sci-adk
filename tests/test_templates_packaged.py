@@ -41,11 +41,12 @@ _KIT_FILES = (
     ".claude/agents/expert-literature.md",
     # v2-promoted worker (1)
     ".claude/agents/expert-replicator.md",
-    # guard agents (4)
+    # guard agents (5)
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
     ".claude/agents/evaluator-conclusions.md",
+    ".claude/agents/evaluator-paper.md",
     # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",

@@ -73,6 +73,7 @@ from sci_adk.render.figures import (
     order_figures_by_reference,
 )
 from sci_adk.render.authored_si import render_authored_si_latex
+from sci_adk.render.bib_latex import latex_safe_bib
 from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.pkgreqs_checks import bib_subset, cited_keys
 from sci_adk.render.prose import AuthoredSI, PaperProse, SIProse
@@ -994,18 +995,27 @@ class ResearchCompiler:
         """Copy the run's ``references.bib`` next to ``draft.tex`` and return its path.
 
         Overleaf self-containment: when ``_locate_bib_path`` finds the run's
-        ``references.bib`` (see ``_LITERATURE_DIRS``), copy it verbatim to
-        ``paper/references.bib`` so uploading the ``paper/`` folder as-is resolves
-        ``\\bibliography{references}``. The returned path's stem is ``references``, so
-        the (pure) renderer emits exactly that ``\\bibliography`` key. ``None`` when no
-        source ``.bib`` exists -> the renderer emits no ``\\bibliography``. No BibTeX is
-        generated -- this is a faithful copy of an existing file.
+        ``references.bib`` (see ``_LITERATURE_DIRS``), write its LaTeX-safe copy
+        (:func:`latex_safe_bib`: HTML entities and tags to LaTeX, bare specials escaped,
+        characters pdflatex cannot typeset through the prose map or accent commands; keys and
+        url/doi values untouched) to ``paper/references.bib`` so
+        uploading the ``paper/`` folder as-is resolves ``\\bibliography{references}`` and
+        compiles. The literature store is only read -- it keeps the bytes it was acquired
+        with. The returned path's stem is ``references``, so the (pure) renderer emits
+        exactly that ``\\bibliography`` key. ``None`` when no source ``.bib`` exists -> the
+        renderer emits no ``\\bibliography``. No entry is generated or dropped.
         """
         src = cls._locate_bib_path(run_dir)
         if src is None:
             return None
         dest = paper_dir / "references.bib"
-        shutil.copyfile(src, dest)
+        try:
+            pool = Path(src).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Not UTF-8, so not something to rewrite character by character: copied as is.
+            shutil.copyfile(src, dest)
+            return str(dest)
+        dest.write_text(latex_safe_bib(pool), encoding="utf-8")
         return str(dest)
 
     @classmethod
@@ -1022,10 +1032,11 @@ class ResearchCompiler:
         keys equal the rendered cited keys. The pool is the SAME single source
         ``_locate_bib_path`` finds. D6 ABSENCE: no pool OR no cited keys -> write NO file and
         return ``None`` (no ``bib_path`` -> ``si.tex`` emits no ``\\bibliography``, mirroring
-        the main paper's missing-pool handling). The subset is a PURE set op (no LLM/network):
-        it never contains a key absent from the pool, so a dangling SI cite is left for the
-        verify gate to surface, never silently dropped. Returns the co-located path (stem
-        ``references_SI``) or ``None``.
+        the main paper's missing-pool handling). The subset is a PURE set op (no LLM/network)
+        over the pool's LaTeX-safe copy, so each SI entry is byte-identical to its entry in
+        ``paper/references.bib``. It never contains a key absent from the pool, so a dangling
+        SI cite is left for the verify gate to surface, never silently dropped. Returns the
+        co-located path (stem ``references_SI``) or ``None``.
         """
         subset = cls._si_bib_subset(run_dir, si)
         if not subset:
@@ -1045,7 +1056,7 @@ class ResearchCompiler:
         if not keys:
             return None
         pool = Path(src).read_text(encoding="utf-8")
-        return bib_subset(pool, keys) or None
+        return bib_subset(latex_safe_bib(pool), keys) or None
 
     def _colocate_figures(
         self, figures: Sequence[AnyFigure], paper_dir: Path, paper_body: str

@@ -44,6 +44,18 @@ import unicodedata
 from pathlib import Path
 from typing import List, Optional, Sequence
 
+from sci_adk.render.bib_latex import (
+    HTML_ENTITY_RE,
+    T1_ONLY_CHARS,
+    VERBATIM_FIELDS,
+    bare_specials,
+    field_value_spans,
+    html_tags,
+    printed_field,
+    stray_math_dollar,
+    undefined_month_tokens,
+    untypesettable_chars,
+)
 from sci_adk.render.pubreqs_checks import word_count
 
 # -- layout ------------------------------------------------------------------
@@ -313,17 +325,20 @@ def unpublished_citation_warnings(tex: str, bib: str) -> List[str]:
 
 # -- bib LaTeX-safety (Phase 2: the compile blind spot the cite/key gates miss) -----
 
-# HTML entities that arrive from XML-rooted registrar metadata (Crossref/DataCite) and are
-# invalid in LaTeX: &amp; &lt; &gt; &quot; &apos; &nbsp; &#NN; &#xNN;.
-_HTML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|apos|nbsp|#\d+|#[xX][0-9a-fA-F]+);")
-# HTML markup tags (e.g. <i>...</i> from a JATS/JSON title). Requires a letter after '<' so a
-# legacy bracketed DOI fragment like ``<1175:BOPACB>`` (digit-led) is NOT a false positive.
-_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*\s*>")
-# A bare '&' that is neither an escaped '\&' nor the start of an HTML entity -- the LaTeX
-# column separator, which errors in running text.
-_BARE_AMP_RE = re.compile(
-    r"(?<!\\)&(?!(?:amp|lt|gt|quot|apos|nbsp|#\d+|#[xX][0-9a-fA-F]+);)"
-)
+# What is checked: the values of PRINTED fields only (``bib_latex.printed_field``: not abstract,
+# keywords, file, annote, timestamp ...), since text no style prints never reaches the .bbl and
+# cannot stop pdflatex. In those values: HTML entities (&amp; &lt; &#8722; ...) and markup tags
+# (<i>, <span class="...">) from XML-rooted registrar metadata (Crossref/DataCite), bare
+# specials, math a '$' breaks, non-standard spaces, characters pdflatex cannot typeset. The
+# patterns and the character policy are the ones render's LaTeX-safe bib copy (bib_latex.py)
+# applies, so the check and the copy agree. url/doi values are typeset verbatim: only their
+# spaces and characters are checked (an escape there would print; ?b&c;d is not an entity).
+# Spaces and zero-width characters have their own problem line (_nonstandard_space_codepoints).
+_ZERO_WIDTH = (0x200B, 0x200C, 0x200D, 0xFEFF)
+# The fix for a bare special: an escape, or (for ^) the command that prints a caret.
+_SPECIAL_FIX = {"^": "write it as \\textasciicircum{}"}
+# Where a per-run copy's problem is fixed: render rewrites paper/ from the run's literature store.
+_PER_RUN_STORE = "the run's literature store entry (literature/references.bib), then render again"
 
 
 def _nonstandard_space_codepoints(s: str) -> set:
@@ -339,51 +354,224 @@ def _nonstandard_space_codepoints(s: str) -> set:
         cp = ord(ch)
         if cp == 0x20:
             continue
-        if unicodedata.category(ch) == "Zs" or cp in (0x200B, 0x200C, 0x200D, 0xFEFF):
+        if unicodedata.category(ch) == "Zs" or cp in _ZERO_WIDTH:
             bad.add(cp)
     return bad
 
 
-def bib_latex_safety_problems(bib: str) -> List[str]:
-    """Every ``.bib`` entry whose field values carry LaTeX-unsafe content (Phase 2). PURE.
+def _codepoint(ch: str) -> str:
+    return "U+%04X (%s)" % (ord(ch), unicodedata.name(ch, "unnamed"))
+
+
+def _character_problems(
+    where: str, printed: List[tuple], package_source: Optional[str]
+) -> List[str]:
+    """The lines for characters pdflatex cannot typeset in one entry's printed values: one for
+    those the copy has a LaTeX form for (naming the form), one for those with none."""
+    with_form: dict = {}
+    no_form: set = set()
+    for name, value in printed:
+        for ch, form in untypesettable_chars(value, verbatim=name in VERBATIM_FIELDS):
+            if unicodedata.category(ch) == "Zs" or ord(ch) in _ZERO_WIDTH:
+                continue  # reported as a space
+            if form is None:
+                no_form.add(ch)
+            else:
+                with_form.setdefault(ch, form)
+    cannot = "which pdflatex cannot typeset with the preamble sci-adk emits (utf8 inputenc, T1)"
+    lines: List[str] = []
+    if with_form:
+        chars = sorted(with_form)
+        forms = ", ".join(
+            "U+%04X as %s" % (ord(c), with_form[c] or "nothing (drop it)") for c in chars
+        )
+        advice = (
+            f"; fix it in {package_source}"
+            if package_source
+            else "; re-rendering a run rewrites its paper/ copy with these forms"
+        )
+        lines.append(
+            f"{where} contains {', '.join(_codepoint(c) for c in chars)}, {cannot} -- write it "
+            f"in LaTeX: {forms}{advice}"
+        )
+    if no_form:
+        lines.append(
+            f"{where} contains {', '.join(_codepoint(c) for c in sorted(no_form))}, {cannot}, "
+            f"and there is no automatic LaTeX form for it -- replace it in "
+            f"{package_source or _PER_RUN_STORE} with an ASCII approximation or a LaTeX form"
+        )
+    return lines
+
+
+def bib_latex_safety_problems(
+    bib: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> List[str]:
+    """Every ``.bib`` entry whose printed field values carry LaTeX-unsafe content (Phase 2). PURE.
 
     The cite/key gates validate that citations RESOLVE and are SHAPED right; this gate validates
-    that the bib actually COMPILES -- the blind spot a manual or non-paperforge ``.bib`` leaves.
-    paperforge's ``latex_safety.sanitize`` closes it on the acquisition path; this is the
-    verify-side safety net for every OTHER path (hand-authored bib, a different tool, an old file).
+    that the bib actually COMPILES. Render writes a LaTeX-safe copy of the run's literature pool
+    into ``paper/`` (``bib_latex.latex_safe_bib``), and paperforge's ``latex_safety.sanitize``
+    cleans what it acquires; this is the verify-side net for whatever is still unsafe -- a
+    character the copy has no LaTeX form for, a hand-edited copy, an author-supplied package bib.
 
-    Flags, per entry: HTML entities (``&amp;`` …), HTML markup tags (``<i>``), a bare unescaped
-    ``&`` (the LaTeX column separator), and non-standard Unicode spaces (U+2005 four-per-em etc.).
-    Does NOT flag the LaTeX-safe ``\\&``, en-/em-dash, or Latin-1 accents -- no false positive.
+    Only fields a BibTeX style prints are checked (``bib_latex.UNPRINTED_FIELDS`` lists the
+    ones that are not: abstract, keywords, file, annote, timestamp ...). Flags, per entry,
+    naming what was found: HTML entities (``&amp;`` ...), markup tags (``<i>``,
+    ``<span class="...">``; read in running text only, so ``$x<y$`` is not a tag), a bare ``&``
+    (the LaTeX column separator), ``%`` or ``#``, a bare ``_`` or ``^`` outside math, a ``$``
+    nested inside math or left open, non-standard Unicode spaces (U+2005 four-per-em etc.), and
+    characters pdflatex cannot typeset with the preamble sci-adk emits (U+2212 MINUS SIGN ...;
+    see ``bib_latex.typesettable``) -- with the LaTeX form the copy writes for each, or, where
+    there is none, the instruction to replace the character at its source. Does NOT flag the
+    LaTeX-safe ``\\&``, dashes, curly quotes, or Latin-1 / Latin Extended-A accents, nor an
+    entity shape or a bare special in a ``url`` or ``doi`` value (typeset verbatim; the copy
+    leaves them).
 
-    OD-4 style: names the offending entry; never rewrites the bib (the author re-runs paperforge
-    or fixes it by hand). Returns sorted problem lines (empty = clean).
+    ``source`` is the file name the problem lines carry. ``package_source`` is set for a
+    package bib: the file the author has to fix (the package copies its bibliographies from
+    ``package_src/`` unchanged, so re-rendering a run never repairs them); each line then names
+    it instead of the per-run advice.
+
+    OD-4 style: names the offending entry; never rewrites the bib. Returns sorted problem lines
+    (empty = clean).
     """
+    tail = f"; fix it in {package_source}" if package_source else ""
     problems: List[str] = []
     for m in _BIB_ENTRY_BODY_RE.finditer(bib):
         key, body = m.group(1).strip(), m.group(2)
-        if _HTML_ENTITY_RE.search(body):
+        where = f"bib LaTeX-safety: {source} entry '{key}'"
+        printed = [
+            (name, body[start:end])
+            for name, start, end in field_value_spans(body)
+            if printed_field(name)
+        ]
+        values = [v for name, v in printed if name not in VERBATIM_FIELDS]
+        entities = sorted({e for v in values for e in HTML_ENTITY_RE.findall(v)})
+        if entities:
             problems.append(
-                f"bib LaTeX-safety: entry '{key}' contains an HTML entity (e.g. &amp;) -- "
-                "invalid in LaTeX, use the LaTeX form (e.g. \\&)"
+                f"{where} contains HTML entity {', '.join(entities)} -- invalid in LaTeX, "
+                f"use the LaTeX form (e.g. \\&){tail}"
             )
-        if _HTML_TAG_RE.search(body):
+        tags = sorted({t for v in values for t in html_tags(v)})
+        if tags:
             problems.append(
-                f"bib LaTeX-safety: entry '{key}' contains an HTML tag (e.g. <i>) -- "
-                "use the LaTeX command (e.g. \\textit{...})"
+                f"{where} contains HTML tag {', '.join(tags)} -- use the LaTeX command "
+                f"(e.g. \\textit{{...}}) or remove it{tail}"
             )
-        if _BARE_AMP_RE.search(body):
+        for special in sorted(set().union(*(bare_specials(v) for v in values))):
+            fix = _SPECIAL_FIX.get(special, f"escape it as \\{special}")
+            problems.append(f"{where} contains a bare '{special}' -- {fix}{tail}")
+        if any(stray_math_dollar(v) for v in values):
             problems.append(
-                f"bib LaTeX-safety: entry '{key}' contains a bare '&' -- escape it as \\&"
+                f"{where} has a '$' nested inside math or left open -- pdflatex stops on it; "
+                f"close each $...$ at the brace level where it opens"
+                + (
+                    tail
+                    or "; fix the entry in the run's literature store (literature/"
+                    "references.bib) if it holds the '$', else render the run again"
+                )
             )
-        bad = _nonstandard_space_codepoints(body)
+        bad = set().union(*(_nonstandard_space_codepoints(v) for _, v in printed))
         if bad:
             cps = ", ".join("U+%04X" % c for c in sorted(bad))
             problems.append(
-                f"bib LaTeX-safety: entry '{key}' contains non-standard Unicode space(s) "
-                f"[{cps}] -- replace with an ASCII space"
+                f"{where} contains non-standard Unicode space(s) [{cps}] -- replace with an "
+                f"ASCII space{tail}"
             )
+        problems.extend(_character_problems(where, printed, package_source))
     return sorted(problems)
+
+
+# -- font encoding of a package manuscript ---------------------------------------------------
+
+# The preamble lines that decide the font encoding: \usepackage[...T1...]{fontenc}, or fontspec /
+# unicode-math (the manuscript then needs XeLaTeX/LuaLaTeX, which typeset Unicode directly).
+_FONTENC_RE = re.compile(r"\\(?:usepackage|RequirePackage)\s*\[([^\]]*)\]\s*\{fontenc\}")
+_UNICODE_ENGINE_RE = re.compile(
+    r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{[^}]*\b(?:fontspec|unicode-math)\b"
+)
+_TEX_COMMENT_RE = re.compile(r"(?<!\\)%.*")
+_BIBLIOGRAPHY_RE = re.compile(r"\\bibliography\s*\{([^}]*)\}")
+# The ogonek accent command: OT1 has no ogonek, so \k stops pdflatex there (measured).
+_OGONEK_RE = re.compile(r"\\k(?![A-Za-z])")
+
+
+def bibliography_stems(tex: str) -> List[str]:
+    """The ``.bib`` stems ``tex`` loads through ``\\bibliography{a,b}`` (comments ignored). PURE."""
+    body = _TEX_COMMENT_RE.sub("", tex)
+    return [
+        stem.strip()
+        for m in _BIBLIOGRAPHY_RE.finditer(body)
+        for stem in m.group(1).split(",")
+        if stem.strip()
+    ]
+
+
+def _loads_t1_or_unicode_engine(tex: str) -> bool:
+    preamble = _TEX_COMMENT_RE.sub("", tex.split("\\begin{document}", 1)[0])
+    if _UNICODE_ENGINE_RE.search(preamble):
+        return True
+    return any(
+        "T1" in (option.strip() for option in m.group(1).split(","))
+        for m in _FONTENC_RE.finditer(preamble)
+    )
+
+
+def font_encoding_problems(
+    tex: str, bib: str, *, tex_name: str, bib_name: str, fix_in: str
+) -> List[str]:
+    """One line when ``tex`` loads no T1 font encoding and ``bib`` (the bibliography it loads)
+    holds a character pdflatex typesets only in T1, else none. PURE.
+
+    sci-adk's character policy (``bib_latex.typesettable``) assumes the preamble render emits,
+    which loads ``\\usepackage[T1]{fontenc}``; an author-supplied package manuscript may not,
+    and then pdflatex runs in OT1, where ``bib_latex.T1_ONLY_CHARS`` (Ð þ Ę Ų « ...) and the
+    ogonek command ``\\k`` stop the compile. Only printed fields count. A manuscript that loads
+    T1 (``[T1]`` or a list holding it), or fontspec / unicode-math, is not checked; neither is a
+    bib without such characters. ``fix_in`` names the file to add the line to.
+    """
+    if _loads_t1_or_unicode_engine(tex):
+        return []
+    found: dict = {}
+    for m in _BIB_ENTRY_BODY_RE.finditer(bib):
+        key, body = m.group(1).strip(), m.group(2)
+        for name, start, end in field_value_spans(body):
+            if not printed_field(name):
+                continue
+            value = body[start:end]
+            for ch in set(value) & T1_ONLY_CHARS:
+                found.setdefault(ch, set()).add(key)
+            if _OGONEK_RE.search(value):
+                found.setdefault("\\k", set()).add(key)
+    if not found:
+        return []
+    chars = sorted(found, key=lambda c: (len(c) > 1, c))
+    keys = sorted(set().union(*found.values()))
+    return [
+        f"font encoding: {bib_name} holds {' '.join(chars)} (entries {', '.join(keys)}), which "
+        f"pdflatex typesets only in the T1 font encoding, and {tex_name} does not load it -- "
+        f"add \\usepackage[T1]{{fontenc}} to the preamble of {fix_in}"
+    ]
+
+
+def bib_month_advisories(
+    bib: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> List[str]:
+    """Advisory lines (never a failure) for each bare ``month`` name BibTeX does not define
+    (``month = June``, ``month = sept``): BibTeX warns and the reference list leaves the month
+    out. Render's copy writes the macro (``jun``, ``sep``) itself; a package bib is copied
+    unchanged, so the advice names ``package_source`` when given. PURE."""
+    tail = f" in {package_source}" if package_source else ""
+    lines: List[str] = []
+    for m in _BIB_ENTRY_BODY_RE.finditer(bib):
+        key, body = m.group(1).strip(), m.group(2)
+        for token, macro in undefined_month_tokens(body):
+            lines.append(
+                f"bib month: {source} entry '{key}' has month = {token}, a name BibTeX does "
+                f"not define (the reference list leaves the month out) -- write "
+                f"month = {macro}{tail}"
+            )
+    return sorted(lines)
 
 
 # -- abstract word count -----------------------------------------------------
@@ -589,6 +777,9 @@ __all__ = [
     "cited_keys",
     "bib_keys",
     "bib_latex_safety_problems",
+    "bib_month_advisories",
+    "bibliography_stems",
+    "font_encoding_problems",
     "cite_resolution_problems",
     "citation_key_conforms",
     "citation_key_shape_problems",

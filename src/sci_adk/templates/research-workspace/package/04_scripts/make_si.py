@@ -162,6 +162,10 @@ def build():
 
     L = []
     L.append(r"\documentclass[10pt]{article}")
+    # T1 + Latin Modern, as in every preamble sci-adk emits: in the default OT1 encoding
+    # letters such as Ð, þ, Ę and the guillemets stop pdflatex.
+    L.append(r"\usepackage[T1]{fontenc}")
+    L.append(r"\usepackage{lmodern}")
     L.append(r"\usepackage[margin=1in]{geometry}")
     L.append(r"\usepackage{booktabs}\usepackage{longtable}")
     L.append(r"\usepackage[hidelinks]{hyperref}")

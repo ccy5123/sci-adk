@@ -6,9 +6,9 @@ the ``src/sci_adk/templates/research-workspace/`` kit into a target research
 workspace, with one command, keeping the hook/``verify`` contracts version-pinned to
 the sci-adk release. As of the sci-adk-as-moai Phase C upgrade the kit is the FULL
 operational layer: the two enforcement hooks, the ``science-orchestrator`` output
-style, ``CLAUDE.md``, a ``settings.json`` fragment, the 9 worker/guard agents (8 v1
-+ the v2-promoted ``expert-replicator``), the 7 ``sci``/``science-*`` Skills, and the
-7 ``/sci`` command routers. (The
+style, ``CLAUDE.md``, a ``settings.json`` fragment, the 11 worker/guard agents (6
+workers, including the v2-promoted ``expert-replicator``, and 5 advisory guards), the 8
+``sci``/``science-*`` Skills, and the 8 ``/sci`` command routers. (The
 ``/research`` command and ``researcher`` persona were removed in the pivot;
 ``science-orchestrator`` is the sole installed persona and ``/sci`` is the sole entry
 point.)
@@ -55,9 +55,9 @@ from pydantic import BaseModel, Field
 # have their own bespoke handling below and are NOT in this list. The ``/research``
 # command and ``researcher`` persona were removed in the sci-adk-as-moai pivot; this
 # list now installs the FULL kit -- the two enforcement hooks, the
-# ``science-orchestrator`` output style, the 9 worker/guard agents (8 v1 + the
-# v2-promoted ``expert-replicator``), the 8 ``sci``/``science-*`` knowledge-library
-# Skills, and the 8 ``/sci`` command routers.
+# ``science-orchestrator`` output style, the 11 worker/guard agents (6 workers,
+# including the v2-promoted ``expert-replicator``, and 5 advisory guards), the 8
+# ``sci``/``science-*`` knowledge-library Skills, and the 8 ``/sci`` command routers.
 # Every entry is copied through the same non-clobbering ``_copy_nonclobber`` path
 # (the loop's ``dst.parent.mkdir(parents=True)`` creates ``.claude/agents/``,
 # ``.claude/skills/<name>/`` and ``.claude/commands/sci/`` as needed -- no
@@ -77,11 +77,12 @@ _PLAIN_ASSETS = (
     ".claude/agents/expert-literature.md",
     # v2-promoted worker (1) -- independent replication
     ".claude/agents/expert-replicator.md",
-    # guard agents (4) -- advisory; sci-adk verify is the sole verdict
+    # guard agents (5) -- advisory; sci-adk verify is the sole verdict
     ".claude/agents/evaluator-rigor.md",
     ".claude/agents/evaluator-novelty.md",
     ".claude/agents/evaluator-validity.md",
     ".claude/agents/evaluator-conclusions.md",
+    ".claude/agents/evaluator-paper.md",
     # the sci orchestration hub + 7 knowledge-library Skills
     ".claude/skills/sci/SKILL.md",
     ".claude/skills/science-foundation-rigor/SKILL.md",
@@ -429,8 +430,8 @@ def install_session(target_dir: Path, *, dry_run: bool = False) -> InstallReport
     src_root = _templates_root()
     report = InstallReport(dry_run=dry_run)
 
-    # 1. the plain file assets (hooks, science-orchestrator output style, the 8
-    #    worker/guard agents, the 5 sci/science-* Skills, the 7 /sci commands).
+    # 1. the plain file assets (hooks, science-orchestrator output style, the
+    #    worker/guard agents, the sci/science-* Skills, the /sci commands).
     #    _copy_nonclobber's dst.parent.mkdir creates each needed subdir on the fly.
     for rel in _PLAIN_ASSETS:
         _copy_nonclobber(

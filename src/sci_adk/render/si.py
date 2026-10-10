@@ -45,6 +45,7 @@ from sci_adk.render.figures import (
 )
 from sci_adk.render.novelty import NOVELTY_NEWCOMMAND, has_novelty_markup
 from sci_adk.render.paper import (
+    T1_FONT_LINES,
     _confidence_display,
     _latex_evidence_validity_label,
     _latex_sanitize,
@@ -289,6 +290,7 @@ def render_si_latex(
     has_image = any(f.kind == "image" for f in figures)
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
+    lines.extend(T1_FONT_LINES)
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")

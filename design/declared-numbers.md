@@ -165,6 +165,8 @@ second phase: the same schema with run-qualified sources and data-cell sources.
 3. **The `draft` helper is in phase 1.**
 4. **The blind conclusions reviewer receives the identifier list** and may note any
    identifier that reads, in its sentence, as a reported quantity. Advisory only.
+   (Its cold reading of the opening goes to a separate `opening_notes` list in the same
+   `review.json`, which `verify` prints beside these `notes`, also advisory.)
 
 ## 8. Phase 1 as built
 

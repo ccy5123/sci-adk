@@ -174,6 +174,15 @@ _UNICODE_MAP: dict[str, str] = {
 _ACCENT_LO = 0x00C0
 _ACCENT_HI = 0x017E
 
+# The font encoding every preamble sci-adk emits loads, right after inputenc (right after
+# \documentclass where there is no inputenc line) and before the figure font-policy lines.
+# With inputenc alone pdflatex runs in OT1, where 22 letters and quotes of this window and of
+# the bibliography's punctuation stop the compile (Ð þ Ą ę Ŋ Ų « » ‚ „ ...; measured, TeX Live
+# 2026). T1 typesets them; Latin Modern gives T1 vector fonts without cm-super and is the
+# Computer Modern design, so body text looks the same. helvet and newtxmath come later and
+# still set the sans and the math.
+T1_FONT_LINES: tuple[str, str] = (r"\usepackage[T1]{fontenc}", r"\usepackage{lmodern}")
+
 # Replacement for a non-ASCII codepoint that is neither curated nor an inputenc-safe
 # accent and does not NFKD-fold to ASCII (e.g. CJK, emoji): a safe placeholder so the
 # document still compiles. ``?`` is ASCII and not a LaTeX special.
@@ -720,6 +729,7 @@ def render_paper_latex(
     # Preamble. natbib (author-year \citep/\citet); figure packages PER KIND.
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
+    lines.extend(T1_FONT_LINES)
     lines.append(r"\usepackage{hyperref}")
     lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")

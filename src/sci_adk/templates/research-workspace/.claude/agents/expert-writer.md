@@ -167,6 +167,12 @@ do not fabricate a number or pad a section to make the gate pass.
   (absent → no requirements gate; author the paper as before).
 - Under `/sci package`: the workspace root `<ws>`, the frozen `<ws>/pkgreqs.json` path, and
   the set of runs to synthesize. Drop the merged manuscript at `<ws>/package_src/main.tex`.
+- After the paper audit, when the orchestrator passes one: the audit file
+  (`drafts/<spec-id>/paper/audit-<date>.md`, or `audit-<date>-2.md` for a same-day
+  re-run), as its content or as an absolute path to read.
+  It is read-only to you — the orchestrator writes it. Revise each passage it lists as
+  upheld, then run `sci-adk numbers draft`, `sci-adk render`, update the declarations and
+  run `sci-adk verify` again.
 
 ## Return Contract (to the orchestrator)
 
@@ -176,6 +182,8 @@ do not fabricate a number or pad a section to make the gate pass.
   figure, unsupported novelty) so it can be resolved.
 - A note that `paper/` is ready for single-folder Overleaf upload, only once the
   consistency gate passes.
+- After an audit revision: for each finding id in the audit file, fixed or not fixed, and
+  for each one not fixed, why — so the orchestrator can list it in the file as open.
 
 ## Blocker Protocol
 
@@ -183,6 +191,11 @@ You CANNOT prompt the user. If a Claim you were asked to narrate is missing, or 
 figure references an `evidence_id` not in the record, STOP and return a structured
 blocker. Do not retype numbers to fill a figure, do not soften a dangling-`\ref`
 failure, and do not assert a Claim the record does not support.
+
+When revising from an audit file, revise each named passage at the strength the record
+supports without adding a hedge. A fix that needs a number with no recorded home is
+returned as a blocker for the experiment stage, with the finding id and the sentence it
+is in — never pointed at a field that merely prints the same.
 
 ## Success Criteria
 
@@ -196,3 +209,6 @@ failure, and do not assert a Claim the record does not support.
 - The narrative matches the derived Claim statuses — nothing over-stated.
 - `runs/<id>/numbers.json` covers every number in the paper and `verify`'s number checks
   pass — or the numbers with no recorded home are returned as a blocker.
+- After an audit revision: each passage the audit file names is revised at the strength
+  the record supports without adding a hedge, and each fix that needs a number with no
+  recorded home is returned as a blocker for the experiment stage.

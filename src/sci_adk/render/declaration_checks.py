@@ -1,17 +1,25 @@
 """
 The deterministic checks over a conclusion declaration list (design §11.3).
 
-Three PURE functions, none of which reads meaning. They implement the middle layer of
-design/reader-facing-prose.md §11.2 -- the one idea being to turn a semantic question into
-a comparison of two values, and to escalate what cannot be reduced that way rather than
-auto-deciding it:
+Seven PURE public functions, none of which reads meaning. Three implement the middle layer
+of design/reader-facing-prose.md §11.2 -- the one idea being to turn a semantic question
+into a comparison of two values, and to escalate what cannot be reduced that way rather
+than auto-deciding it:
 
   - :func:`status_mismatches`      -- declared status  vs  the recorded experiment Claim.
   - :func:`unanchored_sentences`   -- the quoted sentence  vs  the manuscript text.
   - :func:`undeclared_hypotheses`  -- the completeness floor.
 
-What they deliberately do NOT do: judge whether a sentence overstates the status it
-declares. That is semantic, and no language model sits on the verdict path (spec.md
+:func:`declaration_problems` runs those three in a stable order; its lines are the gate.
+The other three only turn what the advisory reviewer of design §11.4 returned into
+advisory lines, and never gate:
+
+  - :func:`declaration_disagreements` -- an independent reading  vs  the declaration.
+  - :func:`review_note_lines`         -- identifiers read as reported quantities.
+  - :func:`opening_note_lines`        -- terms in the opening the venue's reader lacks.
+
+What the three checks deliberately do NOT do: judge whether a sentence overstates the
+status it declares. That is semantic, and no language model sits on the verdict path (spec.md
 Exclusions). It is escalated to the advisory reviewer of design §11.4.
 
 This module is PURE: it imports ``sci_adk.core`` ONLY (the F4 kernel seam -- no adapter, no
@@ -248,6 +256,31 @@ def review_note_lines(review: ConclusionReview) -> list[str]:
     )
 
 
+def opening_note_lines(review: ConclusionReview) -> list[str]:
+    """ADVISORY: each term the reviewer, reading the opening cold, found the venue's reader
+    would not know unaided -- as written.
+
+    PURE. The reviewer reads the title, abstract and first paragraphs as a reader of the
+    frozen venue (design/reader-facing-prose.md, "the opening, cold") and names the term,
+    the sentence and the reason. Nothing is computed against a note and it can never
+    gate; it summons the author to read the passage. The wording names no fix beyond the
+    two the writing standard allows, because a synonym leaves the sentence built around
+    the old concept. A sentence quoted across LaTeX line breaks is shown on one line.
+    """
+    lines = []
+    for note in review.opening_notes:
+        sentence = " ".join(note.sentence.split()) if note.sentence else ""
+        lines.append(
+            f"conclusion review: reading the opening of {note.document} cold, a reader of "
+            f"the venue would not know the term '{note.term}'"
+            + (f' in "{sentence}"' if sentence else "")
+            + (f" ({note.reason})" if note.reason else "")
+            + ". Advisory only -- define it where it first appears, or rewrite the "
+            "passage without it."
+        )
+    return sorted(lines)
+
+
 __all__ = [
     "status_mismatches",
     "unanchored_sentences",
@@ -255,4 +288,5 @@ __all__ = [
     "declaration_problems",
     "declaration_disagreements",
     "review_note_lines",
+    "opening_note_lines",
 ]
