@@ -66,7 +66,8 @@ class PubReqs(BaseModel):
             ``\\section{...}``; "Abstract" also accepts ``\\begin{abstract}``). The IMRaD
             default is :data:`DEFAULT_REQUIRED_SECTIONS`.
         figure_font_policy: F2 font policy on/off -- when on, a figure-bearing paper must
-            carry the F2 font preamble (newtxmath + helvet). Default True.
+            carry the F2 font preamble (newtxtext + newtxmath + helvet: Times text and
+            math, Arial-compatible sans). Default True.
         image_min_dpi: the raster (image) figure minimum effective DPI; None disables the
             DPI gate. Default :data:`DEFAULT_IMAGE_MIN_DPI`.
         reference_style: the declared bib style (e.g. "natbib"/"plainnat"/"numeric") checked

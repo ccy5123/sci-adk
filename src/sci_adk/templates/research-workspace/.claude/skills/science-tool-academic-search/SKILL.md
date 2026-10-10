@@ -48,7 +48,9 @@ flags) is `science-workflow-prereg`, and the record is written by the verbs
 - **Search at the trigger moment.** The search runs at pre-registration, against the
   DRAFT Spec, BEFORE the freeze — never retrofitted after results are in (anti-HARKing).
 - **Record the search date.** Every novelty decision is "as of <search date>"; the engine
-  later renders an honest "to our knowledge, as of <date>" scope from it.
+  later prints the scope of the search beside the paper's novelty sentence -- the indexes
+  that answered (from the search log; name them as the index is called, e.g. `openalex`,
+  `arxiv`, `crossref`) and the search date.
 - **`found_nothing` IS a result.** An affirmative recorded null ("a real search of the
   right {hypothesis, kind} found no prior art") — not "nothing found, move on".
 

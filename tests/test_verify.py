@@ -635,10 +635,39 @@ def test_verify_tool_vocab_extension_to_si_is_observable(tmp_path):
     assert "frozen spec" not in draft_only
     assert "verdicts" not in draft_only
 
-    # GREEN: the EXTENDED per-run gate scans si.tex too -> the leak is now flagged.
+    # GREEN: the EXTENDED per-run gate scans si.tex too -> the leak is now flagged, and
+    # it is reported against the document that carries it.
     flagged = _check_paper_tool_vocab(run_dir)
-    assert "frozen spec" in flagged
-    assert "verdicts" in flagged
+    assert set(flagged) == {"si.tex"}
+    assert "frozen spec" in flagged["si.tex"]
+    assert "verdicts" in flagged["si.tex"]
+
+
+def test_verify_tool_vocabulary_is_reported_per_document(tmp_path):
+    # The gate scans draft.tex AND si.tex; the report says which document holds which
+    # term, so the author edits the right file (the flat list stays for old callers).
+    spec = _numeric_spec("v-toolvocab-per-doc", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex",
+                 r"\label{fig:a}\ref{fig:a} The point estimate 0.95 is engine-derived.")
+    _write_paper(run_dir, "si.tex", r"\label{tab:s1} The frozen Spec; the verdicts.")
+    report = verify_run(run_dir)
+    assert report.paper_tool_vocab_by_doc == {
+        "draft.tex": ["engine-derived"],
+        "si.tex": ["frozen spec", "verdicts", "Spec"],
+    }
+    assert set(report.paper_tool_vocab) == {"engine-derived", "frozen spec", "verdicts",
+                                            "Spec"}
+    assert report.paper_tool_clean is False
+
+
+def test_verify_tool_vocabulary_clean_documents_have_no_entry(tmp_path):
+    spec = _numeric_spec("v-toolvocab-clean", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    _write_paper(run_dir, "draft.tex", r"\label{fig:a}\ref{fig:a} The point estimate is 0.95.")
+    report = verify_run(run_dir)
+    assert report.paper_tool_vocab_by_doc == {}
+    assert report.paper_tool_vocab == []
 
 
 def test_verify_record_tex_is_exempt_while_si_tex_flags(tmp_path):
@@ -827,6 +856,7 @@ def test_verify_figure_font_policy_present_passes(tmp_path):
     spec = _numeric_spec("v-font-ok", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
     _write_paper(run_dir, "draft.tex",
+                 r"\usepackage{newtxtext}" "\n"
                  r"\usepackage{newtxmath}" "\n" r"\usepackage[scaled]{helvet}" "\n"
                  r"\begin{figure}\begin{tikzpicture}\end{tikzpicture}\end{figure}")
     _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=None,
@@ -871,7 +901,7 @@ def test_verify_image_dpi_high_passes_low_fails(tmp_path):
     (figs / "fig1.png").write_bytes(_png_bytes(2000))   # 2000/6.5 ~= 307 DPI -> clean
     # font preamble present so the font gate is not the thing failing.
     _write_paper(run_dir, "draft.tex",
-                 r"\usepackage{newtxmath}\usepackage[scaled]{helvet}"
+                 r"\usepackage{newtxtext}\usepackage{newtxmath}\usepackage[scaled]{helvet}"
                  r"\includegraphics{figures/fig1.png}")
     _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=300,
                    reproduction_bundle=False)
@@ -889,7 +919,7 @@ def test_verify_image_dpi_vector_is_skipped(tmp_path):
     spec = _numeric_spec("v-dpi-vec", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
     _write_paper(run_dir, "draft.tex",
-                 r"\usepackage{newtxmath}\usepackage[scaled]{helvet}"
+                 r"\usepackage{newtxtext}\usepackage{newtxmath}\usepackage[scaled]{helvet}"
                  r"\includegraphics[width=\textwidth]{figures/fig1.pdf}")  # vector -> skipped
     _write_pubreqs(run_dir, figure_font_policy=True, image_min_dpi=300,
                    reproduction_bundle=False)
@@ -1007,6 +1037,23 @@ def test_verify_reproduction_bundle_driver_omits_recorded_ref_fails(tmp_path):
     assert any("does not reference recorded" in p
                for p in report.paper_requirements_problems)
     assert report.passed is False
+
+
+def test_verify_stale_reproduce_driver_says_to_re_render(tmp_path):
+    # Evidence with a new code_ref appended after the paper was rendered leaves
+    # reproduce.py behind the record. The fix is a re-render, and the message says so.
+    spec = _numeric_spec("v-repro-rerender", value=0.9)
+    run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
+    (run_dir / "paper" / "reproduce.py").write_text(
+        "SCRIPTS = []\nPOINTERS = []\n# rendered before the new code_ref\n", encoding="utf-8"
+    )
+    _write_pubreqs(run_dir, figure_font_policy=False, image_min_dpi=None,
+                   reproduction_bundle=True)
+    report = verify_run(run_dir)
+    stale = [p for p in report.paper_requirements_problems
+             if "does not reference recorded" in p]
+    assert len(stale) == 1
+    assert stale[0].endswith("re-run sci-adk render to refresh paper/")
 
 
 def test_verify_reproduction_bundle_ignores_prior_work_decision_ref(tmp_path):

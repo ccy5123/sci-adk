@@ -328,6 +328,13 @@ def tokenize_quantitative(tex: str) -> List[QuantToken]:
             value = float(raw)
         except ValueError:
             continue
+        if not math.isfinite(value):
+            continue  # beyond a float: a code fragment ("1081e637" of a checksum), not data
+        # KNOWN RESIDUAL (kept for byte-stability): this audit does not take the digest rule
+        # of render/number_literals.py, so the FINITE head of a hex digest in prose is still
+        # a token -- the "9" of "9dc5d638...", the "45e12" of "45e12abc..." (4.5e13) -- and
+        # fails unless the pool holds it. A run that hits it adopts numbers.json, whose
+        # tokenizer reads the digest as one word. Pinned in tests/test_number_audit.py.
         tokens.append(QuantToken(value=value, raw=raw))
     return tokens
 

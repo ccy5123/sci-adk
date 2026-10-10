@@ -5,15 +5,18 @@ design/literature-acquisition.md §"Render-time novelty gate". A novelty/priorit
 asserted in the paper ONLY via explicit markup; the engine re-derives the {hyp, kind} status
 via the SINGLE source of truth ``derive_novelty_status`` (NEVER the recorded claim) and:
 
-  - SUPPORTED  -> the markup SURVIVES into the .tex (a preamble ``\\newcommand{\\novelty}[3]
-                  {#3}`` renders only the text) with an honest record-derived scope baked in:
-                  ``<text> (to our knowledge, as of <YYYY-MM-DD>)``;
+  - SUPPORTED  -> the .tex carries the PLAIN sentence (no macro, no ``\\newcommand``) with
+                  the scope of the backing search: ``<text> (no such report was found in
+                  searches of <indexes> on <date>)``, or ``<text> (as of <YYYY-MM-DD>)``
+                  when no search log is recorded (these fixtures record none; the
+                  search-log scope is tested in test_novelty_plain_sentence.py);
   - NOT SUPPORTED / unknown hyp / bad kind -> HARD fail: ``ValueError`` at render time and a
                   non-zero ``sci-adk verify``.
 
-Architecture (locked): SURVIVE + preamble newcommand (not substitute-away). The gate runs on
-BOTH ``draft.tex`` (PaperProse) and ``si.tex`` (SIProse). The byte-identical invariant: a
-no-novelty render carries no ``\\newcommand{\\novelty}`` and is unchanged from before N2.
+The gate runs on BOTH ``draft.tex`` (PaperProse) and ``si.tex`` (SIProse). The rendered
+source carries no novelty markup at all (FIX C); the {kind, hyp} binding goes to a side file
+(test_novelty_plain_sentence.py). Drafts rendered before that change still carry the markup,
+and the verify scan of a ``.tex`` (find_unsupported_novelty) still checks it.
 
 PURE for the render tests (data in, string out); N3 tests seed a real run dir + write a
 ``paper/draft.tex`` and read the verify report.
@@ -125,10 +128,10 @@ def _found_nothing(
 # =========================================================================== #
 
 class TestNoveltyScopeSuffix:
-    def test_supported_bakes_record_date(self):
+    def test_supported_without_search_log_gives_the_decision_date(self):
         spec = _spec()
         suffix = novelty_scope_suffix("result", "hyp-n", spec, [_found_nothing()])
-        assert suffix == " (to our knowledge, as of 2026-06-18)"
+        assert suffix == " (as of 2026-06-18)"
 
     def test_supported_uses_latest_found_nothing_date(self):
         # Two found_nothing decisions -> the LATEST created_at wins (most recent confirmation).
@@ -138,7 +141,7 @@ class TestNoveltyScopeSuffix:
             ev_id="evi-new", created_at=datetime(2026, 7, 1, tzinfo=timezone.utc)
         )
         suffix = novelty_scope_suffix("result", "hyp-n", spec, [newer, older])
-        assert suffix == " (to our knowledge, as of 2026-07-01)"
+        assert suffix == " (as of 2026-07-01)"
 
     def test_unsupported_no_found_nothing_raises(self):
         spec = _spec()
@@ -160,15 +163,15 @@ class TestNoveltyScopeSuffix:
             novelty_scope_suffix("resul", "hyp-n", spec, [_found_nothing()])
         assert "invalid kind" in str(exc.value)
 
-    def test_non_emit_safe_hyp_id_raises(self):
-        # Finding B: a Spec hyp id with a LaTeX tokenization-special (%) is emitted RAW into
-        # the surviving markup and would comment out the line -- the gate must REFUSE it
-        # (fail loud) rather than escape it (escaping would break the emit==scan round-trip).
+    def test_hyp_id_with_a_latex_special_is_accepted_at_render_level(self):
+        # Finding B was about the id being emitted RAW into surviving markup. The rendered
+        # source no longer carries the id (FIX C), so the scope is computed as for any id;
+        # the emit-safe check stays only on the verify scan of old markup (below).
         spec = _spec(hyp_id="hyp%x")
-        with pytest.raises(ValueError) as exc:
-            novelty_scope_suffix("result", "hyp%x", spec, [_found_nothing(hyp_id="hyp%x")])
-        msg = str(exc.value)
-        assert "hyp%x" in msg and "emit-safe" in msg
+        suffix = novelty_scope_suffix(
+            "result", "hyp%x", spec, [_found_nothing(hyp_id="hyp%x")]
+        )
+        assert suffix == " (as of 2026-06-18)"
 
     def test_emit_safe_hyp_ids_accepted(self):
         # Real ids use letters/digits and ._:- -> all emit-safe, gate passes (returns scope).
@@ -177,7 +180,7 @@ class TestNoveltyScopeSuffix:
             suffix = novelty_scope_suffix(
                 "result", hid, spec, [_found_nothing(hyp_id=hid)]
             )
-            assert suffix.startswith(" (to our knowledge, as of ")
+            assert suffix == " (as of 2026-06-18)"
 
     def test_other_kind_found_nothing_does_not_support(self):
         # A METHOD found_nothing must NOT support a RESULT novelty assertion (independence).
@@ -193,18 +196,17 @@ class TestNoveltyScopeSuffix:
 # =========================================================================== #
 
 class TestPaperNoveltyRender:
-    def test_supported_survives_with_scope_and_newcommand(self):
+    def test_supported_renders_the_plain_sentence_with_scope(self):
         spec = _spec()
         prose = PaperProse(
             introduction=r"This is the \novelty{result}{hyp-n}{first encoding of Z}.",
         )
         tex = render_paper_latex(spec, [], evidence=[_found_nothing()], prose=prose)
-        # The markup SURVIVES (not substituted away).
-        assert r"\novelty{result}{hyp-n}{" in tex
-        # The record-derived scope is baked into the text arg.
-        assert "first encoding of Z (to our knowledge, as of 2026-06-18)" in tex
-        # The preamble newcommand is emitted.
-        assert NOVELTY_NEWCOMMAND in tex
+        # The sentence and the record-derived scope, as plain text.
+        assert "This is the first encoding of Z (as of 2026-06-18)." in tex
+        # No markup and no preamble macro in the submitted source (FIX C).
+        assert r"\novelty" not in tex
+        assert NOVELTY_NEWCOMMAND not in tex
 
     def test_unsupported_raises_at_render(self):
         spec = _spec()
@@ -262,20 +264,20 @@ class TestPaperNoveltyRender:
 # =========================================================================== #
 
 class TestSINoveltyRender:
-    def test_si_supported_overview_survives_with_scope(self):
+    def test_si_supported_overview_renders_plain_with_scope(self):
         spec = _spec()
         prose = SIProse(overview=r"As \novelty{result}{hyp-n}{first} shows.")
         tex = render_si_latex(spec, [], [_found_nothing()], prose=prose)
-        assert r"\novelty{result}{hyp-n}{" in tex
-        assert "first (to our knowledge, as of 2026-06-18)" in tex
-        assert NOVELTY_NEWCOMMAND in tex
+        assert r"\novelty{result}{hyp-n}{" not in tex
+        assert "As first (as of 2026-06-18) shows." in tex
+        assert NOVELTY_NEWCOMMAND not in tex
 
-    def test_si_supported_notes_survives(self):
+    def test_si_supported_notes_renders_plain(self):
         spec = _spec()
         prose = SIProse(notes=r"Note: \novelty{result}{hyp-n}{first}.")
         tex = render_si_latex(spec, [], [_found_nothing()], prose=prose)
-        assert "first (to our knowledge, as of 2026-06-18)" in tex
-        assert NOVELTY_NEWCOMMAND in tex
+        assert "first (as of 2026-06-18)" in tex
+        assert NOVELTY_NEWCOMMAND not in tex
 
     def test_si_unsupported_raises(self):
         spec = _spec()
@@ -331,15 +333,16 @@ class TestNoveltyMarkupDetection:
         )
         assert problems and "emit-safe" in problems[0]
 
-    def test_non_emit_safe_hyp_id_raises_at_render(self):
-        # Finding B (render side): the same id HARD-fails the paper render gate.
+    def test_non_emit_safe_hyp_id_never_reaches_the_rendered_source(self):
+        # Finding B (render side), after FIX C: the id is not emitted, so it cannot corrupt
+        # the source -- the render succeeds and the '%' appears nowhere in the body.
         spec = _spec(hyp_id="hyp%x")
         prose = PaperProse(introduction=r"\novelty{result}{hyp%x}{first}")
-        with pytest.raises(ValueError) as exc:
-            render_paper_latex(
-                spec, [], evidence=[_found_nothing(hyp_id="hyp%x")], prose=prose
-            )
-        assert "emit-safe" in str(exc.value)
+        tex = render_paper_latex(
+            spec, [], evidence=[_found_nothing(hyp_id="hyp%x")], prose=prose
+        )
+        assert "hyp%x" not in tex
+        assert "first (as of 2026-06-18)" in tex
 
 
 # =========================================================================== #
@@ -398,8 +401,8 @@ class TestNoveltyWhitespaceTolerance:
         spec = _spec()
         prose = PaperProse(introduction=r"This is \novelty {result} {hyp-n} {first}.")
         tex = render_paper_latex(spec, [], evidence=[_found_nothing()], prose=prose)
-        assert "first (to our knowledge, as of 2026-06-18)" in tex
-        assert NOVELTY_NEWCOMMAND in tex
+        assert "This is first (as of 2026-06-18)." in tex
+        assert NOVELTY_NEWCOMMAND not in tex
 
 
 # =========================================================================== #

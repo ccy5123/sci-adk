@@ -125,12 +125,16 @@ def test_cli_verify_surfaces_incomplete_deposit_as_advisory(tmp_path, capsys):
 
     spec = _numeric_spec("m2-cli-incomplete", value=0.9)
     run_dir = _seed(tmp_path, spec, _numeric_experiment(0.95))
-    # record.tex exists but no availability statement -> deposit INCOMPLETE. Surfaced on stderr
-    # as an ADVISORY that says "not gated" -- the user is warned. (The exit code is decided by
-    # the record-green/consistency gates, NOT this channel; its non-gating nature is pinned at
-    # the report level in test_deposit_check_is_additive_to_record_green_audit above.)
+    # record.tex exists but no availability statement -> deposit INCOMPLETE. Surfaced on
+    # STDOUT with the other advisories (it is not a failure, and printing it on stderr made it
+    # land in the middle of the stdout advisory lines when both streams were merged) as an
+    # ADVISORY that says "not gated" -- the user is warned. (The exit code is decided by the
+    # record-green/consistency gates, NOT this channel; its non-gating nature is pinned at the
+    # report level in test_deposit_check_is_additive_to_record_green_audit above.)
     main(["verify", str(run_dir)])
-    err = capsys.readouterr().err
-    assert "deposit INCOMPLETE" in err
-    assert "advisory -- not gated" in err
-    assert "availability" in err.lower()  # the missing element is named
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "deposit INCOMPLETE" in out
+    assert "deposit INCOMPLETE" not in captured.err
+    assert "advisory -- not gated" in out
+    assert "availability" in out.lower()  # the missing element is named

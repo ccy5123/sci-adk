@@ -49,7 +49,7 @@ from typing import Dict, List, Optional
 from sci_adk.core.pkgreqs import ALL_RUNS, PackageReqs
 from sci_adk.core.spec import Spec
 from sci_adk.loop.verify import verify_run
-from sci_adk.render.paper import T1_FONT_LINES
+from sci_adk.render.paper import TIMES_FONT_LINES
 # The 6 canonical package folders are defined in the pure gate module (kernel-side, no
 # verify_run dependency) so importing it here does not re-introduce a circular import; the
 # assembler and the gate share that one source of truth.
@@ -488,12 +488,17 @@ def _skeleton_si_tex() -> str:
     thin, gate-checkable skeleton occupies the slot: it names the science, asserts no value
     (no ``\\evval``), references no toolchain, and the Wave-2 writer replaces it. It is the
     package analogue of the per-run authored-SI default skeleton (a thin/absent SI is valid).
+
+    Its faces are the ``main.tex`` skeleton's (Times text and math, Helvetica sans: the figure
+    font policy applies to that skeleton), so the submission does not pair two body faces.
     """
     return (
         r"\documentclass{article}"
-        "\n" + "\n".join(T1_FONT_LINES) + "\n"
+        "\n" + "\n".join(TIMES_FONT_LINES) + "\n"
         r"\usepackage[margin=1in]{geometry}"
         "\n" r"\usepackage{amsmath}"
+        "\n" r"\usepackage{newtxmath}"
+        "\n" r"\usepackage[scaled]{helvet}"
         "\n" r"\usepackage{graphicx}"
         "\n" r"\title{Supplementary Information (skeleton)}"
         "\n" r"\author{~}\date{}"
@@ -535,7 +540,8 @@ def _skeleton_main_tex(
 
     lines: List[str] = []
     lines.append(r"\documentclass{article}")
-    lines.extend(T1_FONT_LINES)
+    # The figure font policy applies (newtxmath + helvet below), so the text is Times too.
+    lines.extend(TIMES_FONT_LINES)
     lines.append(r"\usepackage[margin=1in]{geometry}")
     lines.append(r"\usepackage{amsmath}")
     lines.append(r"\usepackage{newtxmath}")
@@ -726,8 +732,8 @@ def _write_verify_logs(workspace_dir: Path, package_dir: Path, runs: List[str]) 
             rederived = (
                 o.rederived_status.value if o.rederived_status is not None else "n/a"
             )
-            lines.append(
-                f"    - {o.hypothesis_id}: {o.result} "
+            lines.append(  # o.label: "H2" vs "H2 (novelty, result)" -- same hypothesis id
+                f"    - {o.label}: {o.result} "
                 f"(recorded={o.recorded_status.value}, re-derived={rederived})"
             )
         lines.append(

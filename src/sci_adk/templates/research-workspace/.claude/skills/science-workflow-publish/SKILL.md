@@ -48,9 +48,11 @@ gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
 - **Figures pull `y` FROM Evidence by `evidence_id`** — you reference the Evidence,
   you do NOT retype numbers into the figure. An unknown `evidence_id` or a
   `None`/`NaN`/`inf` value is a HARD error — that is the record-fidelity guarantee.
-- **Main paper = belief narrative; SI = the full record auto-dumped.** Record/belief
-  maps onto SI/paper: the SI is the deterministic dump of the record; the main paper
-  is the narrative, and every quantitative statement must trace to the record.
+- **Main paper and SI are both authored; the record is deposited beside them.** The main
+  paper is the argument and the SI (`paper/si.tex`) is its authored overflow — both are
+  belief documents you write, and every quantitative statement in either must trace to
+  the record. The record itself is the engine's deterministic dump,
+  `runs/<id>/record.tex`: deposited, never submitted, never authored.
 
 ## Implementation Guide (5 minutes)
 
@@ -64,7 +66,13 @@ gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
   conclusion the record does support, plainly, and stand behind it.** A ceiling alone is
   satisfied by asserting as little as possible, which is how a paper ends up saying
   nothing. Underclaiming and overclaiming are both failures.
-- **`SIProse`** — optional prose around the auto-dumped Supporting Information record.
+- **`AuthoredSI`** — the Supporting Information, authored like the paper: a JSON
+  `{title?, sections: [{title, body}], figures?}` (e.g. `drafts/<spec-id>/paper/si.json`)
+  passed as `--si si.json` to `sci-adk render`, which writes it to `paper/si.tex`. Without
+  `--si` there is no `paper/si.tex`. It is a submission document: `verify` checks its
+  numbers and its vocabulary as it checks the paper's.
+- **`SIProse`** — optional prose wrapping the deposited record dump `runs/<id>/record.tex`
+  (`--si-prose`); it does not go into the submitted SI.
 - **`FigureSpec`** — figure specifications. For a data plot, the `y` values are pulled
   FROM Evidence by `evidence_id` (record fidelity). For a diagram (not a data plot),
   an image figure is supplied externally via the general figure mechanism — the
@@ -101,11 +109,11 @@ Then the writer:
 
 1. authors the manuscript into a `prose.json` (a `PaperProse`: title / abstract /
    introduction / methods / results / discussion);
-2. runs `sci-adk numbers draft <run> --prose prose.json` and completes
+2. runs `sci-adk numbers draft <run> --prose prose.json [--si si.json]` and completes
    `runs/<id>/numbers.json` from the proposals it writes (below) — every number the
-   paper states;
-3. runs `sci-adk render <run> --prose prose.json` — this also re-deposits the identical
-   `record.tex`, since the record inputs have not changed;
+   paper and its SI state;
+3. runs `sci-adk render <run> --prose prose.json [--si si.json]` — this also re-deposits
+   the identical `record.tex`, since the record inputs have not changed;
 4. records the conclusions in `runs/<id>/declarations.json` (below);
 5. runs `sci-adk verify <run>`;
 6. once it passes, the paper session — the session driving `/sci publish` — runs the
@@ -200,11 +208,16 @@ a count, so the role is stated, not guessed:
   is seen.
 - `context` quotes the words around an occurrence; it is needed only when one text has two
   roles in the same document.
+- A number written inside `\texttt` — a seed, a sample size, a timestamp — is a literal
+  like any other and needs its entry: a seed or a size bound to its recorded source, a
+  timestamp as an `identifier`. A hash holding letters reads as a word, not a number; any
+  piece of one that does read as a number is an `identifier` too.
 
-`sci-adk numbers draft <run> --prose prose.json` proposes the list: a source where exactly
-one recorded field prints as the number, `candidates` where several do, `unresolved` where
-none does. A single match is a proposal, not a decision — check it is the quantity the
-sentence states. **You never add a value to the record**: a number with no recorded home
+`sci-adk numbers draft <run> --prose prose.json [--si si.json]` proposes the list: a
+source where exactly one recorded field prints as the number, `candidates` where several
+do, `unresolved` where none does. Pass `--si si.json` whenever there is an SI: only then
+does it propose the literals of `si.tex`. A single match is a proposal, not a decision —
+check it is the quantity the sentence states. **You never add a value to the record**: a number with no recorded home
 goes back to the experiment stage, to be recorded there as a named value.
 
 Two HARD checks in `verify`, neither of which reads meaning: every number in the paper is
@@ -416,19 +429,45 @@ the final `.tex`. It emits a self-contained folder:
 ```
 paper/
 ├── draft.tex        # the main paper (belief narrative)
-├── si.tex           # Supporting Information (the full record, auto-dumped)
+├── si.tex           # Supporting Information, authored (written only with --si si.json)
 ├── figures/         # body-order numbered figure files
 └── references.bib   # bibliography
 ```
 
-The SI is the deterministic record dump (Evidence record + quantitative table +
-Claims with their C3 bases + decision rules + figures + record-integrity). The whole
-`paper/` folder is self-contained for a single Overleaf folder upload.
+Both `.tex` files are authored. The deterministic record dump (Evidence record +
+quantitative table + Claims with their C3 bases + decision rules + figures +
+record-integrity) is NOT in `paper/`: every render deposits it as `runs/<id>/record.tex`,
+outside the submission. The whole `paper/` folder is self-contained for a single
+Overleaf folder upload.
+
+### Compile check
+
+`sci-adk verify` does not compile. Before handing `paper/` over, build each document once
+from inside `paper/` (`draft`, then `si` when there is one) and read the log for errors
+and overfull lines:
+
+```
+pdflatex -interaction=nonstopmode si.tex
+if grep -q '\\bibdata' si.aux; then bibtex si; fi
+pdflatex -interaction=nonstopmode si.tex
+pdflatex -interaction=nonstopmode si.tex
+```
+
+Run `bibtex` for a document only when its `.aux` holds a `\bibdata` line. Render writes
+no `\bibliography` for an SI that cites nothing, and `bibtex` run on it exits with status 2
+("I found no \bibdata command") — an exit that says nothing is wrong with the SI.
+
+A long unbroken `\texttt` run — a 64-character checksum, a code call such as
+`numpy.random.default_rng(20261009).permutation` — cannot be hyphenated and runs into the
+margin (an "Overfull \hbox" line in the log). Put `\allowbreak` inside it: a checksum as
+16-character pieces, `\texttt{1081e637f6bd39f9}\allowbreak\texttt{ba86d0e005cf657e}...`,
+and a code call after a `.` or `_`. The number checks read the pieces of a split checksum as
+one word, so the split adds nothing to declare in `numbers.json`.
 
 ### The paper-consistency gate
 
 `sci-adk verify` runs a within-document consistency gate over the rendered `.tex` as a
-HARD gate — a dangling `\ref`, an orphan figure, or an unsupported `\novelty` marker
+HARD gate — a dangling `\ref`, an orphan figure, or an unsupported novelty sentence
 makes verify exit non-zero EVEN IF the Claims reproduce. Run `sci-adk verify` as a
 read-only self-check before returning.
 
@@ -459,9 +498,18 @@ failure except by an explicit re-freeze (anti-moving-the-goalposts).
 - **Cross-doc SI references are PLAIN TEXT.** A main-paper → SI-figure reference must
   be plain text (e.g. "Figure S1"), NOT `\ref{fig:SI-...}` — the within-document gate
   flags a cross-doc `\ref` as dangling (cross-doc `\ref` resolution is deferred).
-- **Novelty markup is HARD-gated.** A `\novelty{result|method}{hyp}{text}` marker may
-  only be emitted for a kind whose novelty flag is supported on the record (a
-  `found_nothing` search exists). Do not assert novelty the record does not back.
+- **Novelty markup is HARD-gated.** A `\novelty{result|method}{hyp}{text}` marker (in
+  the prose JSON) may only be used for a kind whose novelty flag is supported on the
+  record (a `found_nothing` search exists). Do not assert novelty the record does not
+  back. The marker never reaches the `.tex`: render writes the plain sentence and appends
+  the scope of the recorded search — "(no such report was found in searches of OpenAlex,
+  arXiv and Crossref on 2026-10-08)", or "(as of <date>)" when no search log was recorded
+  — so write the claim without a hedge of your own. Render records the sentence's binding
+  to its hypothesis in `runs/<id>/novelty_sentences.json` (never submitted, never
+  hand-edited) and `verify` re-checks it: the sentence must still be in the paper and end
+  with the scope the record gives now, so a search recorded after render needs a
+  re-render. To change it, edit the prose and re-render. The claim goes inside the
+  marker; an empty marker text is refused.
 
 ### Frozen-Spec boundary
 
@@ -471,13 +519,14 @@ against the on-disk Spec. Render against the Spec, Evidence, and Claims AS RECOR
 
 ## Advanced (10+ minutes)
 
-The figure/SI design (hybrid LaTeX-native pgfplots data plots + image fallback for
-diagrams; SI = auto record-dump; the verify consistency gate) is detailed in the
-paper-figures-and-si design. The novelty render-time `\novelty{}` markup gate
-(detection via explicit markup, HARD-fail on unsupported, scoped "to our knowledge,
-as of <search date>" auto-attach on supported) is a separate track in the literature
-acquisition design — render-time emission of `\novelty` should survive into the
-`.tex` so verify can re-scan it.
+The figure design (hybrid LaTeX-native pgfplots data plots + image fallback for
+diagrams; the verify consistency gate) is detailed in the paper-figures-and-si design;
+the split of the SI into the authored `paper/si.tex` and the deposited record dump
+`runs/<id>/record.tex` is described in the SI belief/record split design. The novelty
+gate (detection via explicit `\novelty{}` markup in the prose, HARD-fail on unsupported,
+the recorded search's scope attached on supported, a plain sentence in the `.tex` with
+its binding in `runs/<id>/novelty_sentences.json`) is described in the literature
+acquisition design.
 
 ## Works Well With
 

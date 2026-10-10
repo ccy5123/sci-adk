@@ -169,9 +169,10 @@ def test_required_sections_abstract_accepts_environment_or_section():
 # -- F2 figure font policy checker -------------------------------------------
 
 _FONT_PREAMBLE = (
-    r"\usepackage{amsmath}" "\n" r"\usepackage{newtxmath}" "\n"
+    r"\usepackage{newtxtext}" "\n" r"\usepackage{amsmath}" "\n" r"\usepackage{newtxmath}" "\n"
     r"\usepackage[scaled]{helvet}"
 )
+_FIGURE = r"\begin{figure}\includegraphics{figures/fig1.pdf}\end{figure}"
 
 
 def test_font_policy_figure_bearing_with_preamble_is_clean():
@@ -188,9 +189,37 @@ def test_font_policy_figure_bearing_stripped_preamble_fails():
     # A figure-bearing doc with the F2 packages removed (hand-edited) fails the gate.
     tex = r"\begin{figure}\begin{tikzpicture}\end{tikzpicture}\end{figure}"
     problems = figure_font_policy_problems(tex)
-    assert len(problems) == 2  # missing both newtxmath and helvet
+    assert len(problems) == 3  # missing newtxtext, newtxmath and helvet
+    assert any("newtxtext" in p for p in problems)
     assert any("newtxmath" in p for p in problems)
     assert any("helvet" in p for p in problems)
+
+
+def test_font_policy_fails_latin_modern_text_beside_times_math():
+    # The preamble render emitted before the text face joined the policy: Latin Modern body
+    # text (lmodern) with Times math (newtxmath) -- two typefaces in one paper.
+    tex = (
+        r"\usepackage[T1]{fontenc}" "\n" r"\usepackage{lmodern}" "\n" r"\usepackage{amsmath}"
+        "\n" r"\usepackage{newtxmath}" "\n" r"\usepackage[scaled]{helvet}" "\n" + _FIGURE
+    )
+    problems = figure_font_policy_problems(tex)
+    assert len(problems) == 1, problems
+    assert "newtxtext" in problems[0] and "Times" in problems[0]
+
+
+def test_font_policy_accepts_the_packages_in_one_usepackage_list():
+    tex = r"\usepackage{newtxtext,newtxmath}" "\n" r"\usepackage[scaled]{helvet}" "\n" + _FIGURE
+    assert figure_font_policy_problems(tex) == []
+    spaced = r"\usepackage{ newtxtext , newtxmath }\usepackage[scaled=.9]{helvet}" + _FIGURE
+    assert figure_font_policy_problems(spaced) == []
+
+
+def test_font_policy_does_not_count_a_commented_out_package():
+    tex = _FONT_PREAMBLE.replace(r"\usepackage{newtxtext}", r"% \usepackage{newtxtext}")
+    problems = figure_font_policy_problems(tex + "\n" + _FIGURE)
+    assert len(problems) == 1 and "newtxtext" in problems[0], problems
+    # An escaped percent sign is text, not a comment.
+    assert figure_font_policy_problems(r"50\% " + _FONT_PREAMBLE + "\n" + _FIGURE) == []
 
 
 def test_font_policy_figureless_doc_is_clean():
@@ -203,7 +232,7 @@ def test_font_policy_figureless_doc_is_clean():
 def test_font_policy_image_figure_needs_preamble():
     tex = r"\includegraphics[width=\linewidth]{figures/fig1.png}"
     assert is_figure_bearing(tex) is True
-    assert len(figure_font_policy_problems(tex)) == 2  # no font packages -> fail
+    assert len(figure_font_policy_problems(tex)) == 3  # no font packages -> fail
 
 
 # -- F2 raster DPI checker ----------------------------------------------------

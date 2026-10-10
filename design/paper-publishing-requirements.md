@@ -15,8 +15,10 @@
 >   figure text in an Arial-compatible sans; raster (image) figures held to a minimum
 >   effective DPI. Enforced at render time and re-checked by `verify`.
 > - **F3 — Reproduction bundle**: the generating code is retained with the paper (an SI
->   code listing) AND re-runnable on the spot (`paper/reproduce.py` driving the recorded
->   code via the existing docker executor).
+>   code listing, and the source files under `paper/code/`), and `paper/reproduce.py`
+>   lists those files and checks their SHA-256 hashes. It ships the files it names and
+>   checks their hashes; it does not re-run them (§3, amendment of 2026-10-10: the record
+>   holds no arguments or input files to re-run them with).
 
 ---
 
@@ -30,13 +32,16 @@ fixed:
   conditions are surfaced as ADVISORY, never as a pass/fail the engine fakes.
 - [HARD] **Tool-agnostic paper.** A requirement is metadata + a gate; it NEVER injects a
   sci-adk-internal noun into `draft.tex` (the §10 / `paper_tool_clean` rule stands). The
-  SI remains the exempt record dump, so F3's code listing lives in the SI, not the paper.
+  record dump, deposited as `runs/<id>/record.tex` outside the submission, is exempt, so
+  F3's code listing lives there, not in the paper or in the authored `si.tex`.
 - [HARD] **Record/belief separation.** The requirements artifact is a FROZEN contract (a
   record), like the Spec; the rendered paper is checked AGAINST it. Amending it is
   explicit, mirroring `sci-adk amend-spec`.
 - **Render reframe inheritance.** F2/F3 attach to the deterministic spine (figures pull
-  `y` from Evidence; the SI is the full record dump). They add a font/DPI gate and a code
-  artifact to that spine — they do not move the line back toward LLM-authored facts.
+  `y` from Evidence; the full record dump is `runs/<id>/record.tex`, while `paper/si.tex`
+  is authored and written only when `sci-adk render` is given `--si si.json`). They add a
+  font/DPI gate and a code artifact to that spine — they do not move the line back toward
+  LLM-authored facts.
 
 ---
 
@@ -142,6 +147,15 @@ body text is unaffected. Native (pgfplots) figures are VECTOR — infinite resol
 (If a venue ever requires the literal Arial/Times New Roman font files, that is a
 separate xelatex/lualatex + fontspec track — Open fork OF-2, NOT this proposal.)
 
+Amendment (2026-10-10). The F2 build emitted `newtxmath` (math only) after
+`[T1]{fontenc}` + `lmodern`, so a figure-bearing paper set its body in Latin Modern and its
+equations in Times. Where the policy applies, render now emits `[T1]{fontenc}` +
+`newtxtext` in place of `lmodern`, then `amsmath` + `newtxmath` + `[scaled]{helvet}`: body
+and equations in one Times-compatible face (TeX Gyre Termes X), as the `mathptmx` line
+above intended. Documents the policy does not apply to keep `lmodern`. The verify gate
+requires all three packages (`newtxtext`, `newtxmath`, `helvet`), so a preamble with Latin
+Modern text beside Times math fails it.
+
 ### 2.3 Raster (image) DPI gate
 
 `ImageFigureSpec` ([figures.py:164](src/sci_adk/render/figures.py)) carries the source
@@ -169,7 +183,7 @@ gate) — the same render-time + verify-gate pairing the reframe uses for `\evva
 
 ---
 
-## 3. F3 — Reproduction bundle (code retained + runnable)
+## 3. F3 — Reproduction bundle (code retained + hash-checked)
 
 The reproducibility core already exists: `provenance.code_ref` / `environment` / `seed`
 ([evidence.py:128-170](src/sci_adk/core/evidence.py)), the docker executor
@@ -180,10 +194,12 @@ re-deriving belief. F3 ADDS two artifacts to the render output:
 
 `render/si.py` gains a "Reproduction code" section: for each Evidence item whose
 `provenance.code_ref` resolves to a co-located script, the code is included as a LaTeX
-listing (read-only, for the reader). The SI is the exempt record dump, so a code listing
-belongs there, not in the tool-agnostic paper. When `code_ref` is a bare commit/ref (no
-co-located script), the SI records the reference (a pointer), honestly — it cannot inline
-a body it does not hold.
+listing (read-only, for the reader). The record dump is exempt from the tool-vocabulary
+rule, so a code listing belongs there, not in the tool-agnostic paper. (Since
+SPEC-SI-AUTHORING-001 that dump is deposited as `runs/<id>/record.tex`; `paper/si.tex` is
+authored and carries no listing.) When `code_ref` is a bare commit/ref (no co-located
+script), the record lists the reference (a pointer), honestly — it cannot inline a body it
+does not hold.
 
 ### 3.2 Runnable bundle (executable on the spot)
 
@@ -192,17 +208,71 @@ same place it co-locates `figures/` and `references.bib` — additionally emits:
 
 - `paper/code/` — the recorded generating code (co-located from each resolvable
   `code_ref`, mirroring the image co-location pattern);
-- `paper/reproduce.py` — a thin DRIVER that re-runs the recorded code through the existing
-  path (`sci-adk execute` / the docker executor) to regenerate the figures/results, so a
-  reader runs `python paper/reproduce.py` on the spot. It re-executes from the RECORD; it
-  is not a hand-written script that could drift from the Evidence.
+- `paper/reproduce.py` — SUPERSEDED (see the amendment below): originally a thin DRIVER
+  meant to re-run the recorded code through `sci-adk execute` / the docker executor. As
+  built it is a manifest and a hash check: it lists the shipped files and checks their
+  hashes, and runs nothing.
 
 ### 3.3 Gate
 
 `reproduction_bundle` (F1 §1.3): `verify` checks `paper/reproduce.py` + `paper/code/`
-exist, are non-empty, and reference real recorded `code_ref`s. It does NOT re-execute the
-code (that is the reader's `python paper/reproduce.py`, or `sci-adk execute`) — running
-arbitrary recorded code inside the read-only verify gate is out of scope and unsafe.
+exist, are non-empty, and reference real recorded `code_ref`s. It does NOT execute any
+code — running arbitrary recorded code inside the read-only verify gate is out of scope and
+unsafe (and `reproduce.py`, after the amendment below, runs nothing either).
+
+Amendment (2026-10-10). The driver of §3.2 cannot be built from the record: a `code_ref`
+records a script and its sha256, never the command-line arguments or the input files the
+script was run with. On a real run the emitted driver called the executor with neither, so
+every script stopped at once while its docstring promised to regenerate the results.
+`paper/reproduce.py` is now a manifest and a hash check that runs nothing, and says so: it
+lists each script shipped under `paper/code/`, the recorded results it backs (the first
+sentence of each finding, with record ids removed -- see the second pass below) and the data those results name, checks
+each shipped copy's sha256, and exits 0 only when every copy matches. Record ids and the
+verbatim `code_ref`s sit only in its marked machine section. `paper/code/` holds one copy
+per distinct script content under the script's own file name (a name shared by different
+contents gets a `_<sha256 prefix>` suffix), byte for byte; every script a `code_ref` names
+with its own `sha256=` is shipped, not only the leading one; decision meta-records
+(`prior_work:`, `novelty:`, `contested:`, `inquiry:`) are not reproduction entries. A
+re-render removes the `paper/code/` files the previous `reproduce.py` listed and the new one
+does not, and nothing else. The §3.3 gate additionally requires, for every named script
+with a recorded hash that resolves in the workspace, a copy in `paper/code/` with that hash.
+
+Amendment (2026-10-10, second pass). Reviewing the first amendment on the same run found:
+
+- *Only source files ship.* Any word followed by `sha256=<hex>` was read as a script, so a
+  `code_ref` naming the data its script read (`analysis/data.csv sha256=...`) shipped the
+  data into `paper/code/`, listed it as a script and inlined a CSV in the record. A named
+  path is now a script only when its extension is in a fixed set of program-file
+  extensions, compared case-insensitively (`SOURCE_EXTENSIONS` in `loop/code_ref.py`:
+  `.py .ipynb .r .rmd .qmd .jl .m .do .ado .sas .sps .sh .bash .zsh .ps1 .bat .cmd .pl .pm
+  .rb .lua .tcl .awk .sed .js .mjs .cjs .ts .c .h .cc .cpp .cxx .hpp .hh .f .for .f77 .f90
+  .f95 .f03 .f08 .rs .go .java .scala .kt .cs .swift .hs .sage .wl .wls .nb .mpl .lean
+  .thy .sql .mk .smk .nf .wdl .cwl`), or its file name is `Makefile`, `makefile`,
+  `GNUmakefile`, `Snakefile` or `Dockerfile`. Any other path written with a hash, that has a directory
+  part or an extension, is a data reference: `reproduce.py` lists it with its recorded hash
+  under the script its `code_ref` names, and it is never copied (data can be large,
+  licensed or private) and not gated.
+- *The gate checks the script list.* `verify` compared the shipped copies with the record
+  but not `reproduce.py`'s `SCRIPTS` list, which is what a reader's `python reproduce.py`
+  checks against. It now reads that list (with `ast`, never executing it) and fails on an
+  entry missing, an entry no `code_ref` names, or an entry whose hash differs from the
+  recorded one; names are re-derived as the compiler derives them. A script named without
+  a hash is compared by name only.
+- *The report survives any console.* `reproduce.py` crashed when the console encoding could
+  not show a character of a summary (e.g. `PYTHONIOENCODING=ascii`); it now prints such a
+  character as `?`.
+- *No placeholders for references.* Summaries had record ids replaced by "another recorded
+  result" and kept the MethodPlan's internal approach numbers ("approach [13]"). A record
+  id is now removed with the clause around it: cut where a preposition introduces it
+  ("Named values for <id>" → "Named values"), removed with its part inside brackets, or
+  removed as a whole clause; a first sentence left empty falls back to the output's file
+  name. An approach number is dropped, never turned into the approach's title: the record
+  does not fix whether the numbering starts at 0 or 1, so a title could name the wrong
+  approach. The first sentence no longer ends at an abbreviation ("Environ.", "et al.",
+  "Fig.", an initial).
+- *Pruning also without listings.* A render with nothing to list returned before removing
+  the `paper/code/` files the previous render had written. It now removes them, and removes
+  the previous `reproduce.py` when a sci-adk render wrote it; a hand-written one stays.
 
 ---
 
@@ -242,7 +312,9 @@ exist before its first tenants — OF-3.)
 - **OF-3 — default `image_min_dpi`**: RESOLVED → 300 (print). Build sequence RESOLVED →
   F2-first.
 - **OF-4 — `reproduce.py` granularity**: RESOLVED → a whole-run entry point (with per-figure
-  helper functions). A bare-commit `code_ref` with no co-located script is recorded as a
+  helper functions). Superseded 2026-10-10: `reproduce.py` now lists the shipped scripts and
+  the data files each recorded result names, checks every shipped file's SHA-256, and runs
+  nothing (the record holds no arguments or input mapping to run them with). A bare-commit `code_ref` with no co-located script is recorded as a
   POINTER and does NOT block the bundle gate (fail-open, honest about what is held).
 - **OF-5 — required-sections source**: RESOLVED → interactive elicitation with a fixed
   IMRaD default (Abstract / Introduction / Methods / Results / Discussion); venue profiles

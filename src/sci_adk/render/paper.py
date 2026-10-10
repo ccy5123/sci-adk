@@ -39,10 +39,10 @@ from sci_adk.render.figures import (
     render_figure,
 )
 from sci_adk.render.novelty import (
-    NOVELTY_NEWCOMMAND,
     NOVELTY_RENDER_RE,
-    has_novelty_markup,
+    NoveltySentence,
     novelty_scope_suffix,
+    require_novelty_text,
 )
 from sci_adk.render.prose import PaperProse
 
@@ -175,13 +175,48 @@ _ACCENT_LO = 0x00C0
 _ACCENT_HI = 0x017E
 
 # The font encoding every preamble sci-adk emits loads, right after inputenc (right after
-# \documentclass where there is no inputenc line) and before the figure font-policy lines.
-# With inputenc alone pdflatex runs in OT1, where 22 letters and quotes of this window and of
-# the bibliography's punctuation stop the compile (Ð þ Ą ę Ŋ Ų « » ‚ „ ...; measured, TeX Live
-# 2026). T1 typesets them; Latin Modern gives T1 vector fonts without cm-super and is the
-# Computer Modern design, so body text looks the same. helvet and newtxmath come later and
-# still set the sans and the math.
+# \documentclass where there is no inputenc line), followed by the text typeface. With
+# inputenc alone pdflatex runs in OT1, where 22 letters and quotes of this window and of the
+# bibliography's punctuation stop the compile (Ð þ Ą ę Ŋ Ų « » ‚ „ ...; measured, TeX Live
+# 2026). T1 typesets them.
+#
+# The text typeface follows the figure font policy (design/paper-publishing-requirements.md
+# F2). Where it applies, math is set in Times (newtxmath, emitted later with amsmath and the
+# Arial-compatible sans), so the text is Times too (newtxtext, TeX Gyre Termes X): one
+# typeface for body and equations. Elsewhere Latin Modern: T1 vector fonts without cm-super,
+# the Computer Modern design.
 T1_FONT_LINES: tuple[str, str] = (r"\usepackage[T1]{fontenc}", r"\usepackage{lmodern}")
+TIMES_FONT_LINES: tuple[str, str] = (r"\usepackage[T1]{fontenc}", r"\usepackage{newtxtext}")
+
+# hyperref without coloured boxes around every citation, reference and URL.
+HYPERREF_LINE = r"\usepackage[hidelinks]{hyperref}"
+
+
+# @MX:ANCHOR: [AUTO] The one choice of text typeface every per-run preamble makes.
+# @MX:REASON: callers render_paper_latex, si.render_si_latex and
+# authored_si.render_authored_si_latex; pubreqs_checks.figure_font_policy_problems requires
+# newtxtext where the policy applies, and the compile tests check typesettable() against both
+# faces -- change all of them together.
+def text_font_lines(font_policy: bool) -> tuple[str, str]:
+    """The T1 + text-typeface preamble lines: Times (:data:`TIMES_FONT_LINES`) for a document
+    the figure font policy applies to, Latin Modern (:data:`T1_FONT_LINES`) otherwise. PURE."""
+    return TIMES_FONT_LINES if font_policy else T1_FONT_LINES
+
+
+def font_policy_applies(figures: Sequence[AnyFigure]) -> bool:
+    """True iff the figure font policy applies to a document carrying ``figures``: it has a
+    native or an image figure. PURE."""
+    return any(f.kind in ("native", "image") for f in figures)
+
+
+def run_font_policy(
+    draft_figures: Sequence[AnyFigure], si_figures: Sequence[AnyFigure] = ()
+) -> bool:
+    """The figure font policy for a whole run: True iff the draft OR the authored SI
+    carries a figure. Decided once, so ``draft.tex`` and ``si.tex`` -- submitted together --
+    always share :func:`text_font_lines` (a run whose only figure is in the SI used to pair
+    a Latin Modern draft with a Times SI). PURE."""
+    return font_policy_applies(list(draft_figures) + list(si_figures))
 
 # Replacement for a non-ASCII codepoint that is neither curated nor an inputenc-safe
 # accent and does not NFKD-fold to ASCII (e.g. CJK, emoji): a safe placeholder so the
@@ -316,6 +351,8 @@ def _novelty_prose(
     text: str,
     spec: Spec,
     novelty_decisions: Sequence[EvidenceItem],
+    found: Optional[list[NoveltySentence]] = None,
+    document: str = "draft.tex",
 ) -> str:
     """Sanitize a prose slot AND render its ``\\novelty{kind}{hyp}{text}`` markup (N2 gate).
 
@@ -323,22 +360,25 @@ def _novelty_prose(
     :func:`factref.substitute_factrefs`). It SPLIT-and-stitches on
     :data:`novelty.NOVELTY_RENDER_RE` exactly as ``_latex_sanitize_prose`` walks the ref/cite
     allowlist: each GAP between/around the ``\\novelty`` spans is fully prose-sanitized, and
-    each SPAN ``\\novelty{kind}{hyp}{inner}`` is re-emitted SURVIVING into the ``.tex`` (the
-    preamble ``\\newcommand`` makes LaTeX render only the text) with:
+    each SPAN ``\\novelty{kind}{hyp}{inner}`` is replaced by the PLAIN sentence -- no macro,
+    no ``kind`` / ``hyp`` in the source (the submitted ``.tex`` carries no markup a reviewer
+    would not recognize):
 
-      - ``kind`` / ``hyp`` -- slugs, emitted VERBATIM (verify re-scans them; a sanitized
-        underscore would break the re-derivation, like a ref key);
-      - the inner text -- prose-sanitized (FLAT: specials escaped, no nested ref/cite -- the
-        documented honest limit), then immediately followed by the record-derived honest
-        scope from :func:`novelty.novelty_scope_suffix` (also sanitized -- it is plain ASCII
-        ``(to our knowledge, as of <date>)`` so the escape is a no-op, but routing it through
-        keeps the boundary uniform). The scope is INSIDE the ``\\novelty`` text arg so the
-        ``\\newcommand`` renders it.
+      - the inner text, prose-sanitized (FLAT: specials escaped, no nested ref/cite -- the
+        documented honest limit), immediately followed by
+      - the record-derived scope from :func:`novelty.novelty_scope_suffix` (the indexes that
+        answered and the search date, or ``(as of <date>)``), sanitized like any other text
+        -- a recorded index name may carry a LaTeX special.
+
+    When ``found`` is given, each rendered sentence is appended to it as a
+    :class:`novelty.NoveltySentence` for ``document`` -- the binding the compiler writes
+    beside the paper so ``verify`` can re-derive it.
 
     A string with NO ``\\novelty`` markup never enters the loop -> falls straight to
     ``_latex_sanitize_prose(text)`` (BYTE-IDENTICAL to the pre-N2 path). PURE + FAIL-LOUD:
     an unsupported / unknown / bad-kind assertion raises ``ValueError`` via
-    ``novelty_scope_suffix`` (the HARD gate at render time).
+    ``novelty_scope_suffix`` (the HARD gate at render time), and so does an empty text
+    (``novelty.require_novelty_text``).
     """
     out: list[str] = []
     pos = 0
@@ -346,12 +386,11 @@ def _novelty_prose(
         out.append(_latex_sanitize_prose(text[pos : match.start()]))  # gap -> sanitized
         kind, hyp, inner = match.group(1), match.group(2), match.group(3)
         suffix = novelty_scope_suffix(kind, hyp, spec, novelty_decisions)  # fail-loud
-        out.append(
-            "\\novelty{" + kind + "}{" + hyp + "}{"
-            + _latex_sanitize_prose(inner)
-            + _latex_sanitize(suffix)
-            + "}"
-        )
+        require_novelty_text(kind, hyp, inner)  # fail-loud: the claim is inside the span
+        sentence = _latex_sanitize_prose(inner) + _latex_sanitize(suffix)
+        out.append(sentence)
+        if found is not None:
+            found.append(NoveltySentence(document, kind, hyp, sentence))
         pos = match.end()
     out.append(_latex_sanitize_prose(text[pos:]))  # trailing gap / whole string if no spans
     return "".join(out)
@@ -649,6 +688,8 @@ def render_paper_latex(
     cited_dois: Optional[Sequence[str]] = None,
     bib_path: Optional[str] = None,
     figures: Optional[Sequence[AnyFigure]] = None,
+    novelty_sentences: Optional[list[NoveltySentence]] = None,
+    font_policy: Optional[bool] = None,
 ) -> str:
     """
     Render the BELIEF-NARRATIVE paper (``draft.tex``) -- agent prose + a record-fidelity
@@ -698,6 +739,14 @@ def render_paper_latex(
             is computed against all prose then the floats are emitted; the compiler
             re-derives the SAME order from the rendered draft for co-located ``fig<N>``
             filenames. ``None``/empty -> no figures.
+        novelty_sentences: when given, every ``\\novelty{kind}{hyp}{text}`` in the prose is
+            appended to it as a :class:`~sci_adk.render.novelty.NoveltySentence`
+            (document ``draft.tex``, the sentence exactly as rendered). The draft itself
+            carries only the plain sentence; the compiler writes these bindings to the side
+            file ``verify`` checks. ``None`` -> nothing is collected (same draft text).
+        font_policy: the figure font policy decided for the whole run
+            (:func:`run_font_policy` -- the draft's and the SI's figures), so the draft and
+            the SI share one text face. ``None`` -> decided from ``figures`` alone.
 
     Returns:
         A LaTeX document string (``\\documentclass`` ... ``\\end{document}``).
@@ -713,13 +762,16 @@ def render_paper_latex(
 
     def _slot(text: str) -> str:
         # Agent prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
-        # render \novelty{} markup (scope baked / HARD fail) + the prose sanitizer (specials
-        # escaped; \ref/\cite preserved). Substitute factrefs before, so a substituted string
-        # value is escaped as ordinary text; _novelty_prose owns the prose sanitize.
+        # render \novelty{} markup (plain sentence + record scope / HARD fail) + the prose
+        # sanitizer (specials escaped; \ref/\cite preserved). Substitute factrefs before, so
+        # a substituted string value is escaped as ordinary text; _novelty_prose owns the
+        # prose sanitize and collects the novelty bindings.
         return _novelty_prose(
             substitute_factrefs(text.strip(), evidence, claims),
             spec,
             novelty_decisions,
+            found=novelty_sentences,
+            document="draft.tex",
         )
 
     # Title: the agent's short title, else spec.id -- NEVER the goal/hypothesis wall.
@@ -727,21 +779,23 @@ def render_paper_latex(
 
     lines: list[str] = []
     # Preamble. natbib (author-year \citep/\citet); figure packages PER KIND.
-    lines.append(r"\documentclass{article}")
-    lines.append(r"\usepackage[utf8]{inputenc}")
-    lines.extend(T1_FONT_LINES)
-    lines.append(r"\usepackage{hyperref}")
-    lines.append(r"\usepackage{url}")
-    lines.append(r"\usepackage{natbib}")
     has_native = any(f.kind == "native" for f in figures)
     has_image = any(f.kind == "image" for f in figures)
-    # Figure font policy (design/paper-publishing-requirements.md F2): equations in a
-    # Times-compatible serif (newtxmath -- MATH only, so the body TEXT font is unchanged),
-    # other figure text in an Arial-compatible sans (helvet, scaled). pdflatex
-    # metric-compatible -- no font files, no engine change. Emitted ONLY for a
-    # figure-bearing paper, so a figure-less paper stays byte-identical (regression
-    # invariant). The per-figure sans scoping is applied in figures.render_figure.
-    if has_native or has_image:
+    if font_policy is None:
+        font_policy = font_policy_applies(figures)
+    lines.append(r"\documentclass{article}")
+    lines.append(r"\usepackage[utf8]{inputenc}")
+    lines.extend(text_font_lines(font_policy))
+    lines.append(HYPERREF_LINE)
+    lines.append(r"\usepackage{url}")
+    lines.append(r"\usepackage{natbib}")
+    # Figure font policy (design/paper-publishing-requirements.md F2): text and equations in
+    # a Times-compatible serif (newtxtext, in the font lines above, + newtxmath), other figure
+    # text in an Arial-compatible sans (helvet, scaled). pdflatex metric-compatible -- no font
+    # files, no engine change. Emitted ONLY when the run's draft or SI carries a figure
+    # (font_policy); a figure-less run keeps Latin Modern. The per-figure sans scoping is
+    # applied in figures.render_figure.
+    if font_policy:
         lines.append(r"\usepackage{amsmath}")
         lines.append(r"\usepackage{newtxmath}")
         lines.append(r"\usepackage[scaled]{helvet}")
@@ -750,22 +804,8 @@ def render_paper_latex(
         lines.append(r"\pgfplotsset{compat=1.18}")
     if has_image:
         lines.append(r"\usepackage{graphicx}")
-    # \novelty{kind}{hyp}{text} survives into the .tex; this \newcommand makes LaTeX render
-    # only the text (kind/hyp are verify metadata). Emitted ONLY when novelty markup is
-    # present in a prose slot, so a no-novelty paper is byte-identical (regression invariant).
-    has_nov = prose is not None and any(
-        has_novelty_markup(s)
-        for s in (
-            prose.abstract,
-            prose.introduction,
-            prose.methods,
-            prose.results,
-            prose.discussion,
-        )
-        if s
-    )
-    if has_nov:
-        lines.append(NOVELTY_NEWCOMMAND)
+    # No \novelty macro in the preamble: a novelty assertion renders as its plain sentence
+    # (_novelty_prose), and its {kind, hyp} binding lives in a side file, not in the source.
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     # Author is agent-supplied; absent -> empty \author{} (the paper is tool-agnostic and
     # never names the rendering toolchain -- design feedback §10, tool-vocabulary leakage).
@@ -778,8 +818,9 @@ def render_paper_latex(
     lines.append("")
     # NO engine-emitted "compiled by sci-adk from Spec ... Belief state ... Evidence"
     # note here: that is tool self-reference, which the belief-narrative paper must not
-    # carry (§10). The provenance note lives in the SI (the record), which is exempt; a
-    # data/code-availability pointer, if wanted, is agent prose.
+    # carry (§10). The provenance note lives in the deposit's record.tex (the record dump,
+    # exempt from the vocabulary check); a data/code-availability pointer, if wanted, is
+    # agent prose.
 
     # Abstract.
     if prose is not None and prose.abstract:
@@ -952,13 +993,17 @@ def _summarize_finding(finding: str) -> str:
     return f"finding={_summarize_value(data)}"
 
 
-# -- §10 tool-vocabulary leakage check (paper narrative only; SI is exempt) ----------
+# -- §10 tool-vocabulary leakage check (the submission documents) ---------------------
 #
 # A belief-narrative paper must read as legitimate science to a reader who does not know
 # sci-adk (the "tool-agnostic reader test"): no sentence may require knowing a sci-adk
 # internal object to make sense. These phrases/words name the MACHINERY, not the science,
-# so they must not appear in draft.tex. The SI (si.tex) is openly the record dump and is
-# EXEMPT -- this checker is for the PAPER only. (design feedback §10.)
+# so they must not appear in the submission documents: draft.tex AND the authored si.tex
+# (SPEC-SI-AUTHORING-001 REQ-SA-204). Only the deposit's record.tex, the deterministic
+# record dump outside paper/, is exempt (REQ-SA-206). (design feedback §10.)
+#
+# The bare phrase "decision rule" is NOT here: it is standard statistics (Wald; Bayes
+# decision rules). Only the compounds that name the frozen machinery are listed below.
 _PAPER_TOOL_PHRASES: tuple[str, ...] = (
     "sci-adk",
     "frozen spec",
@@ -971,7 +1016,6 @@ _PAPER_TOOL_PHRASES: tuple[str, ...] = (
     "anti-harking",
     "result.point",
     "result.finding",
-    "decision rule",
     # Machinery compounds (design/reader-facing-prose.md §12.5, classes A+B). Every entry
     # here is a COMPOUND whose referent is the authoring system in EVERY venue -- that is
     # the admission criterion. Bare ordinary words are never added, however often they
@@ -1017,25 +1061,38 @@ _PAPER_TOOL_PROPER_RE = re.compile(r"\bSpec\b")
 # itself wrote. Whether that emission is itself a leak is a separate decision in
 # SPEC-SI-AUTHORING-001 territory (the SI is authored belief and sits next to the record),
 # and it is left open rather than settled by a list entry.
+#
+# An id ends on a letter or digit: a "." or "-" after it is the sentence's punctuation,
+# not part of the id ("... as recorded in evi-obs-1." reports "evi-obs-1").
+#
+# File and directory NAMES match in any case: "Checkpoints.md" opening a sentence is the
+# same internal file. The id shapes stay case-sensitive -- they are generated lowercase.
 _PAPER_ARTIFACT_RES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bevi-[A-Za-z0-9][A-Za-z0-9._-]*"),          # Evidence ids
-    re.compile(r"\bclaim-(?:hyp|novelty)-[A-Za-z0-9._-]+"),   # derived Claim ids
+    re.compile(r"\bevi-[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"),   # Evidence ids
+    re.compile(r"\bclaim-(?:hyp|novelty)-[A-Za-z0-9._-]*[A-Za-z0-9]"),  # Claim ids
     re.compile(
-        r"\b(?:spec|pubreqs|pkgreqs|declarations|review|numbers(?:\.draft)?)\.json\b"
+        r"\b(?:spec|pubreqs|pkgreqs|declarations|review|numbers(?:\.draft)?)\.json\b",
+        re.IGNORECASE,
     ),
-    re.compile(r"\b(?:checkpoints|science)\.md\b"),
+    # the novelty bindings; a prose slot reaches the source with the underscore escaped
+    re.compile(r"\bnovelty(?:\\_|_)sentences\.json\b", re.IGNORECASE),
+    re.compile(r"\bspec\.v\d+\.json\b", re.IGNORECASE),   # an amended Spec's earlier versions
+    re.compile(r"\bspec(?:\\_|_)history\b", re.IGNORECASE),   # ...and the directory of them
+    re.compile(r"\b(?:checkpoints|science)\.md\b", re.IGNORECASE),
 )
 
 
 def check_paper_tool_vocabulary(paper_tex: str) -> list[str]:
-    """Return the tool-vocabulary leaks found in a rendered PAPER (``draft.tex``).
+    """Return the tool-vocabulary leaks found in one submission document.
 
     PURE. The §10 tool-agnostic check: returns the distinct forbidden phrases/words that
     name the sci-adk machinery (``sci-adk``, ``frozen Spec``, ``engine-derived``,
     ``verdict``, ``Evidence record``, ``result.point``, ...) found in ``paper_tex``. An
-    EMPTY list means the paper reads as tool-agnostic science. The SI is the record dump
-    and is intentionally NOT passed here (it is exempt). De-duplicated, first-seen order;
-    a verify gate and the render regression tests both consume it.
+    EMPTY list means the document reads as tool-agnostic science. The verify gate passes
+    each submission document separately -- ``draft.tex`` and the authored ``si.tex``
+    (REQ-SA-204) -- and never the deposit's ``record.tex`` (the record dump, exempt by
+    REQ-SA-206). De-duplicated, first-seen order; the verify gates and the render
+    regression tests consume it.
     """
     low = paper_tex.lower()
     found: list[str] = []

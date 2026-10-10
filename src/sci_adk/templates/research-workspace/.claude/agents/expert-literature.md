@@ -96,7 +96,8 @@ not answer, and `found_nothing` as a recorded result. The essentials:
 - Search against the DRAFT Spec's exact hypothesis text, per kind — a vague query
   manufactures a false `found_nothing`.
 - Record the search date — the novelty decision is "as of <date>", and the engine later
-  renders an honest "to our knowledge, as of <search date>" scope from it.
+  prints the scope of the search beside the paper's novelty sentence: the indexes that
+  answered in the search log and the search date.
 - An index that refuses or errors was not searched. Write which indexes and query
   strings were used, and which failed, to the search log passed with `--search-log`
   (`verify` fails a `found_nothing` with fewer than two indexes that answered), and list

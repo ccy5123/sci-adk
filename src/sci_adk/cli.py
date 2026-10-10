@@ -495,6 +495,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Help for the --spec-digest flag of the record-advancing verbs. It names the value the
+# flag takes by where it is printed: a trial session read "must match spec.json" as the
+# sha256 of that file and passed it.
+_SPEC_DIGEST_HELP = (
+    "the Spec digest from the worker's [FROZEN SPEC REFERENCE] (§6.1): the value printed "
+    "as 'spec_digest:' by init-spec, amend-spec and `sci-adk status <run_dir>` -- a sha256 "
+    "over the canonical Spec content, not the sha256 of the spec.json file. When passed, "
+    "it must equal the digest of the run's current Spec or the verb fails (exit 2) "
+    "without {blocked}. Lenient when omitted (no check)"
+)
+
+
 def _add_verb_parsers(sub) -> None:
     """Register the 6 standalone Step-2 verbs (design/sci-adk-as-moai.md §4.6).
 
@@ -750,9 +762,7 @@ def _add_verb_parsers(sub) -> None:
     )
     append_ev.add_argument(
         "--spec-digest", default=None, metavar="SHA256",
-        help="the frozen Spec digest from the worker's [FROZEN SPEC REFERENCE] (§6.1); "
-             "when passed, it must match runs/<id>/spec.json or the verb fails (exit 2) "
-             "without writing. Lenient when omitted (no check)",
+        help=_SPEC_DIGEST_HELP.format(blocked="writing"),
     )
 
     # derive-claim: apply each DecisionRule to the recorded Evidence -> Claims.
@@ -771,9 +781,7 @@ def _add_verb_parsers(sub) -> None:
     )
     derive_claim.add_argument(
         "--spec-digest", default=None, metavar="SHA256",
-        help="the frozen Spec digest from the worker's [FROZEN SPEC REFERENCE] (§6.1); "
-             "when passed, it must match runs/<id>/spec.json or the verb fails (exit 2) "
-             "without deriving. Lenient when omitted (no check)",
+        help=_SPEC_DIGEST_HELP.format(blocked="deriving"),
     )
 
     # render: compile the paper/ artifacts from the recorded spec/evidence/claims.
@@ -1045,6 +1053,8 @@ def _check_spec_digest(spec, run_dir: Path, passed_digest) -> None:
     """
     if passed_digest is None:
         return
+    import hashlib
+
     from sci_adk.provenance import SpecDigestMismatch, spec_digest
 
     # Digest the in-memory Spec the verb operates under (already loaded by _load_run_spec).
@@ -1052,9 +1062,49 @@ def _check_spec_digest(spec, run_dir: Path, passed_digest) -> None:
     # a non-matching digest -- and digesting it here avoids a redundant re-read and the
     # FileNotFoundError path a disk re-read exposes to a TOCTOU race.
     actual = spec_digest(spec)
-    if passed_digest.strip().lower() != actual:
+    passed = passed_digest.strip().lower()
+    if passed != actual:
+        # Say what the passed value IS, read only on a mismatch. The usual wrong value is
+        # `sha256sum spec.json` (a trial session passed it): the Spec is unchanged. A
+        # reference taken before an amendment is the digest of a version kept in
+        # spec_history/: the Spec was revised. An unreadable file just drops its hint.
+        try:
+            file_hash = hashlib.sha256((run_dir / "spec.json").read_bytes()).hexdigest()
+        except OSError:
+            file_hash = None
+        passed_file_hash = passed == file_hash
         # expected=passed_digest (un-normalized) so the message shows what was passed.
-        raise SpecDigestMismatch(spec_id=spec.id, expected=passed_digest, actual=actual)
+        raise SpecDigestMismatch(
+            spec_id=spec.id, expected=passed_digest, actual=actual, run_dir=run_dir,
+            passed_file_hash=passed_file_hash,
+            earlier_version=None if passed_file_hash else _earlier_spec_version(run_dir,
+                                                                                passed),
+            current_version=spec.version,
+        )
+
+
+def _earlier_spec_version(run_dir: Path, digest: str) -> Optional[int]:
+    """The version saved in ``spec_history/`` whose Spec digest is ``digest``, if any.
+
+    ``spec_history/spec.v<N>.json`` holds each superseded frozen version byte-for-byte
+    (``amend-spec``). A file that does not parse as a Spec is skipped.
+    """
+    import re
+
+    from sci_adk.loop.amend_spec import HISTORY_DIR
+    from sci_adk.provenance import spec_digest
+
+    for path in sorted((run_dir / HISTORY_DIR).glob("spec.v*.json")):
+        match = re.fullmatch(r"spec\.v(\d+)\.json", path.name)
+        if match is None:
+            continue
+        try:
+            saved = Spec.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+        if spec_digest(saved) == digest:
+            return int(match.group(1))
+    return None
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -1664,7 +1714,7 @@ def _cmd_append_evidence(args: argparse.Namespace) -> int:
         return e.exit_code
 
     # §6.1 spec-digest boundary: a worker-passed --spec-digest must match the recorded
-    # Spec BEFORE any Evidence is written (a mismatch means the Spec was silently revised).
+    # Spec BEFORE any Evidence is written (a mismatch: the reference is not the current Spec).
     from sci_adk.provenance import SpecDigestMismatch
 
     try:
@@ -1716,7 +1766,7 @@ def _cmd_derive_claim(args: argparse.Namespace) -> int:
         return e.exit_code
 
     # §6.1 spec-digest boundary: a worker-passed --spec-digest must match the recorded
-    # Spec BEFORE any Claim is derived (a mismatch means the Spec was silently revised).
+    # Spec BEFORE any Claim is derived (a mismatch: the reference is not the current Spec).
     from sci_adk.provenance import SpecDigestMismatch
 
     try:
@@ -1756,9 +1806,14 @@ def _print_code_ref_warnings(compiler: ResearchCompiler) -> None:
     Each such Evidence item names a file whose sha256 differs from the one it recorded, so
     the render treated it as a pointer: the reproduction bundle does not ship or run it.
     """
+    data_lines = set(getattr(compiler, "code_ref_data_warnings", []))
     for line in compiler.code_ref_warnings:
-        print(f"  warning: {line} -- the file is not the recorded code, so it was not "
-              "shipped as the reproduction script (kept as a pointer)", file=sys.stderr)
+        if line in data_lines:
+            print(f"  warning: {line} -- verify's reproduction check fails until the "
+                  "recorded data file is restored", file=sys.stderr)
+        else:
+            print(f"  warning: {line} -- the file is not the recorded code, so it was not "
+                  "shipped as the reproduction script (kept as a pointer)", file=sys.stderr)
 
 
 def _cmd_render(args: argparse.Namespace) -> int:
@@ -1897,7 +1952,14 @@ def _cmd_numbers_draft(args: argparse.Namespace) -> int:
     print(f"numbers draft: {sum(summary.values())} literal(s) from {read_from} -> {out_path}")
     print(f"  {summary['resolved']} resolved (one recorded source), "
           f"{summary['ambiguous']} ambiguous (candidates listed, none chosen), "
-          f"{summary['unresolved']} unresolved")
+          f"{summary['unresolved']} unresolved, "
+          f"{summary['identifier']} identifier (date-times and numbers inside a name such as "
+          f"SHA-256 or a file name, never matched to a value)")
+    stamps = [f"{e['text']} ({e['document']}"
+              + (f", in \"{e['context']}\")" if e.get("context") else ")")
+              for e in draft["numbers"] if e.get("role") == "identifier"]
+    if stamps:
+        print("  proposed as identifiers: " + ", ".join(stamps))
     unresolved = [f"{e['text']} ({e['document']})" for e in draft["numbers"]
                   if e.get("unresolved")]
     if unresolved:
@@ -1970,6 +2032,18 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _err_in_order(message: str) -> None:
+    """Print ``message`` to stderr after flushing stdout, so the two stay in print order.
+
+    On a pipe stdout is block-buffered and stderr is not: without the flush, a caller
+    reading both streams merged (``sci-adk verify ... 2>&1 | ...``, or an agent's shell
+    tool) sees every stderr line before the stdout lines printed earlier -- or in the
+    middle of one of them.
+    """
+    sys.stdout.flush()
+    print(message, file=sys.stderr, flush=True)
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Headless read-only belief audit over an existing run dir (design §6.2/§7.1, F6).
 
@@ -1990,7 +2064,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         )
         if is_workspace:
             return _run_package_gate(run_dir)
-        print(f"error: no spec.json found in run dir: {run_dir}", file=sys.stderr)
+        _err_in_order(f"error: no spec.json found in run dir: {run_dir}")
         return 2
 
     # A recorded artifact (spec/evidence/claim/verdict) may be malformed, or two
@@ -2002,7 +2076,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     try:
         report = verify_run(run_dir, strict_science=args.strict_science)
     except ValueError as e:
-        print(f"error: {e}", file=sys.stderr)
+        _err_in_order(f"error: {e}")
         return 1
 
     print(f"verified run '{report.spec_id}' -> {run_dir}")
@@ -2011,13 +2085,15 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("  no recorded claims to verify")
     for o in report.outcomes:
         rederived = o.rederived_status.value if o.rederived_status is not None else "n/a"
-        print(f"    - {o.hypothesis_id}: {o.result}  "
+        # o.label tells a hypothesis's experiment claim ("H2") from its novelty claim
+        # ("H2 (novelty, result)"); both answer the same hypothesis id.
+        print(f"    - {o.label}: {o.result}  "
               f"(recorded={o.recorded_status.value}, re-derived={rederived})")
     if report.all_reproduced:
         print("  all recorded claims reproduced from the record")
     else:
-        print("  NOT reproduced: at least one claim DIVERGED or is UNRESOLVED "
-              "(see above)", file=sys.stderr)
+        _err_in_order("  NOT reproduced: at least one claim DIVERGED or is UNRESOLVED "
+                      "(see above)")
 
     # Phase 3 (design/paper-figures-and-si.md D4): paper-consistency is a HARD gate.
     # Report each rendered document's internal \ref<->\label integrity; a broken
@@ -2028,59 +2104,71 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             print("  paper consistency: OK (internal \\ref<->\\label integrity) for "
                   f"{', '.join(sorted(report.paper_consistency))}")
         else:
-            print("  paper consistency FAILED (internal \\ref<->\\label integrity):",
-                  file=sys.stderr)
+            _err_in_order(
+                "  paper consistency FAILED (internal \\ref<->\\label integrity):")
             for name in sorted(report.paper_consistency):
                 rep = report.paper_consistency[name]
                 if rep.ok:
                     continue
                 if rep.unresolved_refs:
-                    print(f"    - {name}: unresolved \\ref (no such \\label): "
-                          f"{', '.join(rep.unresolved_refs)}", file=sys.stderr)
+                    _err_in_order(f"    - {name}: unresolved \\ref (no such \\label): "
+                                  f"{', '.join(rep.unresolved_refs)}")
                 if rep.duplicate_labels:
-                    print(f"    - {name}: duplicate \\label (multiply defined): "
-                          f"{', '.join(rep.duplicate_labels)}", file=sys.stderr)
+                    _err_in_order(f"    - {name}: duplicate \\label (multiply defined): "
+                                  f"{', '.join(rep.duplicate_labels)}")
 
     # Fidelity gate: a residual \evval/\status macro in a rendered .tex (substitution
     # bypassed / .tex hand-edited) fails the combined gate.
     if not report.paper_factref_clean:
-        print("  fidelity FAILED (unsubstituted \\evval/\\status fact macros):",
-              file=sys.stderr)
+        _err_in_order("  fidelity FAILED (unsubstituted \\evval/\\status fact macros):")
         for name in sorted(report.paper_factrefs):
-            print(f"    - {name}: {', '.join(report.paper_factrefs[name])}",
-                  file=sys.stderr)
+            _err_in_order(f"    - {name}: {', '.join(report.paper_factrefs[name])}")
 
-    # Tool-vocabulary gate (§10): the PAPER must read as tool-agnostic science (the SI is
-    # exempt). A leak in draft.tex fails the combined gate.
+    # Novelty gate (N3): a novelty sentence the record does not back (no found_nothing search
+    # of that {hypothesis, kind}), a bound sentence no longer in its document, or a malformed
+    # novelty_sentences.json fails the combined gate.
+    if not report.paper_novelty_clean:
+        _err_in_order("  novelty FAILED (a novelty sentence is not backed by a recorded "
+                      "search, or no longer matches its binding):")
+        for name in sorted(report.paper_novelty_problems):
+            for problem in report.paper_novelty_problems[name]:
+                _err_in_order(f"    - {name}: {problem}")
+
+    # Tool-vocabulary gate (§10): the submission documents -- draft.tex AND the authored
+    # si.tex (REQ-SA-204) -- must read as tool-agnostic science; only the deposit's
+    # record.tex is exempt. A leak in either document fails the combined gate, and each
+    # leaking document is named on its own line so the author edits the right file.
     if not report.paper_tool_clean:
-        print("  tool-vocabulary FAILED (draft.tex names the toolchain, not the "
-              "science -- §10): " + ", ".join(report.paper_tool_vocab), file=sys.stderr)
+        _err_in_order("  tool-vocabulary FAILED (a submission document names the toolchain, "
+                      "not the science -- §10):")
+        for name in sorted(report.paper_tool_vocab_by_doc):
+            _err_in_order(f"    - {name}: {', '.join(report.paper_tool_vocab_by_doc[name])}")
 
     # Declaration gate (design/reader-facing-prose.md §11.3): a declared conclusion whose
     # status the record no longer derives (belief is revisable -- the argument around it is
     # stale and must be REWRITTEN, not re-worded), a declared sentence that is no longer in
     # the manuscript, or a decided hypothesis with no declared conclusion (the floor).
     if not report.declarations_clean:
-        print("  conclusions FAILED (a declared conclusion no longer matches the record "
-              "or the manuscript):", file=sys.stderr)
+        _err_in_order("  conclusions FAILED (a declared conclusion no longer matches the "
+                      "record or the manuscript):")
         for problem in report.declaration_problems_found:
-            print(f"    - {problem}", file=sys.stderr)
+            _err_in_order(f"    - {problem}")
 
     # Declared-number gate (design/declared-numbers.md §4.3): for a run with numbers.json, a
     # literal in the paper that no entry covers, or an entry whose source does not resolve
     # or does not print as the literal. Stale entries + identifiers are advisory (below).
     if not report.numbers_clean:
-        print("  numbers FAILED (a number in the paper is not in numbers.json, or does not "
-              "match its recorded source):", file=sys.stderr)
+        _err_in_order("  numbers FAILED (a number in the paper is not in numbers.json, or "
+                      "does not match its recorded source):")
         for problem in report.number_problems:
-            print(f"    - {problem}", file=sys.stderr)
+            _err_in_order(f"    - {problem}")
 
     # Cross-document gate: a main-paper "Figure/Table S<n>" that points past the SI's float
     # count is a silent dangling cross-reference (a real \ref cannot cross the compile
     # boundary, so the within-document gate never sees it). It fails the combined gate.
     if not report.paper_cross_doc_clean:
-        print("  cross-document FAILED (draft.tex cites SI floats that do not exist): "
-              + ", ".join(report.paper_cross_doc_refs), file=sys.stderr)
+        _err_in_order("  cross-document FAILED (draft.tex cites SI floats that do not "
+                      "exist): " + ", ".join(report.paper_cross_doc_refs))
 
     # Publishing-requirements gate (F1, design §1.3): the umbrella that consumes F2 (font/DPI)
     # + F3 (reproduction bundle) + section/reference/word-count checks the frozen pubreqs.json
@@ -2091,10 +2179,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         if report.paper_requirements_clean:
             print("  publishing requirements: OK (declared requirements met)")
         else:
-            print("  publishing requirements FAILED (declared requirements not met):",
-                  file=sys.stderr)
+            _err_in_order(
+                "  publishing requirements FAILED (declared requirements not met):")
             for problem in report.paper_requirements_problems:
-                print(f"    - {problem}", file=sys.stderr)
+                _err_in_order(f"    - {problem}")
         # ADVISORY surfacing (never gated): the contract's free-form advisory + max_pages.
         from sci_adk.core.pubreqs import PubReqs
 
@@ -2124,21 +2212,22 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     # Search-log gate (design/parallel-literature-search.md §4.4): a novelty found-nothing
     # whose recorded log shows fewer than two indexes that answered fails the combined gate.
     if not report.search_log_clean:
-        print("  search log FAILED (a recorded null rests on fewer than two indexes):",
-              file=sys.stderr)
+        _err_in_order(
+            "  search log FAILED (a recorded null rests on fewer than two indexes):")
         for problem in report.search_log_problems:
-            print(f"    - {problem}", file=sys.stderr)
+            _err_in_order(f"    - {problem}")
 
     # SPEC-SI-AUTHORING-001 M2 (Pillar C): the RECORD-side deposit-completeness channel --
     # the retained record artifact + a "Data & code availability" statement. Surfaced here,
     # ADDITIVE (REQ-SA-305): NOT in report.passed, so it never weakens the claim-reproduction
-    # / record-green gate.
+    # / record-green gate. It is an advisory, so it goes to stdout with the other advisories
+    # (on stderr it landed in the middle of the stdout advisory lines of a merged stream).
     if report.deposit_complete:
         print("  deposit complete (record artifact + data & code availability statement)")
     else:
-        print("  deposit INCOMPLETE (record-side, advisory -- not gated):", file=sys.stderr)
+        print("  deposit INCOMPLETE (record-side, advisory -- not gated):")
         for problem in report.deposit_problems:
-            print(f"    - {problem}", file=sys.stderr)
+            print(f"    - {problem}")
 
     # The exit gate is the COMBINED signal: claims reproduce AND the paper is consistent
     # AND no residual fact macro AND the paper is tool-agnostic AND every cross-document

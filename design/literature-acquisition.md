@@ -303,6 +303,62 @@ contradiction.)
 {hyp, kind} is on record — never semantic "same-ness" (the searcher's recorded judgment) or
 significance.
 
+**Amendment (2026-10-10, found on the BCF/Kow trial run): plain sentence in the source,
+binding beside it, scope from the search log.** Two parts of the placement and action above
+are superseded:
+
+- *Placement.* The surviving `\novelty{}` macro put sci-adk markup and the hypothesis label
+  (`\novelty{result}{H2}{...}`) into the submitted `.tex`, which the publishing rule forbids
+  (the source carries no markup a reviewer would not recognize; cf. `declarations.json`).
+  `render` now writes ONLY the sentence; the markup stays in the authored prose
+  (`prose.json` / `si.json`). The binding `{document, kind, hypothesis, sentence}` goes to
+  `runs/<id>/novelty_sentences.json` — beside `spec.json` / `declarations.json`, outside
+  `paper/`, never submitted, rewritten by every render (emptied when a render has none).
+  `verify` re-derives every binding via `derive_novelty_status` (unbacked → FAIL, as
+  before) and checks the sentence is still in its document (whitespace-normalized,
+  comments stripped; an edited sentence → FAIL, re-render). A malformed or wrong-Spec file
+  fails loud. Drafts rendered earlier still carry the macro; `verify` keeps re-scanning
+  `.tex` for it, so they are checked as before (backward compatible). The CLI now prints
+  the novelty problems (it used to exit 1 without saying why).
+- *Action on SUPPORTED.* "to our knowledge, as of <date>" was a stock softener on every
+  novelty sentence, while the record holds the search itself. The scope is now read from the
+  backing `found_nothing` decisions' search logs: `(no such report was found in searches of
+  <indexes that answered> on <date>)` — each index named once (common indexes get their
+  usual names: OpenAlex, arXiv, Crossref, Semantic Scholar, PubMed, …; a web search is "the
+  web", listed last; any other name is printed as recorded), and `between <first> and
+  <last>` when the searches span days. With no search log (or none in which an index
+  answered): `(as of <date of the latest backing decision>)`, with no "to our knowledge".
+- The emit-safe hypothesis-id check now applies only to markup in a `.tex` (old drafts),
+  the one place the id still reaches the source.
+
+Honest limit: deleting the side file un-binds the sentences (the same tamper as stripping
+the macro from an old `.tex`; render is where the gate is enforced).
+
+Follow-up (2026-10-10, review of the amendment):
+
+- *Scope re-derived at verify.* `verify` no longer only checks that a bound sentence is still
+  in its document: it recomputes the scope from the backing `found_nothing` decisions (the
+  same function render uses, escaped the same way) and requires the bound sentence to end
+  with it, after some claim text. A sentence naming indexes the record's search did not
+  answer (e.g. its decision removed while another, with other indexes, still backs the
+  claim) fails, and so does a sentence whose scope a later search has changed — until the
+  paper is re-rendered. This replaces the earlier limit "a later search leaves the printed
+  scope true but incomplete".
+- *No empty claims.* Render refuses `\novelty{kind}{hyp}{}` (empty or whitespace text): the
+  scope alone, appended to a claim written outside the span, would leave the claim
+  unbound. `novelty_sentences.json` refuses a bound sentence shorter than the shortest one
+  render writes (one character plus `(as of YYYY-MM-DD)`); an empty sentence used to match
+  any document.
+- *A render without the SI keeps the SI's bindings.* Such a render writes no `si.tex`, so
+  one from an earlier render stays in `paper/`; its bindings are now carried into the
+  rewritten side file (they used to be dropped, leaving its novelty sentence unchecked). If
+  the side file cannot be read at that point, render stops before writing anything.
+- An index recorded in two spellings that differ only in case is named once.
+- `novelty_sentences.json` named in a submitted document is a tool-vocabulary leak.
+- *Package.* The package gate does not check novelty sentences in the merged manuscript;
+  each run's sentences are checked only by that run's `sci-adk verify` (see
+  `design/near-submission-package.md` §3, "Novelty sentences").
+
 The 2-kind migration this gate depends on is now implemented (N1, v0.6), so the markup +
 gate (N2/N3) remain to be built on top of the now-live `claim-novelty-{kind}-{hyp}`
 primitives (markup carries `kind`; the gate keys on `claim-novelty-{kind}-{hyp}`).

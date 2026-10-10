@@ -14,6 +14,8 @@ fixtures use NEUTRAL synthetic data (no domain/venue/study).
 
 from __future__ import annotations
 
+import math
+
 from sci_adk.core.claim import (
     Claim,
     ClaimStatus,
@@ -324,3 +326,25 @@ def test_tokenizer_novelty_strip_does_not_swallow_neighbouring_prose():
     tokens = {t.value for t in tokenize_quantitative(tex)}
     assert {1.6, 0.31} <= tokens
     assert 2.0 not in tokens    # 'hyp-002'
+
+
+def test_tokenizer_drops_a_non_finite_checksum_fragment():
+    # Run SPEC-BCFKOW-001: "1081e637f6bd..." read 1081e637 as a number (inf) and failed a
+    # run without a number list with a false "unrecorded number".
+    tex = ("the decrypted copy, which all steps read, has SHA-256 "
+           "1081e637f6bd39f9ba86d0e005cf657ea054ad302fd57e5d2e8d6841fd95c461.")
+    tokens = tokenize_quantitative(tex)
+    assert all(math.isfinite(t.value) for t in tokens)
+    assert "1081e637" not in [t.raw for t in tokens]
+    assert number_audit_problems(tex, RecordedValuePool.from_values([256.0]),
+                                 "draft.tex") == []
+
+
+def test_known_residual_a_finite_number_at_the_head_of_a_digest_is_still_read():
+    # The pattern audit stays byte-for-byte for runs without a number list, so it does not
+    # take the digest rule of the declared-number tokenizer: only a NON-finite head is
+    # dropped. A digest in prose that starts "9d..." or "45e12a..." still yields 9 / 45e12
+    # (a run adopting numbers.json reads it as one word). Pinned so a change is deliberate.
+    tex = ("SHA-256 9dc5d6387201df0f66e9472b034aeaa09ef7a47f705b9b5f50d7c9af8a1aadc3 and "
+           "45e12abcdef0123456789abcdef")
+    assert [t.raw for t in tokenize_quantitative(tex)] == ["256", "9", "45e12"]

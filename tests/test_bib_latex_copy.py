@@ -16,7 +16,7 @@ U+2212. Render used to copy the store verbatim into ``paper/references.bib`` (an
     ``doi`` values are left as they are (their command prints them verbatim), and so are fields
     no style prints (abstract, keywords, file, ...);
   - a character pdflatex cannot typeset with the preamble sci-adk emits (utf8 inputenc, T1,
-    Latin Modern) -> the curated map render already uses for prose (``render/paper.py``
+    Latin Modern or, under the figure font policy, Times) -> the curated map render already uses for prose (``render/paper.py``
     ``_UNICODE_MAP``; inside math its form without the ``$``), or LaTeX accent commands for a
     letter with combining marks (never a dropped mark); accented Latin letters pdflatex has
     stay as they are;
@@ -38,16 +38,18 @@ from any other path can still carry.
 
 from __future__ import annotations
 
+import functools
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unicodedata
 from pathlib import Path
 
 import pytest
 
-from sci_adk.render.bib_latex import latex_safe_bib, typesettable
+from sci_adk.render.bib_latex import latex_safe_bib, paper_bib, typesettable
 from sci_adk.render.figures import ImageFigureSpec
 from sci_adk.render.paper import _UNICODE_MAP, render_paper_latex
 from sci_adk.render.pkgreqs_checks import bib_keys, bib_latex_safety_problems
@@ -485,11 +487,12 @@ def test_render_writes_latex_safe_copies_and_leaves_the_store_as_acquired(tmp_pa
     store = run_dir / "artifacts" / "literature" / "references.bib"
     assert store.read_text(encoding="utf-8") == _RAW_POOL
 
-    paper_bib = (run_dir / "paper" / "references.bib").read_text(encoding="utf-8")
-    assert bib_keys(paper_bib) == bib_keys(_RAW_POOL)
-    assert bib_latex_safety_problems(paper_bib) == []
-    assert "Octanol{$-$}Water" in paper_bib
-    assert "Environmental Science \\& Technology" in paper_bib
+    paper_copy = (run_dir / "paper" / "references.bib").read_text(encoding="utf-8")
+    assert bib_keys(paper_copy) == bib_keys(_RAW_POOL)
+    assert bib_latex_safety_problems(paper_copy) == []
+    # The math minus, its neighbours' casing protected (tests/test_reference_list.py).
+    assert "{Octanol}{$-$}{Water}" in paper_copy
+    assert "Environmental Science \\& Technology" in paper_copy
 
     si_bib = (run_dir / "paper" / "references_SI.bib").read_text(encoding="utf-8")
     assert bib_keys(si_bib) == ["Kenaga1980", "oki2005"]
@@ -881,37 +884,55 @@ needs_tex = pytest.mark.skipif(
     not all(shutil.which(t) for t in _TEX_TOOLS), reason="pdflatex/bibtex/kpsewhich not on PATH"
 )
 _USEPACKAGE_RE = re.compile(r"\\usepackage(?:\[[^\]]*\])?\{([^}]*)\}")
-# The packages the claim under test rests on: without them the test proves nothing.
-_ESSENTIAL = {"inputenc", "fontenc", "lmodern", "natbib", "hyperref", "url"}
+# The packages the claim under test rests on: without them the test proves nothing. The text
+# typeface is the one the preamble emits: Latin Modern without the figure font policy, Times
+# (newtxtext + newtxmath) with it.
+_ESSENTIAL = {"inputenc", "fontenc", "natbib", "hyperref", "url"}
+_ESSENTIAL_FONTS = {False: {"lmodern"}, True: {"newtxtext", "newtxmath"}}
 _TRIAL_BIB = Path(__file__).parent / "fixtures" / "bib_trial2" / "references.bib"
 
 
-def _installed(package: str) -> bool:
-    found = subprocess.run(
-        ["kpsewhich", f"{package}.sty"], capture_output=True, text=True, check=False
-    )
-    return bool(found.stdout.strip())
+@functools.lru_cache(maxsize=None)
+def _loadable(package: str) -> bool:
+    """True iff this TeX install loads ``package`` and sets roman, typewriter and math text with
+    it after T1 (a .sty kpsewhich finds can still fail on a missing dependency or font: newtx's
+    newtxtext needs fontaxes and txfonts). Latin Modern is loaded first, so a package that sets
+    no font leaves vector fonts in place (no bitmap font is generated for the probe)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        probe = Path(tmp) / "probe.tex"
+        probe.write_text(
+            "\\documentclass{article}\\usepackage[T1]{fontenc}\\usepackage{lmodern}"
+            f"\\usepackage{{amsmath}}\\usepackage{{{package}}}"
+            "\\begin{document}x \\texttt{x} $x$\\end{document}\n",
+            encoding="utf-8",
+        )
+        return _run(["pdflatex", "-interaction=nonstopmode", "probe.tex"], Path(tmp)) == 0
 
 
-def _render_preamble() -> tuple[list[str], list[str]]:
-    """The preamble a render emits for a figure-bearing paper (the fullest one: font policy
-    included), minus any package this TeX install lacks (returned second, so a failure says
-    which were dropped). TeX Live here lacks newtxmath, a math-font package that does not
-    touch text characters."""
+def _render_preamble(figure_bearing: bool = True) -> tuple[list[str], list[str]]:
+    """The preamble a render emits -- for a figure-bearing paper (font policy: Times text and
+    math) or a figure-less one (Latin Modern) -- minus any package this TeX install cannot load
+    (returned second, so a failure says which were dropped). Skips when an essential package
+    (one the claim rests on, the text typeface included) cannot be loaded."""
     spec, claims, evidence = _basic_record()
-    figure = ImageFigureSpec(kind="image", id="fig-a", caption="A caption.", image="a.png")
-    tex = render_paper_latex(spec, claims, evidence, figures=[figure])
+    figures = (
+        [ImageFigureSpec(kind="image", id="fig-a", caption="A caption.", image="a.png")]
+        if figure_bearing
+        else []
+    )
+    tex = render_paper_latex(spec, claims, evidence, figures=figures)
     kept: list[str] = []
     dropped: list[str] = []
     for line in tex[: tex.index(r"\begin{document}")].splitlines():
         m = _USEPACKAGE_RE.search(line)
-        missing = [p.strip() for p in m.group(1).split(",") if not _installed(p.strip())] if m else []
+        missing = [p.strip() for p in m.group(1).split(",") if not _loadable(p.strip())] if m else []
         if missing:
             dropped.extend(missing)
             continue
         kept.append(line)
-    if _ESSENTIAL & set(dropped):
-        pytest.skip(f"this TeX install lacks {sorted(_ESSENTIAL & set(dropped))}")
+    essential = _ESSENTIAL | _ESSENTIAL_FONTS[figure_bearing]
+    if essential & set(dropped):
+        pytest.skip(f"this TeX install cannot load {sorted(essential & set(dropped))}")
     return kept, dropped
 
 
@@ -925,10 +946,13 @@ def _log_errors(log: str) -> list[str]:
     return errors
 
 
-def _compile_with_bib(tmp_path: Path, bib: str) -> tuple[list[str], str, list[str]]:
-    """``\\nocite{*}`` over ``bib`` with the render's preamble and plainnat, as Overleaf runs
-    it (pdflatex, bibtex, pdflatex twice). Returns (errors, .bbl text, dropped packages)."""
-    preamble, dropped = _render_preamble()
+def _compile_with_bib(
+    tmp_path: Path, bib: str, figure_bearing: bool = True
+) -> tuple[list[str], str, list[str]]:
+    """``\\nocite{*}`` over ``bib`` with the render's preamble (figure-bearing: Times;
+    figure-less: Latin Modern) and plainnat, as Overleaf runs it (pdflatex, bibtex, pdflatex
+    twice). Returns (errors, .bbl text, dropped packages)."""
+    preamble, dropped = _render_preamble(figure_bearing)
     (tmp_path / "references.bib").write_text(bib, encoding="utf-8")
     body = [r"\begin{document}", r"\nocite{*}", r"\bibliographystyle{plainnat}",
             r"\bibliography{references}", r"\end{document}"]
@@ -952,16 +976,26 @@ def _compile_with_bib(tmp_path: Path, bib: str) -> tuple[list[str], str, list[st
     return errors, bbl, dropped
 
 
+_PREAMBLES = pytest.mark.parametrize(
+    "figure_bearing", [False, True], ids=["latin-modern", "times"]
+)
+
+
 @needs_tex
-def test_every_character_typesettable_accepts_compiles_with_the_render_preamble(tmp_path):
+@_PREAMBLES
+def test_every_character_typesettable_accepts_compiles_with_the_render_preamble(
+    tmp_path, figure_bearing
+):
     # Every non-ASCII character typesettable() accepts, plus printable ASCII that is not LaTeX
-    # markup, one per line, in a document with the preamble a render emits.
+    # markup, one per line, in a document with the preamble a render emits: Latin Modern for
+    # a figure-less paper, Times (newtxtext + newtxmath) for a figure-bearing one. A missing
+    # glyph ("Missing character" in the log) counts as a failure.
     markup = set("\\{}$&#^_~%")
     accepted = [
         chr(c) for c in range(sys.maxunicode + 1)
         if (c >= 0x80 or 0x20 < c < 0x7F) and chr(c) not in markup and typesettable(chr(c))
     ]
-    preamble, dropped = _render_preamble()
+    preamble, dropped = _render_preamble(figure_bearing)
     first = len(preamble) + 2  # the line number of the first character
     lines = preamble + [r"\begin{document}"] + [f"{ch}\\par" for ch in accepted] + [
         r"\end{document}"
@@ -985,20 +1019,24 @@ def test_typesettable_rejects_the_ascii_controls_pdflatex_refuses():
 
 
 @needs_tex
-def test_the_copy_of_the_trial_run_bib_compiles_with_bibtex_and_plainnat(tmp_path):
+@_PREAMBLES
+def test_the_copy_of_the_trial_run_bib_compiles_with_bibtex_and_plainnat(
+    tmp_path, figure_bearing
+):
     # tests/fixtures/bib_trial2/references.bib: the trial run's literature/references.bib
     # (lit-search-trial-2, SPEC-BCFKOW-001; 40 entries as paperforge wrote them), copied
     # 2026-10-10. Its oki2005 title holds U+2212, which stopped the manuscript's compile.
     store = _TRIAL_BIB.read_text(encoding="utf-8")
     copy = latex_safe_bib(store)
     assert bib_latex_safety_problems(copy) == []
-    errors, bbl, dropped = _compile_with_bib(tmp_path, copy)
+    errors, bbl, dropped = _compile_with_bib(tmp_path, copy, figure_bearing)
     assert errors == [], f"{errors[:10]} (packages dropped as not installed: {dropped})"
     assert set(re.findall(r"\\bibitem\[[^\]]*\]\{([^}]+)\}", bbl)) == set(bib_keys(store))
 
 
 @needs_tex
-def test_the_copy_of_the_hard_cases_compiles_with_bibtex_and_plainnat(tmp_path):
+@_PREAMBLES
+def test_the_copy_of_the_hard_cases_compiles_with_bibtex_and_plainnat(tmp_path, figure_bearing):
     # The characters OT1 cannot typeset, accent commands, entities, the specials and verbatim
     # url/doi values, through bibtex + plainnat with the render's preamble.
     entries = [
@@ -1022,16 +1060,22 @@ def test_the_copy_of_the_hard_cases_compiles_with_bibtex_and_plainnat(tmp_path):
     ]
     copy = latex_safe_bib("\n\n".join(entries) + "\n")
     assert bib_latex_safety_problems(copy) == []
-    errors, bbl, dropped = _compile_with_bib(tmp_path, copy)
+    errors, bbl, dropped = _compile_with_bib(tmp_path, copy, figure_bearing)
+    assert errors == [], f"{errors[:10]} (packages dropped as not installed: {dropped})"
+    assert len(re.findall(r"\\bibitem", bbl)) == 8
+    # The reference-list copy render writes (name letters as commands, case protection, no
+    # ISSN) of the same hard cases compiles too.
+    errors, bbl, dropped = _compile_with_bib(tmp_path, paper_bib(copy), figure_bearing)
     assert errors == [], f"{errors[:10]} (packages dropped as not installed: {dropped})"
     assert len(re.findall(r"\\bibitem", bbl)) == 8
 
 
 @needs_tex
-def test_a_zotero_shaped_entry_compiles_as_it_is(tmp_path):
+@_PREAMBLES
+def test_a_zotero_shaped_entry_compiles_as_it_is(tmp_path, figure_bearing):
     # Verify passes it (above) because no style prints abstract, keywords, file, annote or
     # timestamp; this shows the uncopied entry compiles, so the pass is not a blind spot.
-    errors, bbl, dropped = _compile_with_bib(tmp_path, _ZOTERO)
+    errors, bbl, dropped = _compile_with_bib(tmp_path, _ZOTERO, figure_bearing)
     assert errors == [], f"{errors[:10]} (packages dropped as not installed: {dropped})"
     assert "\\bibitem" in bbl and "PFAS" in bbl and "Zotero" not in bbl
 

@@ -11,6 +11,8 @@ byte-identical to today).
 
 from __future__ import annotations
 
+import hashlib
+
 from sci_adk.render.reproduction import (
     ReproListing,
     listing_inlinable,
@@ -120,23 +122,27 @@ class TestListingInlinable:
 # ---------------------------------------------------------------------------
 
 class TestReproduceDriver:
-    def test_driver_runs_scripts_via_docker_executor(self):
+    def test_driver_lists_and_hash_checks_scripts_and_runs_none(self):
+        # The record holds no argv / input mapping, so the driver runs nothing: it lists
+        # the shipped script with its hash (stdlib only -- no sci-adk, no docker).
         out = render_reproduce_driver([_SCRIPT], "t-run")
-        assert "from sci_adk.runner.docker_executor import DockerExecutor" in out
-        assert "execute_python" in out
-        # The real recorded ref + co-located filename are referenced (no fabrication).
+        assert "DockerExecutor" not in out
+        assert "execute_python" not in out
+        assert "sci_adk" not in out
+        sha = hashlib.sha256(_SCRIPT.text.encode("utf-8")).hexdigest()
+        # The real recorded ref + co-located filename + its hash are listed (no fabrication).
         assert repr(_SCRIPT.code_ref) in out
-        assert repr(_SCRIPT.filename) in out
-        assert "t-run" in out
+        assert f"({_SCRIPT.filename!r}, {sha!r}, False)" in out
+        assert "t-run" in out.split("Machine section", 1)[1]
+        assert "runs none of the scripts it lists" in out
 
-    def test_driver_documents_pointer_commit_does_not_execute_it(self):
+    def test_driver_lists_pointer_commit_and_ships_nothing(self):
         out = render_reproduce_driver([_POINTER], "t-run")
-        # The pointer's real commit ref is documented for manual checkout.
+        # The pointer's real commit ref is listed for the reader.
         assert repr(_POINTER.code_ref) in out
-        # It lands in POINTERS (documented), not SCRIPTS (executed).
-        assert "POINTERS = [" in out
-        # An all-pointer run honestly says it cannot execute.
-        assert "SCRIPTS = [\n]" in out or "SCRIPTS = []" in out
+        # An all-pointer run ships no script and says so.
+        assert "SCRIPTS = [\n]" in out
+        assert "No script is shipped with this paper" in out
 
     def test_driver_references_only_recorded_refs(self):
         # No code_ref other than the two given may appear anywhere in the driver.

@@ -202,11 +202,12 @@ record — that is the failure this split exists to prevent.
   frozen contract, so the Stop hook blocks the end of the session.
 - **Session B (a NEW top-level session)** is the one running `/sci publish` for the
   paper, and its input is `runs/<id>/record.tex` — not this conversation. It spawns
-  `expert-writer` to author the paper (step 2): the writer authors a `prose.json`, runs
-  `sci-adk numbers draft <run> --prose prose.json` and completes
+  `expert-writer` to author the paper (step 2): the writer authors a `prose.json` (and an
+  `si.json` when the paper has an SI), runs
+  `sci-adk numbers draft <run> --prose prose.json [--si si.json]` and completes
   `runs/<id>/numbers.json` (every number the paper states, bound to its recorded
-  source), runs `sci-adk render <run> --prose prose.json`, records the conclusions in
-  `declarations.json`, and runs `sci-adk verify`. Once that passes, Session B — the
+  source), runs `sci-adk render <run> --prose prose.json [--si si.json]`, records the
+  conclusions in `declarations.json`, and runs `sci-adk verify`. Once that passes, Session B — the
   session driving `/sci publish` — runs the audit itself (step 5 below): it spawns the
   readers and refuters and writes the audit file, and the writer revises from that
   file. A number with no recorded home comes back to the experiment stage — the paper
@@ -232,10 +233,13 @@ the engine can catch it.
    ONLY if the user declines declared requirements (the gate is then vacuously clean —
    backward compatible). A frozen requirement's gate-bearing fields are immutable;
    relaxing one after a figure fails needs an explicit re-freeze (anti-moving-the-goalposts).
-2. `Agent(subagent_type: "expert-writer")` → author `PaperProse` / `SIProse` /
+2. `Agent(subagent_type: "expert-writer")` → author `PaperProse` / `AuthoredSI` /
    `FigureSpec` hooks (figures pull `y` FROM Evidence by `evidence_id`) authoring TO
    the frozen `pubreqs.json` contract (declared sections present, font policy, length
-   limits) → `sci-adk render` → `paper/{draft.tex, si.tex, figures/, references.bib}`
+   limits) → `sci-adk render` → `paper/draft.tex`, `paper/figures/`,
+   `paper/references.bib`, and `paper/si.tex` only from an authored `--si si.json` (the
+   SI is written like the paper; the record dump is re-deposited at
+   `runs/<id>/record.tex`, outside `paper/`)
    + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`). Pass the frozen
    `pubreqs.json` path in the spawn prompt. The writer ALSO records the paper's
    conclusions in `runs/<id>/declarations.json` — per conclusion, the hypothesis, the

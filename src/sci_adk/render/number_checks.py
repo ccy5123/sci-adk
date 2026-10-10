@@ -15,7 +15,9 @@ against the text and the record, and none of them reads meaning:
      matched by every value within an absolute 1e-9. A derived entry is recomputed from
      its operands by the safe evaluator; a ``spec_text`` literal must be written as a
      standalone number IN the field it names; a citation year must equal the bib field.
-     Identifier entries skip resolution.
+     Identifier entries skip resolution. A literal beyond a float (``1081e637``) never
+     matches a value, and a date-time (``2026-10-08T10:03:39Z``) names no recorded value
+     whatever its source: both fail with a request to declare them identifiers.
   3. Stale entries (ADVISORY): an entry whose text (inside its context) no longer occurs
      in its document, or whose document is not rendered.
   4. Identifiers (ADVISORY): every identifier entry is listed, so each exemption is seen.
@@ -37,6 +39,7 @@ src/sci_adk/render/declaration_checks.py (the sibling checks over the conclusion
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -57,6 +60,7 @@ from sci_adk.render.number_literals import (
     canonical_text,
     find_literals,
     find_text_literals,
+    is_date_time,
     parse_literal_text,
 )
 from sci_adk.render.paper import _latex_sanitize_prose
@@ -99,11 +103,27 @@ def fmt_value(value: float) -> str:
 
 
 def printed_match(value: float, literal: NumberLiteral) -> bool:
-    """True iff ``value`` rounded to the literal's printed precision equals the literal."""
-    if literal.value is None or literal.decimals is None:
+    """True iff ``value`` rounded to the literal's printed precision equals the literal.
+
+    False, never an OverflowError, for a literal with no finite value or a precision
+    coarser than any float (``0e999``: a tolerance of 10**999).
+    """
+    if literal.value is None or literal.decimals is None or not math.isfinite(literal.value):
         return False
-    tolerance = 0.5 * 10.0 ** (-literal.decimals)
+    try:
+        tolerance = 0.5 * 10.0 ** (-literal.decimals)
+    except OverflowError:
+        return False
     return abs(float(value) - literal.value) <= tolerance * (1 + 1e-9)
+
+
+def _not_finite(literal: NumberLiteral) -> bool:
+    """True iff the literal is one number written in full but beyond a float (``1081e637``),
+    as opposed to joined digit groups (``17109-49-8``), which do not parse at all."""
+    try:
+        return not math.isfinite(float(literal.text.replace(",", "")))
+    except ValueError:
+        return False
 
 
 def _finding_data(item: EvidenceItem, path: str) -> Any:
@@ -344,10 +364,16 @@ def _resolution_reason(entry: NumberEntry, record: NumberRecord,
                 f"alone, without a unit or '%'")
     if entry.role == "identifier":
         return None
+    if is_date_time(literal.text):
+        return (f"{literal.text} is a date-time, not a quantity: no recorded field holds a "
+                f"time of day -- declare it as an identifier (role \"identifier\")")
     if entry.role == "citation":
         return _citation_reason(entry.source, literal, record)
     if entry.source is not None and entry.source.kind == "spec_text":
         return _spec_text_reason(entry.source, literal, record)
+    if literal.value is None and _not_finite(literal):
+        return (f"{literal.text} is not a finite number -- declare it as an identifier "
+                f"(role \"identifier\")")
     if literal.value is None:
         return (f"{literal.text} is joined digit groups, not one number -- declare it role "
                 f"\"identifier\", or give a spec_text source where it is written")
@@ -373,14 +399,14 @@ def resolution_problems(numbers: NumberList, record: NumberRecord) -> List[str]:
 
 # -- 3. stale entries and 4. identifiers (advisory) --------------------------------
 
-def stale_entries(numbers: NumberList, documents: Mapping[str, str]) -> List[str]:
-    """Check 3 (advisory): entries that no longer describe anything in the document."""
+def _stale_indexes(numbers: NumberList, documents: Mapping[str, str]) -> List[int]:
+    """The indexes of the entries whose text (inside their context, if any) no longer
+    occurs in their document. Entries for a document not in ``documents`` are not stale --
+    they are not checked against any text."""
     literals = _literals(documents)
-    lines: List[str] = []
-    absent: Dict[str, int] = {}
+    stale: List[int] = []
     for index, entry in enumerate(numbers.numbers):
         if entry.document not in documents:
-            absent[entry.document] = absent.get(entry.document, 0) + 1
             continue
         parsed = parse_literal_text(entry.text)
         if parsed is None:
@@ -390,11 +416,25 @@ def stale_entries(numbers: NumberList, documents: Mapping[str, str]) -> List[str
             spans = _context_spans(entry.context, documents[entry.document])
             matches = [lit for lit in matches if _inside(lit, spans)]
         if not matches:
-            where = " inside its context" if entry.context is not None else ""
-            lines.append(
-                f"{_label(index, entry)} matches no number in {entry.document}{where} -- "
-                f"remove it, or correct its text or context."
-            )
+            stale.append(index)
+    return stale
+
+
+def stale_entries(numbers: NumberList, documents: Mapping[str, str]) -> List[str]:
+    """Check 3 (advisory): entries that no longer describe anything in the document --
+    leftovers of an earlier text, which can be deleted."""
+    lines: List[str] = []
+    for index in _stale_indexes(numbers, documents):
+        entry = numbers.numbers[index]
+        where = " inside its context" if entry.context is not None else ""
+        lines.append(
+            f"{_label(index, entry)} matches no number in {entry.document}{where} -- a "
+            f"leftover from an earlier text: delete it (or correct its text or context)."
+        )
+    absent: Dict[str, int] = {}
+    for entry in numbers.numbers:
+        if entry.document not in documents:
+            absent[entry.document] = absent.get(entry.document, 0) + 1
     for document, count in absent.items():
         noun = "entry names" if count == 1 else "entries name"
         lines.append(
@@ -404,11 +444,17 @@ def stale_entries(numbers: NumberList, documents: Mapping[str, str]) -> List[str
     return lines
 
 
-def identifier_listing(numbers: NumberList) -> List[str]:
-    """Check 4 (advisory): one line per identifier entry -- every exemption is visible."""
+def identifier_listing(
+    numbers: NumberList, documents: Optional[Mapping[str, str]] = None
+) -> List[str]:
+    """Check 4 (advisory): one line per identifier entry -- every exemption is visible.
+
+    Given the documents, a stale identifier entry (check 3 already names it as a leftover)
+    is not listed again."""
+    stale = set(_stale_indexes(numbers, documents)) if documents is not None else set()
     lines = []
-    for entry in numbers.numbers:
-        if entry.role != "identifier":
+    for index, entry in enumerate(numbers.numbers):
+        if entry.role != "identifier" or index in stale:
             continue
         context = f" (context: \"{entry.context}\")" if entry.context else ""
         lines.append(
@@ -433,7 +479,7 @@ def number_list_checks(
     the identifier listing) is surfaced and never gates.
     """
     problems = coverage_problems(numbers, documents) + resolution_problems(numbers, record)
-    advisory = stale_entries(numbers, documents) + identifier_listing(numbers)
+    advisory = stale_entries(numbers, documents) + identifier_listing(numbers, documents)
     return problems, advisory
 
 

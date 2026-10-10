@@ -9,6 +9,7 @@ checkpoints (the zero-cost LLM model: surfaced for an in-session verdict, not
 judged autonomously).
 """
 
+import hashlib
 import json
 
 from datetime import datetime, timezone
@@ -278,12 +279,12 @@ def test_f3_bare_commit_is_pointer_no_file_no_error(tmp_path):
     assert r"\begin{lstlisting}" not in si
     # No co-located code file for a bare commit (fail-open).
     assert not (paper_dir / "code").exists()
-    # reproduce.py is still written and documents the commit (never executes it).
+    # reproduce.py is still written and lists the commit (it ships and runs no script).
     repro = paper_dir / "reproduce.py"
     assert repro.exists()
     repro_text = repro.read_text(encoding="utf-8")
     assert commit in repro_text
-    assert "POINTERS = [" in repro_text
+    assert "SCRIPTS = [\n]" in repro_text
     # It must be valid Python.
     compile(repro_text, "reproduce.py", "exec")
 
@@ -323,11 +324,13 @@ def test_f3_resolvable_script_inlined_colocated_and_driven(tmp_path):
     assert colocated.exists()
     assert colocated.read_text(encoding="utf-8") == "print('reproduced')\n"
 
-    # reproduce.py references the script + its filename, and is valid Python.
+    # reproduce.py lists the script + its filename + its hash (it runs nothing: the record
+    # holds no arguments or inputs for it), and is valid Python.
     repro_text = (paper_dir / "reproduce.py").read_text(encoding="utf-8")
     assert "encode.py" in repro_text
     assert script_rel in repro_text  # the real recorded code_ref
-    assert "execute_python" in repro_text
+    assert hashlib.sha256(b"print('reproduced')\n").hexdigest() in repro_text
+    assert "execute_python" not in repro_text
     compile(repro_text, "reproduce.py", "exec")
 
     # The main paper stays tool-agnostic: no code listing leaks into draft.tex.

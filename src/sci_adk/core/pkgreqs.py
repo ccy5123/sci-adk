@@ -75,7 +75,8 @@ class PackageReqs(BaseModel):
             ``\\section{...}``; "Abstract" also accepts ``\\begin{abstract}``). The IMRaD
             default is :data:`DEFAULT_REQUIRED_SECTIONS`.
         figure_font_policy: F2 font policy on/off -- when on, a figure-bearing package
-            ``main.tex`` must carry the F2 font preamble (newtxmath + helvet). Mirrors
+            ``main.tex`` must carry the F2 font preamble (newtxtext + newtxmath + helvet:
+            Times text and math, Arial-compatible sans). Mirrors
             :class:`sci_adk.core.pubreqs.PubReqs`. Default True.
         image_min_dpi: the raster (image) figure minimum effective DPI checked over the
             package ``main.tex`` figures; None disables the DPI gate. Mirrors PubReqs.

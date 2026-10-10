@@ -16,8 +16,8 @@ The checkers (design §1.3 table):
   - :func:`required_sections_problems` -- each named section present as a ``\\section{...}``
     in draft.tex (Abstract also accepts ``\\begin{abstract}``);
   - :func:`figure_font_policy_problems` -- a figure-bearing document carries the F2 font
-    preamble (the REAL tokens the F2 commit emits: ``newtxmath`` + ``[scaled]helvet``); a
-    figure-LESS document is vacuously clean (the policy is N/A);
+    preamble (the packages render emits: ``newtxtext`` + ``newtxmath`` + ``[scaled]helvet``);
+    a figure-LESS document is vacuously clean (the policy is N/A);
   - :func:`image_dpi_problems` -- every raster ``\\includegraphics`` is >= the threshold
     effective DPI; vector PDF/EPS are skipped (no fixed DPI);
   - :func:`reference_style_problems` -- the declared bib style is wired in draft.tex;
@@ -153,11 +153,29 @@ def section_order_problems(tex: str, reference_order: List[str]) -> List[str]:
 # .tex, exactly as the other paper gates are).
 _TIKZ_RE = re.compile(r"\\begin\{tikzpicture\}")
 _INCLUDEGRAPHICS_RE = re.compile(r"\\includegraphics")
-# The REAL F2 font tokens (git show 3dcb1dc): the math serif (Times-compatible) and the
-# scaled sans (Arial/Helvetica-compatible). A figure-bearing document missing EITHER fails
-# the font policy. We match the package names tolerantly to brace/option whitespace.
-_NEWTXMATH_RE = re.compile(r"\\usepackage(?:\[[^\]]*\])?\{newtxmath\}")
-_HELVET_RE = re.compile(r"\\usepackage(?:\[[^\]]*\])?\{helvet\}")
+# The F2 font packages render emits for a figure-bearing document, each with the problem line
+# naming it when absent: the Times-compatible text serif (newtxtext, so body text and
+# equations are one typeface), the Times-compatible math serif (newtxmath) and the scaled
+# Arial/Helvetica-compatible sans (helvet). A package counts when a ``\usepackage`` outside a
+# comment loads it, alone or in a list (``\usepackage{newtxtext,newtxmath}``), with any options.
+_FONT_POLICY_PACKAGES = (
+    ("newtxtext", r"\usepackage{newtxtext} (the Times-compatible text serif, F2)"),
+    ("newtxmath", r"\usepackage{newtxmath} (the Times-compatible math serif, F2)"),
+    ("helvet", r"\usepackage[scaled]{helvet} (the Arial-compatible sans, F2)"),
+)
+_USEPACKAGE_RE = re.compile(r"\\usepackage\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}")
+_TEX_COMMENT_RE = re.compile(r"(?<!\\)%.*")
+
+
+def _loaded_packages(tex: str) -> set:
+    """The package names ``tex`` loads with ``\\usepackage`` (comments ignored). PURE."""
+    body = _TEX_COMMENT_RE.sub("", tex)
+    return {
+        name.strip()
+        for m in _USEPACKAGE_RE.finditer(body)
+        for name in m.group(1).split(",")
+        if name.strip()
+    }
 
 
 def is_figure_bearing(tex: str) -> bool:
@@ -174,11 +192,13 @@ def figure_font_policy_problems(tex: str) -> List[str]:
     """Confirm the F2 font preamble is present for a figure-bearing document (design §2).
 
     PURE + deterministic. For a figure-bearing document the render-time policy emits the
-    Times-compatible math serif (``newtxmath``) and the Arial-compatible sans
-    (``[scaled]{helvet}``); a hand-edited ``.tex`` that strips either bypasses the policy and
-    fails this gate (the render-time + verify-gate pairing the reframe uses). A figure-LESS
-    document is vacuously clean -- the policy is N/A (no figures to set the font of). Returns
-    the missing-package problem lines (empty = clean).
+    Times-compatible text serif (``newtxtext``, in place of ``lmodern``) and math serif
+    (``newtxmath``) and the Arial-compatible sans (``[scaled]{helvet}``); a hand-edited
+    ``.tex`` that strips any of them bypasses the policy and fails this gate (the render-time +
+    verify-gate pairing the reframe uses) -- including a preamble that keeps Latin Modern text
+    beside Times math (no ``newtxtext``). A figure-LESS document is vacuously clean -- the
+    policy is N/A (no figures to set the font of). Returns the missing-package problem lines
+    (empty = clean).
 
     The font INSIDE a raster image is out of scope (a baked-in bitmap font is not
     deterministically checkable) -- the policy covers the engine-rendered NATIVE figures'
@@ -186,18 +206,12 @@ def figure_font_policy_problems(tex: str) -> List[str]:
     """
     if not is_figure_bearing(tex):
         return []
-    problems: List[str] = []
-    if not _NEWTXMATH_RE.search(tex):
-        problems.append(
-            "figure font policy: a figure-bearing document is missing "
-            r"\usepackage{newtxmath} (the Times-compatible math serif, F2)"
-        )
-    if not _HELVET_RE.search(tex):
-        problems.append(
-            "figure font policy: a figure-bearing document is missing "
-            r"\usepackage[scaled]{helvet} (the Arial-compatible sans, F2)"
-        )
-    return problems
+    loaded = _loaded_packages(tex)
+    return [
+        f"figure font policy: a figure-bearing document is missing {line}"
+        for package, line in _FONT_POLICY_PACKAGES
+        if package not in loaded
+    ]
 
 
 # -- F2 raster (image) DPI gate ----------------------------------------------

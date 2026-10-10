@@ -52,6 +52,8 @@ from sci_adk.render.bib_latex import (
     field_value_spans,
     html_tags,
     printed_field,
+    raw_sort_letter,
+    sort_letter_command,
     stray_math_dollar,
     undefined_month_tokens,
     untypesettable_chars,
@@ -574,6 +576,41 @@ def bib_month_advisories(
     return sorted(lines)
 
 
+def bib_sort_advisories(
+    tex: str, bib: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> List[str]:
+    """Advisory lines (never a failure) for each entry ``tex`` cites whose first author (the
+    first editor when it has no author) BibTeX sorts by a raw non-ASCII letter
+    (:func:`bib_latex.raw_sort_letter`): plainnat lists it after the names that start with Z.
+    Render's reference-list copy writes every letter that has a command BibTeX sorts by its base
+    letter that way, so in a rendered paper only Ð Þ Đ Ŋ remain; a package bib is copied
+    unchanged, so the advice names the command and ``package_source`` when there is one. PURE."""
+    cited = set(cited_keys(tex))
+    lines: List[str] = []
+    for m in _BIB_ENTRY_BODY_RE.finditer(bib):
+        key, body = m.group(1).strip(), m.group(2)
+        if key not in cited:
+            continue
+        values: dict[str, str] = {}
+        for name, start, end in field_value_spans(body):
+            values.setdefault(name, body[start:end])
+        names = values.get("author") or values.get("editor") or ""
+        letter = raw_sort_letter(names)
+        if letter is None:
+            continue
+        command = sort_letter_command(letter)
+        fix = ""
+        if command is not None:
+            where = f" in {package_source}" if package_source else ""
+            fix = f" -- write it as {command}{where}, which sorts with its base letter"
+        lines.append(
+            f"bib sort: {source} entry '{key}': the first name starts with {letter}, which "
+            f"BibTeX sorts after every ASCII letter, so the reference list prints the entry "
+            f"after the names that start with Z{fix}"
+        )
+    return sorted(lines)
+
+
 # -- abstract word count -----------------------------------------------------
 
 # The \begin{abstract}...\end{abstract} body (the venue abstract whose length venues cap).
@@ -778,6 +815,7 @@ __all__ = [
     "bib_keys",
     "bib_latex_safety_problems",
     "bib_month_advisories",
+    "bib_sort_advisories",
     "bibliography_stems",
     "font_encoding_problems",
     "cite_resolution_problems",

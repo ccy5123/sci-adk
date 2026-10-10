@@ -8,6 +8,7 @@ arguments of \\ref / \\cite / \\label / \\includegraphics ..., the verbatim span
 definitions) and a few lexical rules that do not depend on the field:
 
   - digits joined by hyphens with no spaces are ONE literal (17109-49-8, 2026-10-08);
+  - an ISO-8601 date-time is ONE literal (2026-10-08T10:03:39Z), and a hex digest none;
   - an en dash / ``--`` between two numbers separates a range (the second is not negated);
   - a minus negates only when it is unary;
   - digits in a superscript or subscript are not literals; other numbers in math are;
@@ -24,6 +25,7 @@ import pytest
 from sci_adk.render.number_literals import (
     find_literals,
     find_text_literals,
+    is_date_time,
     parse_literal_text,
 )
 
@@ -222,3 +224,229 @@ def test_parse_literal_text_accepts_exactly_one_literal():
     assert parse_literal_text("95%") is None       # the literal is "95"
     assert parse_literal_text("0.7 to 1.0") is None
     assert parse_literal_text("R2") is None
+
+
+# --------------------------------------------------------------------------- #
+# checksums and other hex digests (the strings of run SPEC-BCFKOW-001)
+# --------------------------------------------------------------------------- #
+
+DRAFT_DECRYPTED = (
+    "The file is encrypted with Excel's built-in default key and was decrypted with "
+    "msoffcrypto-tool 6.0.0 before reading; the decrypted copy, which all steps read, has "
+    "SHA-256 1081e637f6bd39f9ba86d0e005cf657ea054ad302fd57e5d2e8d6841fd95c461. Records "
+    "were kept in this order")
+DRAFT_ORIGINAL = (
+    "received on 2026-10-08 (SHA-256 "
+    "d5f642bdaf3c69fa1cf5de3679a5f6d5ed920d8ca68cc8bd86aaece87dc7f8f0); it holds 6973 "
+    "records for 842 chemicals.")
+DRAFT_OPERA = (
+    r"(OPERA data release v2.9.5, file LogP\_QR.sdf, SHA-256 "
+    "de50a1eb020ae42f7f89f8cb7dd73987048e80f30ef32eeaf376451cb832e489, from "
+    r"OPERA\_Data.zip, SHA-256 "
+    "9dc5d6387201df0f66e9472b034aeaa09ef7a47f705b9b5f50d7c9af8a1aadc3, downloaded "
+    "2026-10-08 from github.com/kmansouri/OPERA); this applied to 5 chemicals.")
+SI_CHECKSUMS = (
+    r"The checksums of the data file (original \texttt{d5f642bdaf3c69fa}\allowbreak"
+    r"\texttt{1cf5de3679a5f6d5}\allowbreak\texttt{ed920d8ca68cc8bd}\allowbreak"
+    r"\texttt{86aaece87dc7f8f0}, decrypted copy \texttt{1081e637f6bd39f9}\allowbreak"
+    r"\texttt{ba86d0e005cf657e}\allowbreak\texttt{a054ad302fd57e5d}\allowbreak"
+    r"\texttt{2e8d6841fd95c461}) were recorded at")
+
+
+def test_a_checksum_in_prose_is_not_a_number():
+    # It used to read as 1081e637 (10^640, beyond a float) and as 9 -- fragments of a code.
+    assert texts(DRAFT_DECRYPTED) == ["6.0.0", "256"]
+    assert texts(DRAFT_ORIGINAL) == ["2026-10-08", "256", "6973", "842"]
+    assert texts(DRAFT_OPERA) == ["256", "256", "2026-10-08", "5"]
+
+
+def test_a_checksum_in_spec_text_is_not_a_number():
+    assert [lit.text for lit in find_text_literals(
+        "decrypted copy SHA-256 1081e637f6bd39f9ba86d0e005cf657e")] == ["256"]
+    assert parse_literal_text("1081e637f6bd39f9") is None
+
+
+def test_a_checksum_split_into_typewriter_pieces_is_not_a_number():
+    # The SI writes each checksum as \texttt pieces joined by \allowbreak.
+    assert texts(SI_CHECKSUMS) == []
+
+
+def test_a_piece_of_a_split_checksum_that_looks_like_a_number_is_part_of_it():
+    # Alone, 1234567e89012345 and 1081e637 read as numbers; joined to their neighbours by
+    # \allowbreak they are pieces of one checksum. Plain pieces join the same way.
+    assert texts(r"\texttt{a16a50d52c886585}\allowbreak\texttt{1234567e89012345}") == []
+    assert texts(r"1081e637\allowbreak f6bd39f9ba86d0e0") == []
+    assert texts(r"\texttt{1081e637\allowbreak f6bd39f9}") == []
+    # A space is not a join: two words, and the second is a number.
+    assert texts("3fa7c9b0e1 1234567") == ["1234567"]
+
+
+@pytest.mark.parametrize("tex,expected", [
+    ("code 3fa7c9b0e1 here", []),             # >= 7 hex characters, a digit and a letter
+    ("lot 12ab34c", []),                      # exactly seven
+    ("lot 12ab34", ["12"]),                   # six: too short to be a digest
+    ("1234567 rows", ["1234567"]),            # no letter: a number
+    ("12345e6 m", ["12345e6"]),               # digits, e, digits: an exponent
+    ("fragment 1081e637", ["1081e637"]),      # the same shape (value: see below)
+    ("lot 12ab34cg", ["12"]),                 # g is not a hex character
+    ("1081E637F6BD39F9", []),                 # an upper-case digest
+    ("1081e637F6bd39F9", ["1081e637"]),       # mixed case is not one digest
+])
+def test_digest_rule_boundaries(tex, expected):
+    assert texts(tex) == expected
+
+
+def test_a_non_finite_literal_has_no_value():
+    (lit,) = find_literals("a lone fragment 1081e637 here")
+    assert lit.text == "1081e637"
+    assert lit.value is None and lit.decimals is None
+    assert parse_literal_text("1e999").value is None
+
+
+def test_typewriter_text_is_prose():
+    # \texttt is a font, not verbatim (it needs \_ like any prose): a seed or a size
+    # written as code is still a number the paper states. File names yield nothing.
+    tex = (r"50 positions are drawn without replacement with "
+           r"\texttt{numpy.random.default\_rng(20261008).choice(N, size=50, replace=False)}.")
+    assert texts(tex) == ["50", "20261008", "50"]
+    assert texts(r"produced by the script \texttt{s1\_select\_records.py}") == []
+    # A date-time written as code is one literal (see the date-time tests below).
+    assert texts(r"recorded at \texttt{2026-10-08T14:48:59Z}") == ["2026-10-08T14:48:59Z"]
+
+
+def test_a_version_with_a_leading_letter_is_not_a_literal():
+    # "v2.9.5" continues the word "v2", so no literal starts in it (the checks, the draft
+    # helper and the pattern audit all ignore it); written bare it is one dotted literal.
+    assert texts("OPERA data release v2.9.5") == []
+    (lit,) = find_literals("OPERA data release 2.9.5")
+    assert lit.text == "2.9.5" and lit.value is None
+
+
+# --------------------------------------------------------------------------- #
+# the digest rule leaves scientific notation alone
+# --------------------------------------------------------------------------- #
+# A mantissa of seven or more digits ends in a run like "2345678e" (digits, then the
+# exponent marker), which has a digit, a hex letter and one case -- the shape of a digest.
+# It is the tail of a number when it follows a decimal point, or the head of one when an
+# exponent follows it, and then it is not a digest.
+
+@pytest.mark.parametrize("number", [
+    "1.2345678e-3", "4.8765432e-05", "1.23456789E+10", "2.7182818e+2", "0.1234567e-2",
+    "2345678e-3",
+])
+def test_scientific_notation_with_a_long_mantissa_is_one_literal(number):
+    (lit,) = find_literals(f"the rate was {number} per day")
+    assert lit.text == number
+    assert lit.value == pytest.approx(float(number))
+    (plain,) = find_text_literals(f"rate {number}")
+    assert plain.text == number
+    assert parse_literal_text(number).value == pytest.approx(float(number))
+
+
+def test_a_long_mantissa_keeps_its_printed_precision():
+    (lit,) = find_literals("1.2345678e-3")
+    assert lit.decimals == 10
+
+
+def test_a_digest_ending_in_e_before_a_hyphen_is_still_a_digest():
+    # Only a run of digits then e/E is an exponent's mantissa; "3fa7c9b0e" is a code.
+    assert texts("lot 3fa7c9b0e-3 shipped") == ["3"]
+
+
+# --------------------------------------------------------------------------- #
+# ISO-8601 date-times (the strings of run SPEC-BCFKOW-001's si.tex)
+# --------------------------------------------------------------------------- #
+
+SI_PROTOCOL_V1 = (
+    r"Version 1 of the protocol was created at \texttt{2026-10-08T10:03:39Z}; its file has "
+    r"SHA-256 \texttt{4fa76e47b3048258}\allowbreak\texttt{1e1fe74dc4d9b77c}\allowbreak"
+    r"\texttt{a16a50d52c886585}\allowbreak\texttt{a9b399c5a767fa66}. The amendment (next "
+    r"section) stores this checksum for the version it replaced.")
+SI_AMENDMENT = (
+    r"The amendment was recorded at \texttt{2026-10-08T14:05:17Z}; its file has SHA-256 "
+    r"\texttt{9035bfa84e0e78f3}\allowbreak\texttt{4973036e14679fff}\allowbreak"
+    r"\texttt{89e7fa3e4f31336a}\allowbreak\texttt{1e8b6bc7e2c4cbb4}.")
+SI_RECORD_TIMES = (
+    r"The checksums of the data file (original \texttt{d5f642bdaf3c69fa}\allowbreak"
+    r"\texttt{1cf5de3679a5f6d5}\allowbreak\texttt{ed920d8ca68cc8bd}\allowbreak"
+    r"\texttt{86aaece87dc7f8f0}, decrypted copy \texttt{1081e637f6bd39f9}\allowbreak"
+    r"\texttt{ba86d0e005cf657e}\allowbreak\texttt{a054ad302fd57e5d}\allowbreak"
+    r"\texttt{2e8d6841fd95c461}) were recorded at \texttt{2026-10-08T14:48:59Z}. The first "
+    r"record selection on that file was recorded at \texttt{2026-10-08T14:49:19Z}, after "
+    r"the amendment. The time-stamped description of that selection, a file with SHA-256 "
+    r"\texttt{0aa8cb6baaad8231}\allowbreak\texttt{060ed879ceb7b931}\allowbreak"
+    r"\texttt{7113302f4e1d7686}\allowbreak\texttt{4bc229fc3497500e}, was produced by the "
+    r"script \texttt{s1\_select\_records.py} (SHA-256 \texttt{a5a9cab9c96805e3}\allowbreak"
+    r"\texttt{1e27db0a0e902900}\allowbreak\texttt{b328d2226aa93ff6}\allowbreak"
+    r"\texttt{87457bfccadcb68b}) from the decrypted copy. The sample for the code was "
+    r"recorded at \texttt{2026-10-08T16:53:12Z} and the slope fit at "
+    r"\texttt{2026-10-08T16:53:36Z}.")
+
+
+def test_a_date_time_in_the_si_is_one_literal():
+    # It used to split into 2026-10-08, 03, 39 -- and the draft helper matched 12 and 36
+    # to unrelated recorded counts.
+    assert texts(SI_PROTOCOL_V1) == ["1", "2026-10-08T10:03:39Z", "256"]
+    assert texts(SI_AMENDMENT) == ["2026-10-08T14:05:17Z", "256"]
+    assert texts(SI_RECORD_TIMES) == [
+        "2026-10-08T14:48:59Z", "2026-10-08T14:49:19Z", "256", "256",
+        "2026-10-08T16:53:12Z", "2026-10-08T16:53:36Z"]
+
+
+@pytest.mark.parametrize("stamp", [
+    "2026-10-08T10:03:39Z",
+    "2026-10-08T10:03:39",
+    "2026-10-08T10:03",
+    "2026-10-08T10:03Z",
+    "2026-10-08T10:03:39.125Z",
+    "2026-10-08T10:03:39+09:00",
+    "2026-10-08T10:03:39-05:00",
+    "2026-10-08T10:03:39+09",
+])
+def test_every_iso_date_time_form_is_one_literal_with_no_value(stamp):
+    (lit,) = find_literals(f"recorded at {stamp}, then 341 rows", "si.tex")[:1]
+    assert lit.text == stamp
+    assert lit.value is None and lit.decimals is None
+    assert [x.text for x in find_literals(f"at {stamp}, then 341 rows")] == [stamp, "341"]
+    assert [x.text for x in find_text_literals(f"created_at {stamp}")] == [stamp]
+    assert parse_literal_text(stamp).text == stamp
+
+
+def test_a_date_time_glued_to_a_word_is_not_one_and_reads_as_before():
+    assert texts("tag 2026-10-08T10:03:39Zabc here") == ["2026-10-08", "03", "39"]
+
+
+def test_a_bare_date_stays_one_joined_literal():
+    assert texts("received on 2026-10-08 from the authors") == ["2026-10-08"]
+    assert texts(r"received on \texttt{2026-10-08} and 2026-10-09") == [
+        "2026-10-08", "2026-10-09"]
+
+
+def test_is_date_time_names_the_literals_that_are_date_times():
+    assert is_date_time("2026-10-08T10:03:39Z")
+    assert is_date_time("2026-10-08T10:03:39.125+09:00")
+    assert not is_date_time("2026-10-08")
+    assert not is_date_time("0.769")
+    assert not is_date_time("10:03")
+
+
+# --------------------------------------------------------------------------- #
+# \allowbreak chains: only typewriter-length pieces join
+# --------------------------------------------------------------------------- #
+
+def test_a_short_hex_word_does_not_pull_a_number_into_a_digest():
+    # "abc" + "1234567" read as one run looks like a ten-character digest; "abc" is a
+    # word and 1234567 a number. A piece shorter than four characters never joins a chain.
+    assert texts(r"\texttt{abc}\allowbreak 1234567") == ["1234567"]
+    assert texts(r"\texttt{abc}\allowbreak\texttt{1234567}") == ["1234567"]
+    assert texts(r"1234567\allowbreak\texttt{ab}") == ["1234567"]
+
+
+def test_a_piece_beside_a_short_piece_is_judged_on_its_own():
+    # A short LAST piece after a hex piece of eight or more characters is the tail of the
+    # split digest (tests/test_numbers_names_and_stale.py); after a shorter piece, or before
+    # another piece, a short piece is read as it stands.
+    assert texts(r"\texttt{1081e637f6bd39f9}\allowbreak\texttt{12}") == []
+    assert texts(r"\texttt{4fa76e4}\allowbreak\texttt{12}") == ["12"]
+    assert texts(r"\texttt{1234567}\allowbreak\texttt{ab}\allowbreak\texttt{89abcdef}") == [
+        "1234567"]

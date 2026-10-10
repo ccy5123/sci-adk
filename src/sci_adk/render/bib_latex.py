@@ -5,8 +5,11 @@ Render copies the run's literature pool (``literature/references.bib``, as paper
 ingest wrote it) into ``paper/references.bib`` and the cited-only ``paper/references_SI.bib``.
 Registrar BibTeX (Crossref's metadata is XML-rooted) can carry HTML entities (``&amp;``), HTML
 markup (``<i>K</i>``) and characters pdflatex cannot typeset (U+2212 MINUS SIGN).
-:func:`latex_safe_bib` writes that copy in LaTeX. The pool itself is never rewritten here: its
-keys never change and the merge keeps old entries verbatim (``search/literature_merge.py``).
+:func:`latex_safe_bib` writes that copy in LaTeX; :func:`paper_bib`, what render writes, adds
+four changes to what plainnat prints (title case kept as acquired, no ISSN or URL repeating
+the DOI, no stray period after a given name, name letters BibTeX sorts by their base letter).
+The pool itself is never rewritten here: its keys never change and the merge keeps old entries
+verbatim (``search/literature_merge.py``).
 
 Only field values change; entry headers (keys), field names and the text between entries are
 copied as they are, except that a bare month name BibTeX does not define (``month = June``,
@@ -32,7 +35,9 @@ known HTML/XML tags (:data:`HTML_TAG_RE`) become LaTeX or are stripped, and any 
 
 Character policy, shared with the verify-side check (``pkgreqs_checks.bib_latex_safety_problems``
 via :func:`typesettable`). It assumes the preamble every sci-adk render emits: ``utf8`` inputenc,
-``T1`` fontenc and Latin Modern (``paper.T1_FONT_LINES``):
+``T1`` fontenc and Latin Modern (``paper.T1_FONT_LINES``) or, under the figure font policy,
+Times (``paper.TIMES_FONT_LINES``: newtxtext); a test compiles every accepted character with
+both:
 
 - printable ASCII, Latin-1 (U+00A0..U+00FF), Latin Extended-A up to ``paper._ACCENT_HI``
   (U+017E) except the few letters LaTeX defines no glyph for, and a short list of typographic
@@ -62,7 +67,8 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
-from typing import Iterator
+from typing import Iterator, NamedTuple
+from urllib.parse import unquote
 
 from sci_adk.render.paper import _ACCENT_HI, _UNICODE_MAP, _latex_escape
 
@@ -222,16 +228,16 @@ _BELOW_MARKS = frozenset("̧̨̣̦̱")
 
 
 # @MX:ANCHOR: [AUTO] The one character policy the bib copy, its verify check and the compile
-# test share; it assumes the preamble render emits (utf8 inputenc + T1 + lmodern).
+# test share; it assumes the preambles render emits (utf8 inputenc + T1 + lmodern or newtxtext).
 # @MX:REASON: callers: _char_to_latex here, pkgreqs_checks.bib_latex_safety_problems (verify),
-# the pdflatex tests that compile every character it accepts (T1) and pin T1_ONLY_CHARS (OT1)
-# -- widening it unmeasured breaks compiles that verify passed.
+# the pdflatex tests that compile every character it accepts (T1, both typefaces) and pin
+# T1_ONLY_CHARS (OT1) -- widening it unmeasured breaks compiles that verify passed.
 def typesettable(ch: str) -> bool:
-    """True iff pdflatex typesets ``ch`` with the preamble sci-adk emits (utf8 inputenc, T1,
-    Latin Modern). PURE.
+    """True iff pdflatex typesets ``ch`` with the preambles sci-adk emits (utf8 inputenc, T1,
+    Latin Modern or Times). PURE.
 
-    Every character accepted here is compiled by a test with the real render preamble; the ones
-    that need T1 rather than OT1 are :data:`T1_ONLY_CHARS`. ASCII control characters other than
+    Every character accepted here is compiled by a test with both real render preambles; the
+    ones that need T1 rather than OT1 are :data:`T1_ONLY_CHARS`. ASCII control characters other than
     tab, line feed and carriage return are refused: LaTeX reads them as invalid input.
     """
     cp = ord(ch)
@@ -464,27 +470,37 @@ def _value_end(bib: str, start: int) -> int:
     return header.start() if header else len(bib)
 
 
-def _field_parts(bib: str) -> list[tuple[str, int, int, bool]]:
-    """``(field name in lower case, start, end, delimited)`` of every part of every field value
-    in ``bib``: braced or quoted values (delimiters excluded, ``delimited`` True) and bare tokens
-    (numbers, macro names such as ``jun``; ``delimited`` False), ``#``-concatenated parts each
-    their own entry."""
-    parts: list[tuple[str, int, int, bool]] = []
+class _Field(NamedTuple):
+    """One field of a bib: its name in lower case, where the name starts, where the field ends
+    (just past the value's closing delimiter), and its value parts ``(start, end, delimited)``
+    -- see :func:`_field_parts`."""
+
+    name: str
+    start: int
+    end: int
+    parts: tuple[tuple[int, int, bool], ...]
+
+
+def _fields(bib: str) -> list[_Field]:
+    """Every ``name = value`` field in ``bib``, in order (see :func:`_field_parts`)."""
+    fields: list[_Field] = []
     pos = 0
     n = len(bib)
     while (m := _FIELD_NAME_RE.search(bib, pos)) is not None:
         name = m.group(1).lower()
         j = m.end()
+        parts: list[tuple[int, int, bool]] = []
         while True:
             if j < n and bib[j] in '{"':
                 end = _value_end(bib, j)
-                parts.append((name, j + 1, end, True))
+                parts.append((j + 1, end, True))
                 j = end + 1
             else:
                 end = _BARE_TOKEN_RE.match(bib, j).end()
                 if end > j:
-                    parts.append((name, j, end, False))
+                    parts.append((j, end, False))
                 j = end
+            field_end = min(j, n)
             k = j
             while k < n and bib[k].isspace():
                 k += 1
@@ -494,8 +510,21 @@ def _field_parts(bib: str) -> list[tuple[str, int, int, bool]]:
                     j += 1
                 continue
             break
+        fields.append(_Field(name, m.start(), field_end, tuple(parts)))
         pos = max(j, m.end())
-    return parts
+    return fields
+
+
+def _field_parts(bib: str) -> list[tuple[str, int, int, bool]]:
+    """``(field name in lower case, start, end, delimited)`` of every part of every field value
+    in ``bib``: braced or quoted values (delimiters excluded, ``delimited`` True) and bare tokens
+    (numbers, macro names such as ``jun``; ``delimited`` False), ``#``-concatenated parts each
+    their own entry."""
+    return [
+        (field.name, start, end, delimited)
+        for field in _fields(bib)
+        for start, end, delimited in field.parts
+    ]
 
 
 def field_value_spans(bib: str) -> list[tuple[str, int, int]]:
@@ -652,6 +681,401 @@ def latex_safe_bib(bib: str) -> str:
     return "".join(out)
 
 
+# -- the reference-list copy -------------------------------------------------------------------
+#
+# What plainnat prints from the LaTeX-safe copy, measured on the trial run's compiled list:
+# titles lowercased at brace level 0 (change.case$ "t"), an ISSN and a dx.doi.org URL beside
+# every DOI, a stray period after a given name ("Donald. Mackay."), and names with non-ASCII
+# letters sorted after "z" (BibTeX compares raw bytes). paper_bib() writes these four things
+# differently; nothing else changes.
+
+# Fields whose case plainnat (and the other natbib styles) change: a title; booktitle is
+# included for styles that treat it like one. journal is never case-changed.
+_CASE_FIELDS = frozenset({"title", "booktitle"})
+# Fields holding names, sorted and formatted by BibTeX's name functions.
+_NAME_FIELDS = frozenset({"author", "editor"})
+# Printed beside the DOI and of no use to a reader of the reference list.
+_OMITTED_FIELDS = frozenset({"issn"})
+
+# A doi.org / dx.doi.org link (the form Crossref puts in url), and a doi value's own prefix.
+_DOI_HOST = r"(?:https?://)?(?:dx\.|www\.)?doi\.org/"
+_DOI_LINK_RE = re.compile(r"\s*" + _DOI_HOST + r"(\S+?)\s*", re.IGNORECASE)
+_DOI_PREFIX_RE = re.compile(r"\s*(?:doi:\s*|" + _DOI_HOST + ")", re.IGNORECASE)
+
+# A control sequence: a control word, or a control symbol other than a brace (BibTeX counts
+# every brace, escaped or not, so ``\{`` opens a group for it).
+_CONTROL_SEQ_RE = re.compile(r"\\(?:[A-Za-z]+|[^{}A-Za-z])", re.DOTALL)
+# The control symbols that take the next letter as their argument (accents).
+_ACCENT_SYMBOLS = frozenset("'`^\"~=.")
+# The accent commands that are control words (cedilla, caron, double acute, breve, ogonek,
+# ring, dot below, bar below, tie).
+_ACCENT_WORDS = frozenset("cvHukrdbt")
+# What may follow an accent command as its unbraced argument: spaces, then one letter.
+_ACCENT_LETTER_RE = re.compile(r"\s*[A-Za-z]")
+_SPACE_RUN_RE = re.compile(r"\s*")
+# A run of letters and digits: the unit the case protection braces.
+_WORD_RUN_RE = re.compile(r"[^\W_]+")
+_ASCII_UPPER_RE = re.compile(r"[A-Z]")
+
+# Latin letters with no decomposition and a LaTeX command defined in OT1 and T1, which BibTeX's
+# purify$ reduces to their letters (\o -> o, \ss -> ss): what a name letter becomes so that it
+# sorts with its base letter. Ð Þ Đ Ŋ (T1-only commands) and Ħ Ŀ Ŧ (none) are kept as they are.
+_NAME_LETTER_CMD = {
+    "Æ": "AE", "æ": "ae", "Ø": "O", "ø": "o", "Œ": "OE", "œ": "oe", "ß": "ss",
+    "Ł": "L", "ł": "l", "ı": "i",
+}
+# A depth-0 " and " between two names (BibTeX matches it without regard to case), and the
+# comma and the spaces that divide one name into its parts.
+_NAME_SEPARATOR_RE = re.compile(r"\s+and\s+", re.IGNORECASE)
+_COMMA_RE = re.compile(",")
+_SPACES_RE = re.compile(r"\s+")
+# A given-name token: a capitalised word (or hyphenated words) and a period, standing alone.
+_GIVEN_TOKEN_RE = re.compile(r"(?<!\S)([^\W\d_]+(?:-[^\W\d_]+)*)\.(?=\s|$)")
+# Old given-name abbreviations that keep their period (two-letter ones, "Wm.", keep it anyway).
+_GIVEN_NAME_ABBREVIATIONS = frozenset(
+    {"Benj", "Chas", "Edw", "Geo", "Jas", "Jno", "Jos", "Jun", "Robt", "Saml", "Sen", "Thos"}
+)
+_VOWELS = frozenset("aeiouyAEIOUY")
+
+
+def _group_close(value: str, start: int) -> int:
+    """The index of the ``}`` closing the group that opens at ``value[start]`` (BibTeX counting:
+    every brace counts), or the last index when it never closes."""
+    depth = 0
+    for i in range(start, len(value)):
+        if value[i] == "{":
+            depth += 1
+        elif value[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(value) - 1
+
+
+def _math_end(value: str, start: int) -> int:
+    """The index just past the ``$`` or ``$$`` closing the math that opens at ``value[start]``,
+    or the end of ``value`` when it never closes."""
+    delimiter = "$$" if value.startswith("$$", start) else "$"
+    i = start + len(delimiter)
+    while i < len(value):
+        if value[i] == "\\":
+            i += 2
+            continue
+        if value.startswith(delimiter, i):
+            return i + len(delimiter)
+        i += 1
+    return len(value)
+
+
+def _case_unit_end(value: str, m: re.Match) -> int | None:
+    """The end of the unit that starts with the control sequence ``m`` (read at brace level 0)
+    and must be braced whole to keep its capitals, or None when ``m`` starts no such unit:
+
+    - an accent command and its unbraced letter (``\\"O``, ``\\" O``, ``\\v S``);
+    - a control word with an uppercase letter in its name (``\\LaTeX``, ``\\AE``, ``\\H``), with
+      the spaces TeX swallows after it and the brace groups following it as its arguments
+      (``\\LaTeX{}``, ``\\H{o}``), so bracing changes nothing TeX typesets.
+    """
+    name = m.group(0)[1:]
+    if name in _ACCENT_SYMBOLS or name in _ACCENT_WORDS:
+        letter = _ACCENT_LETTER_RE.match(value, m.end())
+        if letter is not None:
+            return letter.end()
+    if not (name[:1].isalpha() and _ASCII_UPPER_RE.search(name)):
+        return None
+    end = _SPACE_RUN_RE.match(value, m.end()).end()
+    while value.startswith("{", end):
+        end = _group_close(value, end) + 1
+        after = _SPACE_RUN_RE.match(value, end).end()
+        if not value.startswith("{", after):
+            break
+        end = after
+    return end
+
+
+def _protect_case(value: str, field_start: bool = True) -> str:
+    """``value`` (a title-like field value, or one ``#`` part of it) with the casing it gives
+    protected from BibTeX's case change, by braces only. PURE.
+
+    At brace level 0: a run of letters and digits holding an uppercase letter is braced, except
+    that the field's first character (``field_start``) is printed as it is anyway; math holding
+    an uppercase letter is braced; a group opening with a command (a BibTeX special character,
+    whose letters BibTeX lowercases) and holding an uppercase letter is braced once more. An
+    accent command with an unbraced capital letter, and a control word with a capital in its
+    name (:func:`_case_unit_end`), are braced twice the same way: BibTeX lowercases them letter
+    by letter (``\\latex`` is undefined), and once braced they would be a special character.
+    Other groups are protected already and are left alone, and so are the other command names
+    and the run such a command takes as its argument (bracing it would change the argument).
+    """
+    out: list[str] = []
+    i, n = 0, len(value)
+    after_command = False  # the next run may be the argument of the command just read
+    while i < n:
+        c = value[i]
+        if c == "\\" and (m := _CONTROL_SEQ_RE.match(value, i)) is not None:
+            end = _case_unit_end(value, m)
+            if end is not None:
+                unit = value[i:end]
+                out.append("{{" + unit + "}}" if _ASCII_UPPER_RE.search(unit) else unit)
+                after_command = False
+                i = end
+                continue
+            out.append(m.group(0))
+            symbol = m.group(0)[1:]
+            after_command = symbol[:1].isalpha() or symbol in _ACCENT_SYMBOLS
+            i = m.end()
+            continue
+        if c == "{":
+            close = _group_close(value, i)
+            group = value[i : close + 1]
+            if group.startswith("{\\") and _ASCII_UPPER_RE.search(group):
+                group = "{" + group + "}"
+            out.append(group)
+            after_command = False
+            i = close + 1
+            continue
+        if c == "$":
+            end = _math_end(value, i)
+            math = value[i:end]
+            out.append("{" + math + "}" if _ASCII_UPPER_RE.search(math) else math)
+            after_command = False
+            i = end
+            continue
+        m = _WORD_RUN_RE.match(value, i)
+        if m is not None:
+            run = m.group(0)
+            upper = any(
+                ch.isupper() for k, ch in enumerate(run) if not (field_start and i == 0 and k == 0)
+            )
+            out.append("{" + run + "}" if upper and not after_command else run)
+            after_command = False
+            i = m.end()
+            continue
+        out.append(c)
+        if not c.isspace():
+            after_command = False
+        i += 1
+    return "".join(out)
+
+
+def _depth0_split(value: str, pattern: re.Pattern) -> list[str]:
+    """``value`` split at the matches of ``pattern`` that lie at brace level 0, separators
+    kept at the odd indices. PURE."""
+    pieces: list[str] = []
+    depth = 0
+    last = 0
+    i = 0
+    while i < len(value):
+        c = value[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif depth == 0 and (m := pattern.match(value, i)) is not None and m.end() > i:
+            pieces += [value[last:i], m.group(0)]
+            last = i = m.end()
+            continue
+        i += 1
+    pieces.append(value[last:])
+    return pieces
+
+
+def _given_period(m: re.Match) -> str:
+    """A given-name token without its stray period, or as it is (an initial, an abbreviation)."""
+    words = m.group(1).split("-")
+    last = words[-1]
+    full_word = (
+        all(w[0].isupper() and w[1:].islower() for w in words if w)
+        and len(last) >= 3
+        and last not in _GIVEN_NAME_ABBREVIATIONS
+        and any(unicodedata.normalize("NFD", ch)[0] in _VOWELS for ch in last)
+    )
+    return m.group(1) if full_word else m.group(0)
+
+
+def _tidy_given_names(name: str) -> str:
+    """One name with the stray period after a full given name dropped (``Mackay, Donald.`` ->
+    ``Mackay, Donald``; ``Donald. Mackay`` -> ``Donald Mackay``); initials keep theirs. The given
+    part is what follows the last brace-level-0 comma, or every word but the last."""
+    parts = _depth0_split(name, _COMMA_RE)
+    if len(parts) > 1:
+        return "".join(parts[:-1]) + _GIVEN_TOKEN_RE.sub(_given_period, parts[-1])
+    words = _depth0_split(name, _SPACES_RE)
+    if len(words) < 3:  # a single word is a family name
+        return name
+    given = "".join(words[:-2])
+    return _GIVEN_TOKEN_RE.sub(_given_period, given) + "".join(words[-2:])
+
+
+def _name_letter(cluster: str) -> str:
+    """A non-ASCII letter of a name as the LaTeX BibTeX sorts by its base letter: accent
+    commands for a letter with marks over an ASCII letter, a letter command for æ ø ł ß ...;
+    anything else as it is."""
+    if cluster.isascii():
+        return cluster
+    if cluster in _NAME_LETTER_CMD:
+        return "{\\" + _NAME_LETTER_CMD[cluster] + "}"
+    decomposed = unicodedata.normalize("NFD", cluster)
+    if len(decomposed) > 1 and decomposed[0].isascii():
+        latex = _accent_commands(decomposed[0], decomposed[1:])
+        if latex is not None:
+            return latex
+    return cluster
+
+
+def _tidy_names(value: str) -> str:
+    """An author or editor value: each name's stray given-name period dropped, then its
+    non-ASCII letters (outside math and verbatim arguments) written as LaTeX commands. PURE."""
+    pieces = _depth0_split(value, _NAME_SEPARATOR_RE)
+    value = "".join(p if k % 2 else _tidy_given_names(p) for k, p in enumerate(pieces))
+    return "".join(
+        "".join(_name_letter(c) for c in _clusters(text)) if kind == "text" else text
+        for kind, text in _segments(value)
+    )
+
+
+def _starts_lowercase(word: str) -> bool:
+    """True iff the first letter of ``word`` outside command names is a-z: BibTeX's test for a
+    von word (it knows the case of ASCII letters only)."""
+    m = _WORD_RUN_RE.search(_CONTROL_SEQ_RE.sub("", word))
+    return m is not None and "a" <= m.group(0)[0] <= "z"
+
+
+def raw_sort_letter(names: str) -> str | None:
+    """The raw non-ASCII letter BibTeX sorts the first name of ``names`` (an author or editor
+    value) by, or None. PURE.
+
+    The natbib styles sort by the first name's von part, else its last name (``Last, First`` /
+    ``von Last, First``: what precedes the first brace-level-0 comma; ``First von Last``: the
+    first lowercase word but the last, else the last word), purified: braces dropped, a
+    command reduced to ASCII letters or nothing. A raw non-ASCII letter there sorts after every
+    ASCII letter, so the entry prints after the names that start with Z.
+    """
+    first = _depth0_split(names, _NAME_SEPARATOR_RE)[0].strip()
+    parts = _depth0_split(first, _COMMA_RE)
+    if len(parts) > 1:
+        sort_part = parts[0]
+    else:
+        words = [w for w in _depth0_split(first, _SPACES_RE)[::2] if w]
+        if not words:
+            return None
+        sort_part = next((w for w in words[:-1] if _starts_lowercase(w)), words[-1])
+    for ch in sort_part:
+        if ch == "\\":
+            return None  # a command: purify$ leaves ASCII letters, or nothing
+        if ch.isalnum():
+            return None if ch.isascii() else ch
+    return None
+
+
+def sort_letter_command(letter: str) -> str | None:
+    """The LaTeX for ``letter`` that BibTeX sorts by its base letter (what the reference-list
+    copy writes in a name: ``Š`` -> ``{\\v{S}}``, ``Ø`` -> ``{\\O}``), or None when there is none
+    (Ð Þ Đ Ŋ, whose T1 commands purify$ drops whole, and Ħ Ŧ Ŀ). PURE."""
+    latex = _name_letter(letter)
+    return None if latex == letter else latex
+
+
+def _normalised_doi(doi: str) -> str:
+    """A DOI without a leading ``doi:`` / doi.org prefix, percent-decoded, case-folded."""
+    prefix = _DOI_PREFIX_RE.match(doi)
+    return unquote(doi[prefix.end() :] if prefix else doi).strip().casefold()
+
+
+def _repeats_doi(url: str, doi: str | None) -> bool:
+    """True iff ``url`` is the doi.org / dx.doi.org link of ``doi`` (DOIs ignore case)."""
+    m = _DOI_LINK_RE.fullmatch(url)
+    return doi is not None and m is not None and _normalised_doi(m.group(1)) == _normalised_doi(doi)
+
+
+def _present_entry(body: str) -> str:
+    """One entry's fields (the text after ``@type{key,`` up to its closing brace) as the
+    reference list should print them (see :func:`paper_bib`)."""
+    fields = _fields(body)
+    if not fields:
+        return body
+    doi = next(
+        (body[f.parts[0][0] : f.parts[0][1]] for f in fields if f.name == "doi" and f.parts),
+        None,
+    )
+
+    def omitted(field: _Field) -> bool:
+        if field.name in _OMITTED_FIELDS:
+            return True
+        return (
+            field.name == "url"
+            and len(field.parts) == 1
+            and _repeats_doi(body[field.parts[0][0] : field.parts[0][1]], doi)
+        )
+
+    def text(field: _Field) -> str:
+        if field.name not in _CASE_FIELDS | _NAME_FIELDS:
+            return body[field.start : field.end]
+        out, pos = [], field.start
+        for k, (start, end, delimited) in enumerate(field.parts):
+            out.append(body[pos:start])
+            value = body[start:end]
+            if delimited:
+                value = (
+                    _protect_case(value, field_start=k == 0)
+                    if field.name in _CASE_FIELDS
+                    else _tidy_names(value)
+                )
+            out.append(value)
+            pos = end
+        out.append(body[pos : field.end])
+        return "".join(out)
+
+    # Each field keeps the separator written before it; the first field kept follows the
+    # header's own spacing, and what follows the last field (the closing layout) is kept.
+    out = [body[: fields[0].start]]
+    first = True
+    for k, field in enumerate(fields):
+        if omitted(field):
+            continue
+        if not first:
+            out.append(body[fields[k - 1].end : field.start])
+        out.append(text(field))
+        first = False
+    out.append(body[fields[-1].end :])
+    return "".join(out)
+
+
+# @MX:NOTE: [AUTO] What render writes into paper/ (references.bib and the SI subset); the store
+# keeps the acquired bytes and its keys. Verify's bib check still passes on it.
+def paper_bib(bib: str) -> str:
+    """The bibliography a rendered paper loads: :func:`latex_safe_bib` of ``bib``, written for
+    the reference list plainnat prints. PURE; keys never change; idempotent.
+
+    In every entry:
+
+    - ``title`` and ``booktitle`` keep the casing the source gives (:func:`_protect_case`):
+      "(BCF)", "OPERA models", "Connectivity III", "Matula numbers", "log Kow" print as
+      acquired instead of lowercased, and so do an unbraced accented capital (``\\"Osterreich``)
+      and a capitalised command (``\\LaTeX``, which lowercased is undefined);
+    - ``issn`` is omitted, and so is a ``url`` that is the doi.org / dx.doi.org link of the
+      entry's own ``doi`` (any other url stays; doi always stays);
+    - in ``author`` and ``editor``, a full given name loses a stray period ("Mackay, Donald."
+      -> "Mackay, Donald"; initials keep theirs), and a non-ASCII letter becomes LaTeX accent
+      or letter commands, so BibTeX sorts it by its base letter (Šoškić with the S names).
+      Ð Þ Đ Ŋ have no such command and stay raw (Ħ Ŧ fail verify's LaTeX-safety check; Ŀ is
+      written L·); verify advises on a cited entry whose first author still sorts after Z
+      (:func:`raw_sort_letter`).
+    """
+    safe = latex_safe_bib(bib)
+    out: list[str] = []
+    pos = 0
+    for m in _HEADER_RE.finditer(safe):
+        if m.start() < pos:
+            continue  # a header-shaped text inside an entry already read
+        close = _value_end(safe, safe.index("{", m.start()))
+        out.append(safe[pos : m.end()])
+        out.append(_present_entry(safe[m.end() : close]))
+        pos = close
+    out.append(safe[pos:])
+    return "".join(out)
+
+
 __all__ = [
     "HTML_ENTITY_RE",
     "HTML_TAG_RE",
@@ -662,7 +1086,10 @@ __all__ = [
     "field_value_spans",
     "html_tags",
     "latex_safe_bib",
+    "paper_bib",
     "printed_field",
+    "raw_sort_letter",
+    "sort_letter_command",
     "stray_math_dollar",
     "typesettable",
     "undefined_month_tokens",

@@ -47,7 +47,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from sci_adk.core.evidence import EvidenceItem
 from sci_adk.core.pkgreqs import PackageReqs
@@ -220,29 +220,72 @@ class SpecDigestMismatch(Exception):
     """The passed Spec digest does not match the recorded ``spec.json`` (§6.1 boundary).
 
     Raised at a record-advancing verb (``append-evidence`` / ``derive-claim``) when the
-    worker-supplied ``--spec-digest`` differs from the on-disk Spec's digest -- the
-    signal that the Spec was silently revised between the worker's frozen reference and
-    the verb call. The CLI catches it, prints a friendly stderr message, and exits 2, so
-    the worker cannot advance past the tampered boundary. The remedy is to re-fetch the
-    frozen Spec or amend it via ``manager-prereg`` (which records a checkpoint, S5).
+    worker-supplied ``--spec-digest`` differs from the on-disk Spec's digest. The CLI
+    catches it, prints a friendly stderr message, and exits 2, so the worker cannot
+    advance past a Spec other than the one it was given.
+
+    The message says what the passed value IS, as far as the caller could establish it,
+    and claims a revision only when it applies:
+
+      - ``passed_file_hash``: the value is the sha256 of the spec.json bytes (the obvious
+        wrong value -- a 64-char sha256 too). The Spec is unchanged.
+      - ``earlier_version``: the value is the Spec digest of a version saved in
+        ``spec_history/`` -- the Spec WAS amended since that reference.
+      - neither: the value is not the digest of any recorded version of this Spec. Nothing
+        shows the Spec changed, so the message does not say it did.
+
+    Which digest the flag takes, and where to read the current one (``sci-adk status``,
+    as init-spec and amend-spec print it), is stated once.
 
     Attributes:
         spec_id: the run's Spec id.
         expected: the digest the worker passed (its frozen reference).
         actual: the digest recomputed from ``spec.json`` on disk.
+        run_dir: the run dir named in the "where to get it" hint (``None`` -> a
+            ``<run-dir>`` placeholder).
+        passed_file_hash: True iff ``expected`` is the sha256 of the spec.json bytes.
+        earlier_version: the ``spec_history/`` version whose Spec digest ``expected`` is,
+            or ``None``.
+        current_version: the version of the Spec on disk, or ``None`` when unknown.
     """
 
-    def __init__(self, *, spec_id: str, expected: str, actual: str) -> None:
+    def __init__(self, *, spec_id: str, expected: str, actual: str,
+                 run_dir: "Path | str | None" = None,
+                 passed_file_hash: bool = False,
+                 earlier_version: Optional[int] = None,
+                 current_version: Optional[int] = None) -> None:
         self.spec_id = spec_id
         self.expected = expected
         self.actual = actual
+        self.run_dir = run_dir
+        self.passed_file_hash = passed_file_hash
+        self.earlier_version = earlier_version
+        self.current_version = current_version
+        status = f"`sci-adk status {run_dir if run_dir is not None else '<run-dir>'}`"
+        current = f"v{current_version}" if current_version is not None else ""
+        takes = "--spec-digest takes the Spec digest (sha256 over the canonical Spec content)"
+        if passed_file_hash:
+            what = ("the value passed is the sha256 of the spec.json file; the Spec itself "
+                    f"is unchanged. {takes}")
+        elif earlier_version is not None:
+            what = ("the value passed is the digest of an earlier Spec version "
+                    f"(v{earlier_version}, kept as spec_history/spec.v{earlier_version}.json); "
+                    f"the Spec has been amended since and is now {current or 'a later version'}. "
+                    "Read the amended Spec before recording under it")
+        else:
+            if current_version is not None and current_version > 1:
+                versions = f" ({current}) nor of an earlier version kept in spec_history/"
+            else:
+                versions = f" ({current})" if current else ""
+            what = (f"the value passed is not the digest of this Spec{versions}. {takes}, "
+                    "not the sha256 of the spec.json file")
         # Truncate the 64-char hashes for a readable one-line message; the full values
         # stay on the attributes for callers that need them.
         super().__init__(
             f"spec-digest mismatch for '{spec_id}': "
-            f"passed {expected[:12]}... != recorded {actual[:12]}...; "
-            "the Spec on disk was revised since this frozen reference -- re-fetch the "
-            "frozen Spec or amend via manager-prereg (S5)"
+            f"passed {expected[:12]}... != recorded {actual[:12]}...: {what}; "
+            f"{status} prints the current Spec digest on its spec_digest: line, as "
+            "init-spec and amend-spec do at freeze"
         )
 
 

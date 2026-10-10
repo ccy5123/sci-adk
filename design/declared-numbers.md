@@ -1,6 +1,8 @@
 # Declared numbers: binding every number in a paper to its source
 
-> Status: **v0.2 (2026-10-09)** — §7 decided; phase 1 (the per-run list) built, see §8.
+> Status: **v0.3 (2026-10-10)** — §7 decided; phase 1 (the per-run list) built, see §8;
+> v0.3 scans `\texttt`, reads hex digests as words and an ISO-8601 date-time as one
+> literal that may only be an identifier (§4.2).
 > The package stage (§5, second paragraph) is phase 2 and not built.
 > Replaces, per run that adopts it, the pattern-based number audit of
 > `design/paper-writing-enforcement.md` (P2, OD-2/OD-3). Mirrors the conclusion
@@ -101,12 +103,33 @@ in one document; it locates the occurrences it covers, as declaration quotes do.
 
 Tokenizing stays, but only to find numbers, never to judge them. It keeps the exemptions
 LaTeX itself defines — arguments of `\ref`, `\cite`, `\label`, `\input`,
-`\includegraphics`, comments, and the verbatim spans `\texttt`, `\url`, `\href`, `\path`
-(the author's own markup for code and identifiers) — and two lexical rules that do not
-depend on the field: digits joined by hyphens without spaces form one literal
-(`17109-49-8`, `2026-10-08`), and an en dash or `--` between two numbers separates a range
-rather than negating the second. Digits in a superscript or subscript (`R$^2$`,
-`H$_2$O`, produced from Unicode by the renderer) are not literals.
+`\includegraphics`, comments, and the verbatim spans `\url`, `\href`, `\path` — and
+two lexical rules that do not depend on the field: digits joined by hyphens without spaces
+form one literal (`17109-49-8`, `2026-10-08`), and an en dash or `--` between two numbers
+separates a range rather than negating the second. Digits in a superscript or subscript
+(`R$^2$`, `H$_2$O`, produced from Unicode by the renderer) are not literals.
+
+`\texttt` was exempt in v0.2 and is not since v0.3: it is a font, not a verbatim span,
+and on the first paper it hid a seed and a sample size written as code
+(`default\_rng(20261008)`, `size=50`) — an exemption no list entry made visible. A hex
+digest (a checksum, a commit) is a word, not a number: seven or more hex characters in one
+case, with a digit and a letter, and not of the form digits-e-digits; pieces joined by
+`\allowbreak` count as one when each is at least four characters long. Before this rule
+the SHA-256 `1081e637f6bd…` read as the literal `1081e637` (10^640, beyond a float), which
+crashed `numbers draft`. A literal that is still beyond a float has no value and must be
+declared an identifier. A run that belongs to a number in scientific notation is not a
+digest: a long mantissa (`1.2345678e-3`) has the digest shape `2345678e`, and reading it
+as one split the number into `1` and `3`.
+
+Scanning `\texttt` also exposed the time stamps the SI writes as code: split at `:`,
+`2026-10-08T10:03:39Z` read as `2026-10-08`, `03` and `39`, and `numbers draft` matched
+`12` and `36` (the seconds and minutes of two stamps) to unrelated recorded counts. An
+ISO-8601 date-time — a date, `T`, `hh:mm[:ss[.fff]]`, then optionally `Z` or `±hh[:mm]` —
+is therefore one literal with no value, and the only role it may have is identifier: no
+recorded field holds a time of day, so any source a date-time matched would be a
+coincidence. `numbers draft` proposes it with role identifier and never with a source. A
+bare date (`2026-10-08`) stays hyphen-joined digit groups, which a `spec_text` source may
+still name.
 
 Removed: the year, page, date and version rules; the derived policy; the ±0.005 / 1 %
 tolerance window; Claim confidence values in the pool.
@@ -194,7 +217,7 @@ Choices beyond §4.1:
 
 - Masked as non-prose: comments; the arguments of `\ref`-like, `\cite`-like (with up to
   two `[...]` options), `\label`, `\input`, `\include`, `\includegraphics`,
-  `\bibliography(style)`, `\usepackage`, `\documentclass`, `\pgfplotsset`; `\texttt`,
+  `\bibliography(style)`, `\usepackage`, `\documentclass`, `\pgfplotsset`;
   `\path`, `\url`, `\nolinkurl`, `\verb`, the URL argument of `\href`; macro definitions
   and `#N` (an escaped `\#3` stays prose); the two identifier arguments of `\novelty`;
   the `coordinates {...}` of `\addplot` (plotted values come from the record by Evidence
@@ -204,7 +227,17 @@ Choices beyond §4.1:
   bracket. So `criterion-5` is the literal 5, and `n - 2` is 2. `-`, U+2212 and `$-$`
   count; a run of hyphens (`--`, `---`) never does.
 - A digit run continuing a word (`log10`, `CO2`) is part of the word, as in the pattern
-  audit. Digit groups joined by two or more dots are one literal (`2025.09.4`).
+  audit. Digit groups joined by two or more dots are one literal (`2025.09.4`). So a
+  version after a letter (`v2.9.5`) holds no literal; a bare `2.9.5` is one.
+- A date-time, then a hex digest, is overwritten before scanning (§4.2); the mask is a
+  letter, so a neighbouring number reads as it did beside the word. A date-time glued to
+  a following letter or digit (`…39Zabc`) is not one and reads as before.
+- In an `\allowbreak` chain a piece shorter than four characters joins nothing: a short
+  hex word (`\texttt{abc}`) beside a number (`1234567`) is a word and a number, not one
+  ten-character digest. Pieces on either side of it are judged on their own.
+- The pattern audit (runs without a list) keeps its own tokenizer byte-for-byte: it drops
+  a non-finite fragment (`1081e637`) but still reads the finite head of a digest in prose
+  (the `9` of `9dc5…`, the `45e12` of `45e12ab…`). Such a run adopts the list.
 - A hyphen-joined range (`1-6`) is one literal with no value; a range needs an en dash.
 
 **Precision.** The slack in `|v - literal| <= 0.5·10^-d` is relative to that tolerance
@@ -217,9 +250,10 @@ every value within 1e-9.
 writes). All recorded fields are searched together, with no preference between them: one
 match fills `source`, several are listed as `candidates`, none is `unresolved`.
 Undecided proposals also carry `where` snippets and do not load as entries until decided.
-Spec bookkeeping (`id`, `version`, `created_at`) is not searched. The summary names
-resolved literals stated more than once, because one entry covers every occurrence of its
-text and a second role can hide behind a single match.
+Spec bookkeeping (`id`, `version`, `created_at`) is not searched. A date-time is not
+searched either: it is proposed with role identifier, counted and named on its own line.
+The summary names resolved literals stated more than once, because one entry covers every
+occurrence of its text and a second role can hide behind a single match.
 
 **Reviewer.** `review.json` gained an optional `notes` list (`text`, `document`,
 `note`); a file without it loads unchanged. Notes reach `paper_advisory` as written.
@@ -254,4 +288,4 @@ beside nine Spec text candidates. Rendered with a list of the 27 then-resolved p
 
 ---
 
-Version: 0.2
+Version: 0.3

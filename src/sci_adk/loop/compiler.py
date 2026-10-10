@@ -31,11 +31,12 @@ design/directory-structure.md (loop/), design/decision-engine.md.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
@@ -43,7 +44,14 @@ from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.core.spec_science import ScienceFinding, audit_spec_science
 from sci_adk.loop.claim_updater import ClaimUpdater, _NOVELTY_KINDS
-from sci_adk.loop.code_ref import describe_mismatch, resolve_code_ref
+from sci_adk.loop.code_ref import (
+    NON_REPRODUCIBLE_KINDS,
+    code_ref_data_files,
+    describe_data_mismatch,
+    describe_mismatch,
+    resolve_code_ref_data_files,
+    resolve_code_ref_scripts,
+)
 from sci_adk.loop.judge import Judge
 from sci_adk.loop.literature_triggers import (
     contested_checkpoint,
@@ -73,14 +81,26 @@ from sci_adk.render.figures import (
     order_figures_by_reference,
 )
 from sci_adk.render.authored_si import render_authored_si_latex
-from sci_adk.render.bib_latex import latex_safe_bib
-from sci_adk.render.paper import render_paper_latex
+from sci_adk.render.bib_latex import paper_bib
+from sci_adk.render.novelty import (
+    NOVELTY_SENTENCES_FILE,
+    NoveltySentence,
+    novelty_sentences_payload,
+    parse_novelty_sentences,
+)
+from sci_adk.render.paper import render_paper_latex, run_font_policy
 from sci_adk.render.pkgreqs_checks import bib_subset, cited_keys
 from sci_adk.render.prose import AuthoredSI, PaperProse, SIProse
 from sci_adk.render.reproduction import (
     ReproListing,
-    listing_inlinable,
+    ReproScript,
+    bundle_file_names,
+    bundle_scripts,
+    listed_code_files,
+    reader_summary,
+    reader_text,
     render_reproduce_driver,
+    written_by_sci_adk,
 )
 from sci_adk.render.si import render_si_latex
 
@@ -165,6 +185,37 @@ class CompileResult:
         return bool(self.checkpoints)
 
 
+def _listing_text(raw: bytes) -> Optional[str]:
+    """A shipped script's body as text for the record listing, or None (not UTF-8).
+
+    Line ends are normalized as ``Path.read_text`` does; the shipped copy keeps the bytes.
+    """
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _output_name(output_ref: str) -> str:
+    """The file name of the first path in a recorded output reference, or ``""``: the
+    summary a reader sees when the finding's first sentence is nothing but references."""
+    token = (output_ref or "").split(None, 1)[0] if (output_ref or "").strip() else ""
+    token = token.rstrip(";,")
+    return token.replace("\\", "/").rsplit("/", 1)[-1] if token else ""
+
+
+def _plain_file_name(name: str) -> bool:
+    """Whether ``name`` is a bare file name (no directory part, not ``.``/``..``)."""
+    return (
+        bool(name)
+        and name not in (".", "..")
+        and "/" not in name
+        and "\\" not in name
+        and Path(name).name == name
+    )
+
+
 class ResearchCompiler:
     """
     Compile a proposal into a Spec + Evidence + Claims + a paper draft.
@@ -193,6 +244,7 @@ class ResearchCompiler:
         # evidence id, file, recorded vs actual sha256). Such an item is never shipped as the
         # recorded script; the CLI prints these as warnings.
         self.code_ref_warnings: List[str] = []
+        self.code_ref_data_warnings: List[str] = []
 
     def compile(
         self,
@@ -592,6 +644,11 @@ class ResearchCompiler:
 
         run_dir = self.workspace_dir / "runs" / spec.id
 
+        # A render without an SI writes no paper/si.tex, so one from an earlier render stays
+        # in place; the bindings of its novelty sentences are carried into the side file
+        # below. Read BEFORE anything is written: an unreadable side file stops the render.
+        kept_si_bindings = self._kept_si_bindings(run_dir, spec.id) if si is None else []
+
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
         # A hypothesis whose MAIN experiment Claim is already RESOLVED (SUPPORTED/REFUTED) is
@@ -625,6 +682,12 @@ class ResearchCompiler:
         # rendered FIRST (before co-location) because its body fixes the canonical
         # body-reference figure numbering (Figure 1 = first-\ref'd) that the co-located
         # fig<N> filenames AND the SI must agree with.
+        # Each \novelty assertion renders as its plain sentence; the renderers hand back the
+        # {document, kind, hyp, sentence} bindings, written beside the paper below.
+        novelty_found: List[NoveltySentence] = []
+        # One text face for the submission: decided from the draft's AND the authored SI's
+        # figures, so draft.tex and si.tex always share text_font_lines.
+        font_policy = run_font_policy(figures, si.figures if si is not None else [])
         paper_tex = render_paper_latex(
             spec, claims_list, evidence_list,
             pending=pending_dicts,
@@ -632,6 +695,8 @@ class ResearchCompiler:
             cited_dois=cited_dois,
             bib_path=bib_path,
             figures=figures,
+            novelty_sentences=novelty_found,
+            font_policy=font_policy,
         )
         paper_path = paper_dir / "draft.tex"
         paper_path.write_text(paper_tex, encoding="utf-8")
@@ -668,17 +733,23 @@ class ResearchCompiler:
             # no \bibliography. A cited key absent from the pool is NOT silently dropped -- it
             # cannot be in the subset, so the SI cite gate (verify) surfaces it.
             si_bib_path = self._colocate_si_bib(run_dir, paper_dir, si)
+            # The SI is set in the draft's faces (the run's one font policy, above).
             si_tex = render_authored_si_latex(
-                si, spec, claims_list, evidence_list, bib_path=si_bib_path
+                si, spec, claims_list, evidence_list, bib_path=si_bib_path,
+                novelty_sentences=novelty_found,
+                draft_font_policy=font_policy,
             )
             if si_tex is not None:
                 si_path = paper_dir / "si.tex"
                 si_path.write_text(si_tex, encoding="utf-8")
 
-        # F3 reproduction bundle (design/paper-publishing-requirements.md §3): resolve each
-        # Evidence item's provenance.code_ref -> (co-located script | bare-ref pointer),
-        # then (a) inline the listings in the record's "Reproduction code" section, (b)
-        # co-locate the resolvable scripts into paper/code/, and (c) write paper/reproduce.py.
+        self._write_novelty_sentences(run_dir, spec.id, novelty_found + kept_si_bindings)
+
+        # F3 reproduction bundle (design/paper-publishing-requirements.md §3): resolve every
+        # script each Evidence item's provenance.code_ref names (or a bare-ref pointer),
+        # then (a) inline each distinct script once in the record's "Reproduction code"
+        # section, (b) ship one copy per distinct script into paper/code/, and (c) write
+        # paper/reproduce.py (a manifest + hash check; it runs nothing).
         # The compiler -- the SOLE filesystem toucher -- does the resolution + fs; the
         # renderer stays pure (it receives the resolved listings). When NO Evidence item
         # carries a code_ref, repro_listings is empty -> no section, no paper/code/, no
@@ -694,11 +765,11 @@ class ResearchCompiler:
             bib_path=bib_path,
         )
 
-        # Land the runnable bundle (paper/code/ + paper/reproduce.py) ONLY when at least
-        # one code_ref resolved to a co-located script. A pointer-only set (every code_ref
-        # a bare commit, as in an all-pointer run) still documents the commits in reproduce.py, but
-        # only when there is something to drive: an entirely code_ref-free run writes
-        # nothing (byte-identical paper/). See _emit_reproduction_bundle.
+        # Land the bundle (paper/code/ + paper/reproduce.py). paper/code/ is written only when
+        # at least one named script resolved; a pointer-only set (every code_ref a bare
+        # commit) still lists the references in reproduce.py; an entirely code_ref-free run
+        # writes nothing (byte-identical paper/). A re-render removes the paper/code/ files
+        # the previous render wrote and this one does not. See _emit_reproduction_bundle.
         self._emit_reproduction_bundle(repro_listings, paper_dir, spec.id)
 
         # Prose<->figure ref consistency (design/paper-figures-and-si.md D4): scan the
@@ -774,13 +845,16 @@ class ResearchCompiler:
         claims_list = self._load_claims(spec)
         checkpoints_list = self._load_checkpoints(spec, evidence_list)
         run_dir = self.workspace_dir / "runs" / spec.id
+        figures = list(figures or [])
+        font_policy = run_font_policy(figures, si.figures if si is not None else [])
         draft_tex = render_paper_latex(
             spec, claims_list, evidence_list,
             pending=self._open_checkpoints(claims_list, checkpoints_list),
             prose=prose,
             cited_dois=self._gather_cited_dois(evidence_list, run_dir),
             bib_path=self._locate_bib_path(run_dir),
-            figures=list(figures or []),
+            figures=figures,
+            font_policy=font_policy,
         )
         si_tex: Optional[str] = None
         if si is not None:
@@ -789,7 +863,8 @@ class ResearchCompiler:
                 if self._si_bib_subset(run_dir, si) else None
             )
             si_tex = render_authored_si_latex(
-                si, spec, claims_list, evidence_list, bib_path=si_bib
+                si, spec, claims_list, evidence_list, bib_path=si_bib,
+                draft_font_policy=font_policy,
             )
         return draft_tex, si_tex
 
@@ -846,6 +921,61 @@ class ResearchCompiler:
         record_path = deposit_record_path(run_dir)
         record_path.write_text(record_tex, encoding="utf-8")
         return record_path
+
+    @staticmethod
+    def _kept_si_bindings(run_dir: Path, spec_id: str) -> List[NoveltySentence]:
+        """The ``si.tex`` novelty bindings to carry over when a render has no SI.
+
+        Such a render writes no ``paper/si.tex``, so the one an earlier render wrote stays
+        in place, still printing that render's novelty sentences. Rewriting the side file
+        from the draft alone would leave those sentences unbound and unchecked, so their
+        bindings are read back here and written again with the draft's. No ``si.tex`` or no
+        side file -> nothing to keep.
+
+        Raises:
+            ValueError: ``si.tex`` stays but the side file cannot be read (raised before the
+                render writes anything, instead of dropping the bindings).
+        """
+        side = run_dir / NOVELTY_SENTENCES_FILE
+        if not (run_dir / "paper" / "si.tex").is_file() or not side.is_file():
+            return []
+        try:
+            kept = parse_novelty_sentences(
+                json.loads(side.read_text(encoding="utf-8")), spec_id
+            )
+        except ValueError as exc:  # json.JSONDecodeError is a ValueError
+            raise ValueError(
+                f"paper/si.tex from an earlier render stays in place (this render has no "
+                f"SI), but the bindings of its novelty sentences in "
+                f"{NOVELTY_SENTENCES_FILE} cannot be read: {exc}. Re-render with the SI, "
+                f"which rebinds them."
+            ) from exc
+        return [s for s in kept if s.document == "si.tex"]
+
+    @staticmethod
+    def _write_novelty_sentences(
+        run_dir: Path, spec_id: str, sentences: Sequence[NoveltySentence]
+    ) -> Optional[Path]:
+        """Write the rendered novelty bindings to ``run_dir/novelty_sentences.json``.
+
+        The paper carries each novelty assertion as a plain sentence; this side file --
+        beside ``spec.json`` / ``declarations.json``, outside ``paper/``, never submitted --
+        is what binds each sentence to the {kind, hypothesis} the record must back, for
+        ``verify`` to re-derive. ``sentences`` are this render's bindings plus, when it had
+        no SI, those of the ``si.tex`` it left in place (:meth:`_kept_si_bindings`). Written
+        when there is a binding. When there is none, an existing file from an earlier
+        render is rewritten with an empty list (a stale binding would describe a paper that
+        no longer exists); with no earlier file nothing is written, so a novelty-free run
+        gains no file.
+        """
+        path = run_dir / NOVELTY_SENTENCES_FILE
+        if not sentences and not path.is_file():
+            return None
+        payload = novelty_sentences_payload(spec_id, sentences)
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        return path
 
     # -- disk loaders (the verb path reads its inputs from the run dir) -----
 
@@ -996,9 +1126,10 @@ class ResearchCompiler:
 
         Overleaf self-containment: when ``_locate_bib_path`` finds the run's
         ``references.bib`` (see ``_LITERATURE_DIRS``), write its LaTeX-safe copy
-        (:func:`latex_safe_bib`: HTML entities and tags to LaTeX, bare specials escaped,
-        characters pdflatex cannot typeset through the prose map or accent commands; keys and
-        url/doi values untouched) to ``paper/references.bib`` so
+        (:func:`paper_bib`: HTML entities and tags to LaTeX, bare specials escaped,
+        characters pdflatex cannot typeset through the prose map or accent commands; title case
+        protected, no ISSN or URL repeating the DOI, name letters as LaTeX commands; keys and
+        doi values untouched) to ``paper/references.bib`` so
         uploading the ``paper/`` folder as-is resolves ``\\bibliography{references}`` and
         compiles. The literature store is only read -- it keeps the bytes it was acquired
         with. The returned path's stem is ``references``, so the (pure) renderer emits
@@ -1015,7 +1146,7 @@ class ResearchCompiler:
             # Not UTF-8, so not something to rewrite character by character: copied as is.
             shutil.copyfile(src, dest)
             return str(dest)
-        dest.write_text(latex_safe_bib(pool), encoding="utf-8")
+        dest.write_text(paper_bib(pool), encoding="utf-8")
         return str(dest)
 
     @classmethod
@@ -1056,7 +1187,7 @@ class ResearchCompiler:
         if not keys:
             return None
         pool = Path(src).read_text(encoding="utf-8")
-        return bib_subset(latex_safe_bib(pool), keys) or None
+        return bib_subset(paper_bib(pool), keys) or None
 
     def _colocate_figures(
         self, figures: Sequence[AnyFigure], paper_dir: Path, paper_body: str
@@ -1111,101 +1242,119 @@ class ResearchCompiler:
     ) -> List[ReproListing]:
         """Resolve each Evidence item's ``provenance.code_ref`` for the F3 bundle (§3).
 
-        For each item carrying a ``code_ref``, decide -- DETERMINISTICALLY, no LLM -- one
-        of two outcomes (design/paper-publishing-requirements.md §3, OF-4 fail-open):
+        For each item that carries a ``code_ref`` and is not a decision meta-record
+        (:data:`NON_REPRODUCIBLE_KINDS` -- a decision pointer, not code), every SOURCE
+        script the ``code_ref`` names is resolved with :func:`resolve_code_ref_scripts` --
+        the SAME reading verify's F3 gate uses -- DETERMINISTICALLY, no LLM
+        (design/paper-publishing-requirements.md §3, OF-4 fail-open). A named script ships
+        when its file exists, is readable, and matches its recorded ``sha256=`` (when one is
+        recorded); everything else (a bare commit, a missing path, a changed file) is not
+        shipped and NEVER an error. The non-source paths it names with a hash are data
+        references (:func:`code_ref_data_files`), listed with their hash and never read. An
+        item naming no shipped script is a ``pointer`` entry; otherwise a ``script`` entry
+        listing its shipped scripts in the order named.
 
-          - ``script``  -- :func:`resolve_code_ref` names the recorded script: the
-            ``code_ref`` (or its leading path token, run dir first, then the workspace) is
-            an EXISTING READABLE FILE -- matching its recorded ``sha256=`` when one is given
-            -- whose body can be safely inlined (:func:`listing_inlinable`). The body is
-            read here (the compiler is the sole filesystem toucher; the renderers stay pure)
-            and the ``paper/code/`` basename is recorded; the script is co-located + driven
-            by ``reproduce.py``.
-          - ``pointer`` -- everything else: a bare commit/ref (e.g. a 40-hex git hash, the
-            all-pointer shape), a missing path, a file whose sha256 no longer matches the
-            record, an unreadable file, OR a body that cannot be safely inlined. Recorded as
-            a POINTER -- NEVER an error (fail-open), honest about holding only the
-            reference. The ``reproduce.py`` driver embeds the FULL recorded ``code_ref``
-            either way, so the F3 gate's "driver references every recorded code_ref" holds.
+        Shipped scripts are DISTINCT BY CONTENT: one :class:`ReproScript` per sha256 across
+        the whole run, holding the exact bytes (so the shipped copy keeps the recorded hash)
+        and the text for the record listing. Each is named by its own file name; a name
+        shared by different contents gets a ``_<sha256 prefix>`` suffix on every one of them
+        (:func:`bundle_file_names`). The bytes are read here (the compiler is the sole
+        filesystem toucher; the renderers stay pure).
 
         A hash mismatch is also collected into ``self.code_ref_warnings`` (one line per
-        item, reset on every call) for the CLI to surface.
+        named script or data file the workspace holds, reset on every call) for the CLI to
+        surface.
 
         Items with no ``code_ref`` contribute nothing -> an entirely code_ref-free run
         yields ``[]`` (the F3 byte-identical regression invariant). First-seen Evidence
-        order is preserved (deterministic). Co-located filenames are de-collided so two
-        scripts that share a basename land at distinct ``paper/code/`` names.
+        order is preserved (deterministic).
         """
-        out: List[ReproListing] = []
-        used_names: set[str] = set()
         self.code_ref_warnings = []
+        self.code_ref_data_warnings = []
+        known_ids = [ev.id for ev in evidence]
+        # Pass 1: every named script of every generating-code item, and the distinct
+        # contents (sha256 -> (source path, bytes, hash recorded?)) in first-named order.
+        contents: Dict[str, Tuple[Path, bytes, bool]] = {}
+        items: List[Tuple[EvidenceItem, str, List[str], Tuple[str, ...]]] = []
         for ev in evidence:
             code_ref = (ev.provenance.code_ref or "").strip()
-            if not code_ref:
+            if not code_ref or ev.kind in NON_REPRODUCIBLE_KINDS:
                 continue
-            resolution = resolve_code_ref(code_ref, run_dir, self.workspace_dir)
-            if resolution.hash_mismatch:
-                # The named file is not the code the record names: never shipped as the
-                # recorded script (it stays a pointer below); surfaced by the CLI.
-                self.code_ref_warnings.append(describe_mismatch(ev.id, resolution))
-            resolved = resolution.script
-            if resolved is None:
-                out.append(
-                    ReproListing(
-                        evidence_id=ev.id, code_ref=code_ref, kind="pointer"
-                    )
-                )
-                continue
-            try:
-                body = resolved.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                # Unreadable / non-text: honest pointer, never a fail-loud (fail-open).
-                out.append(
-                    ReproListing(
-                        evidence_id=ev.id, code_ref=code_ref, kind="pointer"
-                    )
-                )
-                continue
-            if not listing_inlinable(body):
-                # Body carries the lstlisting closing delimiter -> cannot inline safely;
-                # record a pointer so the SI is never a broken document (honest).
-                out.append(
-                    ReproListing(
-                        evidence_id=ev.id, code_ref=code_ref, kind="pointer"
-                    )
-                )
-                continue
-            filename = self._dedupe_code_filename(resolved.name, used_names)
+            named = resolve_code_ref_scripts(code_ref, run_dir, self.workspace_dir)
+            shas: List[str] = []
+            for ns in named:
+                if ns.resolution.hash_mismatch:
+                    # The named file is not the code the record names: never shipped as the
+                    # recorded script; surfaced by the CLI.
+                    self.code_ref_warnings.append(describe_mismatch(ev.id, ns.resolution))
+                script = ns.resolution.script
+                if script is None:
+                    continue
+                try:
+                    raw = script.read_bytes()
+                except OSError:
+                    continue  # unreadable: not shipped (fail-open)
+                sha = hashlib.sha256(raw).hexdigest()
+                recorded = ns.recorded_sha256 is not None
+                if sha not in contents:
+                    contents[sha] = (script, raw, recorded)
+                elif recorded and not contents[sha][2]:
+                    contents[sha] = (contents[sha][0], raw, True)
+                if sha not in shas:
+                    shas.append(sha)
+            for data in resolve_code_ref_data_files(code_ref, run_dir, self.workspace_dir):
+                if data.hash_mismatch:
+                    # The data file is not the data the result was computed from (verify's
+                    # reproduction gate fails on it); surfaced by the CLI.
+                    line = describe_data_mismatch(ev.id, data)
+                    self.code_ref_warnings.append(line)
+                    self.code_ref_data_warnings.append(line)
+            unshipped = tuple(
+                ns.path for ns in named
+                if ns.resolution.script is None and ns.recorded_sha256 is not None
+            )
+            items.append((ev, code_ref, shas, unshipped))
+
+        names = bundle_file_names(
+            [(sha, source.name) for sha, (source, _raw, _rec) in contents.items()]
+        )
+        shipped = {
+            sha: ReproScript(
+                filename=names[sha], sha256=sha, hash_recorded=recorded,
+                text=_listing_text(raw), data=raw,
+            )
+            for sha, (_source, raw, recorded) in contents.items()
+        }
+
+        out: List[ReproListing] = []
+        for ev, code_ref, shas, unshipped in items:
+            scripts = tuple(shipped[sha] for sha in shas)
+            first = scripts[0] if scripts else None
+            # Printed to the bundle's reader, so references a reader cannot resolve (record
+            # ids) are removed here too.
+            output_ref = reader_text(ev.result.artifact_ref if ev.result else None, known_ids)
             out.append(
                 ReproListing(
                     evidence_id=ev.id,
                     code_ref=code_ref,
-                    kind="script",
-                    text=body,
-                    filename=filename,
+                    kind="script" if scripts else "pointer",
+                    text=first.text if first else None,
+                    filename=first.filename if first else None,
+                    scripts=scripts,
+                    unshipped=unshipped,
+                    summary=reader_summary(
+                        ev.result.finding if ev.result else None, known_ids,
+                        fallback=_output_name(output_ref)
+                        or f"a recorded {ev.kind.value.replace('_', ' ')}",
+                    ),
+                    output_ref=output_ref or None,
+                    data_ref=reader_text(ev.provenance.data_ref, known_ids) or None,
+                    data_files=tuple(
+                        code_ref_data_files(code_ref, run_dir, self.workspace_dir)
+                    ),
                 )
             )
         return out
-
-    @staticmethod
-    def _dedupe_code_filename(name: str, used: set[str]) -> str:
-        """A unique ``paper/code/`` basename for ``name`` (deterministic de-collision).
-
-        Two resolvable scripts that share a basename (e.g. both ``run.py``) must land at
-        distinct files; the second becomes ``run_1.py``, the third ``run_2.py`` -- so
-        ``reproduce.py`` drives each independently. Mutates ``used`` to record the choice.
-        """
-        if name not in used:
-            used.add(name)
-            return name
-        stem, dot, ext = name.partition(".")
-        suffix = f".{ext}" if dot else ""
-        i = 1
-        while f"{stem}_{i}{suffix}" in used:
-            i += 1
-        chosen = f"{stem}_{i}{suffix}"
-        used.add(chosen)
-        return chosen
 
     def _emit_reproduction_bundle(
         self,
@@ -1213,30 +1362,59 @@ class ResearchCompiler:
         paper_dir: Path,
         spec_id: str,
     ) -> None:
-        """Land ``paper/code/`` + ``paper/reproduce.py`` for the F3 runnable bundle (§3).
+        """Land ``paper/code/`` + ``paper/reproduce.py`` for the F3 bundle (§3).
 
-        The compiler is the SOLE filesystem toucher: it copies each resolvable script's
-        recorded body into ``paper/code/<filename>`` and writes the pure
-        :func:`render_reproduce_driver` text to ``paper/reproduce.py``. The bundle is
-        written ONLY when there is something to drive (at least one ``ReproListing``); an
-        entirely ``code_ref``-free run passes ``[]`` and NOTHING is written -- the run's
-        ``paper/`` stays byte-identical to today (the F3 regression invariant). A
-        pointer-only run still writes ``reproduce.py`` (documenting the commits) but no
-        ``paper/code/`` files.
+        The compiler is the SOLE filesystem toucher: it writes each distinct shipped script's
+        exact bytes to ``paper/code/<filename>`` and the pure :func:`render_reproduce_driver`
+        text to ``paper/reproduce.py``. The bundle is written ONLY when there is something
+        to list (at least one ``ReproListing``); an entirely ``code_ref``-free run passes
+        ``[]`` and NOTHING is written -- the run's ``paper/`` stays byte-identical to today
+        (the F3 regression invariant). A pointer-only run still writes ``reproduce.py``
+        (listing the references) but no ``paper/code/`` files.
+
+        A re-render keeps ``paper/code/`` in step with the record: the files the PREVIOUS
+        render wrote -- read from the previous ``reproduce.py``'s ``SCRIPTS`` list when a
+        sci-adk render wrote that file (:func:`written_by_sci_adk`), never guessed -- that
+        this render does not ship are removed (stale duplicates, scripts no longer named).
+        Anything else in ``paper/code/`` is the author's and is left alone,
+        and so is a listed name that is not a plain file name inside ``paper/code/``. An
+        emptied ``paper/code/`` is removed. This pruning runs also when this render has
+        nothing to list; the previous ``reproduce.py`` is then removed too, but only when a
+        sci-adk render wrote it (:func:`written_by_sci_adk`) -- a hand-written one stays.
         """
-        if not listings:
-            return
-        scripts = [it for it in listings if it.is_script]
+        code_dir = paper_dir / "code"
+        driver_path = paper_dir / "reproduce.py"
+        previous_driver = ""
+        if driver_path.is_file():
+            try:
+                previous_driver = driver_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                previous_driver = ""
+        # Only a reproduce.py a sci-adk render wrote says which paper/code/ files are the
+        # render's; the files a hand-written one lists are the author's.
+        previously = (
+            (listed_code_files(previous_driver) or [])
+            if written_by_sci_adk(previous_driver)
+            else []
+        )
+        scripts = bundle_scripts(listings)
+        keep = {s.filename for s in scripts}
+        for name in previously:
+            if name in keep or not _plain_file_name(name):
+                continue
+            stale = code_dir / name
+            if stale.is_file() or stale.is_symlink():
+                stale.unlink()
         if scripts:
-            code_dir = paper_dir / "code"
             code_dir.mkdir(parents=True, exist_ok=True)
-            for it in scripts:
-                # text/filename are guaranteed non-None for a script ReproListing.
-                (code_dir / (it.filename or "")).write_text(
-                    it.text or "", encoding="utf-8"
-                )
-        driver = render_reproduce_driver(listings, spec_id)
-        (paper_dir / "reproduce.py").write_text(driver, encoding="utf-8")
+            for script in scripts:
+                (code_dir / script.filename).write_bytes(script.data)
+        elif code_dir.is_dir() and not any(code_dir.iterdir()):
+            code_dir.rmdir()
+        if listings:
+            driver_path.write_text(render_reproduce_driver(listings, spec_id), encoding="utf-8")
+        elif previous_driver and written_by_sci_adk(previous_driver):
+            driver_path.unlink()
 
     def _collect_contested_checkpoints(
         self, spec: Spec, claims: Sequence[Claim]

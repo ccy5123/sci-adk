@@ -77,3 +77,42 @@ def test_status_json_emits_valid_keys(tmp_path, capsys):
     ):
         assert key in data, f"missing key {key} in --json output"
     assert f"claim-{hyp_id}" in data["unresolved_claim_ids"]
+
+
+def test_status_hypothesis_count_reads_as_english():
+    # the trial run printed "(2 hypothesises, ...)"
+    from sci_adk.loop.status import StatusReport, render_status_text
+
+    def spec_line(n: int) -> str:
+        text = render_status_text(
+            StatusReport(spec_id="SPEC-BCFKOW-001", run_name="SPEC-BCFKOW-001",
+                         n_hypotheses=n, headline="h"))
+        return text.splitlines()[1]
+
+    assert "(2 hypotheses, run 'SPEC-BCFKOW-001')" in spec_line(2)
+    assert "(1 hypothesis, run 'SPEC-BCFKOW-001')" in spec_line(1)
+    assert "(0 hypotheses, " in spec_line(0)
+
+
+def test_status_prints_the_spec_digest_the_verbs_check(tmp_path, capsys):
+    # --spec-digest on append-evidence / derive-claim is checked against this value; a
+    # trial session passed the sha256 of the spec.json FILE because no read-only verb
+    # printed the Spec digest. status does now, on the same "spec_digest:" line that
+    # init-spec and amend-spec print at freeze.
+    from sci_adk.provenance import spec_digest_of_run
+
+    run_dir, _hyp_id = _seed(tmp_path, "cli-status-digest")
+    rc = main(["status", str(run_dir)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    digest_lines = [line for line in out.splitlines() if "spec_digest:" in line]
+    assert digest_lines == [f"  spec_digest: {spec_digest_of_run(run_dir)}"]
+
+    main(["status", str(run_dir), "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert data["spec_digest"] == spec_digest_of_run(run_dir)
+
+
+def test_status_without_a_spec_prints_no_digest(tmp_path, capsys):
+    main(["status", str(tmp_path / "runs" / "nope")])
+    assert "spec_digest" not in capsys.readouterr().out

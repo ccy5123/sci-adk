@@ -128,8 +128,10 @@ Two-pass, sequential (novelty search needs exact hypothesis text):
 
 ### Stage 4 — Publish (render)
 
-`expert-writer` authors the `PaperProse` / `SIProse` / `FigureSpec` hooks and runs
-`sci-adk render` → `paper/{draft.tex, si.tex, figures/, references.bib}`. Figures
+`expert-writer` authors the `PaperProse` / `AuthoredSI` / `FigureSpec` hooks and runs
+`sci-adk render` → `paper/draft.tex`, `figures/`, `references.bib`, and `paper/si.tex`
+only from an authored `--si si.json` (the SI is written like the paper; the record dump
+is deposited at `runs/<id>/record.tex`, outside the submission). Figures
 pull their `y` values **from Evidence by `evidence_id`** (record fidelity — the
 agent authors WHAT to render; the engine renders deterministically FROM the record).
 
@@ -163,7 +165,7 @@ cycle. A worker never writes the record directly — every append goes through a
 | `manager-prereg` | Author + freeze the Spec; set novelty flags; handle amendments | `init-spec`, `amend-spec` | Stage 2 (`/sci plan`) |
 | `expert-experimentalist` | Run experiments per the frozen MethodPlan; append Evidence (null/negative included); fill `bearing[]` | `execute`, `append-evidence` | Stage 3 (`/sci experiment`) |
 | `expert-statistician` | Apply the DecisionRule to the Evidence; derive Claim status + confidence | `derive-claim` | Stage 3 (after experimentalist) |
-| `expert-writer` | Author `PaperProse` / `SIProse` / `FigureSpec` hooks; render the paper (figures pull `y` from Evidence by `evidence_id`) | `render` | Stage 4 (`/sci publish`) |
+| `expert-writer` | Author `PaperProse` / `AuthoredSI` / `FigureSpec` hooks; render the paper (figures pull `y` from Evidence by `evidence_id`) | `render` | Stage 4 (`/sci publish`) |
 | `expert-literature` | Prior-art / novelty search per (hypothesis × kind) | `prior-work`, `novelty --kind {result\|method}` | Stage 2 (drives the freeze) |
 | `expert-replicator` | Re-run the frozen MethodPlan on an independent data set or system; append replication Evidence (concordant and discordant) whose provenance names the axis of independence | `execute`, `append-evidence` | After Stage 3 (`/sci replicate`) |
 

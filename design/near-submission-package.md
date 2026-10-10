@@ -129,6 +129,24 @@ LLM:
 Surfaced as ADVISORY (never gated): `body_word_range`, free-prose numbers not behind
 `\evval`, and the §4 evaluator qualities.
 
+**Novelty sentences (not checked at package level; decided 2026-10-10).** The package gate
+does not check novelty claims in `main.tex` / `si.tex`. Its record-green check runs each
+listed run's claim audit, not that run's paper checks, so a run's novelty sentences and
+their bindings (`runs/<id>/novelty_sentences.json`) are checked only by `sci-adk verify
+<run>`, which step [0] requires for every run. A novelty sentence in the merged manuscript
+is bound to nothing, so no gate checks it — the position of a "first" written as plain
+prose in a per-run paper. The writer therefore copies a run's rendered novelty sentence,
+scope included, unchanged from a run that verifies, rather than writing a new one;
+`\novelty` markup in `package_src/` is not rendered (the assembler copies those files
+verbatim).
+
+Why the bindings are not carried into the package gate: the merged manuscript is written
+across runs, and a run's binding describes that run's sentence, not the package text.
+Requiring every bound sentence to appear verbatim in `main.tex` would forbid rewording or
+dropping one; checking only those that do appear would pass every reworded or new claim
+while reading as coverage. A real check needs the assembler to render package-level markup
+naming the run and hypothesis against that run's record, which it does not do.
+
 ## 4. The procedure — `/sci package` skill + `sci-adk package` verb
 
 `sci-adk package <ws>` (new verb) drives the deterministic spine; `/sci package` (new

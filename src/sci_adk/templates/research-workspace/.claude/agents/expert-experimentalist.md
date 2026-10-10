@@ -58,19 +58,24 @@ prior entry. The verb is the ONLY way to write Evidence; do not hand-edit
 
 ## Recording `provenance.code_ref`
 
-`provenance.code_ref` tells a reader which code produced the result, and the rendered
-reproduction bundle ships and re-runs the file it names. Write it as ONE of:
+`provenance.code_ref` tells a reader which code produced the result. The rendered
+reproduction bundle ships the source files it names and checks each against its recorded
+hash; it does not re-run them (the record holds no command-line arguments or input
+files). Write it as ONE of:
 
 - the path of the script that produced the result, relative to the workspace or to the
-  run dir (e.g. `analysis/<spec-id>/<script>.py`), optionally followed by
-  ` sha256=<hex>` — the sha256 of that file as it was when it ran (`sha256sum <file>`);
+  run dir (e.g. `analysis/<spec-id>/<script>.py`), followed by ` sha256=<hex>` — the
+  sha256 of that file as it was when it ran (`sha256sum <file>`);
 - when the code is not a file in the workspace, the commit or ref that holds it.
 
-One script per `code_ref`. A description, the scripts that built its inputs, and notes
-such as "no git commit" go in the result's finding, not in `code_ref`: the bundle reads
-only the leading path and the hash right after it. Anything it cannot resolve to a file
-is kept as a pointer it cannot run, and a file whose sha256 no longer matches the
-recorded one is not shipped as the recorded code.
+A script that built the result's inputs is named after the first one in the same form,
+`<path> sha256=<hex>`, and ships too. Only source files ship (program files such as
+`.py`, `.R`, `.jl`, `.m`, `.sh`, `.do`, `.ipynb`, recognised by extension); a data file
+named with its hash (`data/x.csv sha256=<hex>`) is listed with that hash in
+`paper/reproduce.py` and never shipped. A description and notes such as "no git commit"
+go in the result's finding, not in `code_ref`. Anything the bundle cannot resolve to a
+file is kept as a pointer, and a file whose sha256 no longer matches the recorded one is
+not shipped as the recorded code.
 
 ## Record The Numbers A Paper Will State — As Values
 
@@ -184,8 +189,9 @@ substitute a different method or skip a step to "make progress".
   `discriminating_cases_covered` covering the Spec's declared
   `discriminating_cases` — so the strict G3 gate has its falsifiability control.
 - Provenance is captured for each entry; no hand-edited Evidence files. Each
-  `provenance.code_ref` is one script's path (optionally followed by ` sha256=<hex>`)
-  or a commit/ref; descriptions and the scripts that built its inputs are in the finding.
+  `provenance.code_ref` is the producing script's path followed by ` sha256=<hex>` (then
+  any script that built its inputs, and any data file, in the same `<path> sha256=<hex>`
+  form) or a commit/ref; descriptions are in the finding.
 - Every count, constant and quoted value a paper may state is a named number in a finding
   JSON (`{"summary": ..., "<name>": <value>}`), not only prose.
 - No silent deviation from the frozen MethodPlan.

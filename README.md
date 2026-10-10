@@ -1,7 +1,7 @@
 # sci-adk: Agentic Discovery Kit (ADK)
 
 > Version: 0.2.0
-> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 1369 tests passing
+> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 2,653 engineering tests
 > Last Updated: 2026-06-30
 
 ## What is sci-adk?
@@ -233,13 +233,13 @@ kernel** — it adds delegation and early checks, never a new verdict path. See
 - **Literature triggers — novelty + contested**: contested = recording-only; **novelty is a 1st-class revisable Claim `claim-novelty-<hyp>` derived by rule (B-replace)** — SUPPORTED iff a recorded `found_nothing` prior-art search; NON-HALT compile-time checkpoint; `sci-adk novelty`/`sci-adk contested` CLI verbs; `verify` re-derives the novelty claim
 - **Science guards (G1–G5)**: spec-layer rigor gates enforced at compile time and verdict time — G1 analyticity (no known-theorem dressed as discovery), G2 test-power (discriminating-case declaration), G3 falsifiability (mutation test: apparatus must be able to report FAIL), G4 mode-coherence (threshold + exploratory = structural conflict), G5 claim-cost (practical-property claim with no declared cost metric). `strict_science` is on by default for `run` / `derive-claim`; guards surface findings in `runs/<id>/science.md`. Pure, no-LLM. See `design/science-guards.md`.
 - **Render reframe** — paper render is now a **deterministic record-fidelity SPINE + an agent-authored belief NARRATIVE + a markup fidelity gate**: the agent authors title/IMRaD/discussion; the engine substitutes measured values and verdicts via `\evval{<id>}{<field>}` / `\status{<hyp>}` macros at render time (FAIL-LOUD if the record does not hold the value); `sci-adk verify` flags any unresolved macro residuals. Produces a tool-agnostic paper (no sci-adk internal nouns in `draft.tex`). See `design/render-architecture-reframe.md`.
-- **Publishing requirements (F1/F2/F3)**: F1 — elicit + freeze a `pubreqs.json` contract (venue, required sections, length limits) at `/sci publish` time and gate the rendered paper deterministically; F2 — figure font/DPI policy (serif equations, sans figure text, minimum DPI for raster figures) enforced at render + re-checked by `verify`; F3 — reproduction bundle (generating code retained as SI code listing + `paper/reproduce.py` re-runner). CLI: `sci-adk pubreqs freeze`. See `design/paper-publishing-requirements.md`.
+- **Publishing requirements (F1/F2/F3)**: F1 — elicit + freeze a `pubreqs.json` contract (venue, required sections, length limits) at `/sci publish` time and gate the rendered paper deterministically; F2 — figure font/DPI policy (serif equations, sans figure text, minimum DPI for raster figures) enforced at render + re-checked by `verify`; F3 — reproduction bundle (the source files each `code_ref` names, shipped byte for byte under `paper/code/` and inlined in the deposit record, plus `paper/reproduce.py`, which lists them and checks their SHA-256 hashes but does not re-run them; data files a `code_ref` names with a hash are listed, never shipped, and `verify` fails a data file the workspace holds whose hash no longer matches). CLI: `sci-adk pubreqs freeze`. See `design/paper-publishing-requirements.md`.
 - **Workspace near-submission package**: `sci-adk package` assembles a workspace-level submission — one merged `main.tex` + `si.tex` + figures from ALL runs, plus a standard 6-folder reproduction package. A `pkgreqs.json` frozen contract (venue + format) gates the package via the `package_requirements_clean` HARD gate inside `sci-adk verify`. CLI: `sci-adk package`, `sci-adk pkgreqs freeze`. `/sci package` drives the full [0]–[5] contract. See `design/near-submission-package.md`.
 - **Novelty 2-kind (result vs method)** — `novelty_result` / `novelty_method` are independent flags per hypothesis (N1); each produces a separate `claim-novelty-<hyp>-result` / `-method` Claim derived by the B-replace rule; `sci-adk novelty` + `sci-adk contested` CLI verbs; `verify` re-derives both. `\novelty{}` render markup (N2) and render/verify novelty gate (N3) track the 2-kind split into the rendered paper. See `design/literature-acquisition.md`.
-- **Paper figures + SI**: native pgfplots data-plot renderer with stable labels + Overleaf folder co-location; SI auto-record-dump (`si.tex`); a `\ref`↔`\label` within-document consistency gate as a `sci-adk verify` HARD gate; image-path figures (`ImageFigureSpec`, domain-general — the kernel carries zero domain code); optional `SIProse` hook around the SI record dump; body-order figure numbering. See `design/paper-figures-and-si.md`.
+- **Paper figures + SI**: native pgfplots data-plot renderer with stable labels + Overleaf folder co-location; an authored Supporting Information (`paper/si.tex`, written only when `sci-adk render` is given `--si si.json`), with the deterministic record dump deposited outside the submission as `runs/<id>/record.tex`; a `\ref`↔`\label` within-document consistency gate as a `sci-adk verify` HARD gate; image-path figures (`ImageFigureSpec`, domain-general — the kernel carries zero domain code); optional `SIProse` hook around the record dump; body-order figure numbering. See `design/paper-figures-and-si.md` and `design/si-belief-record-split.md`.
 - **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (IMRaD structure, no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
 - **paperforge re-pin → DOI→BibTeX**: pin `2cec69b` ships `paperforge.bibtex`
-- 1369 unit tests passing (`python3 -m pytest -q`)
+- 2,653 engineering tests (`python3 -m pytest -q`, measured 2026-10-10): 2,637 pass; 14 need a running Docker daemon and 2 skip without an optional package (`mcp`, LaTeX `pgfplots`)
 
 ### Remaining
 
@@ -306,7 +306,7 @@ sci-adk/
 │   ├── render-architecture-reframe.md  # Render = record-fidelity spine + agent narrative
 │   ├── paper-publishing-requirements.md # F1/F2/F3 publishing requirements + pubreqs
 │   ├── near-submission-package.md      # Workspace package layer + pkgreqs
-│   ├── paper-figures-and-si.md         # Native figures + SI record-dump + ref-consistency gate
+│   ├── paper-figures-and-si.md         # Native figures + record dump + ref-consistency gate
 │   ├── research-session-enforcement.md # Stop/UserPromptSubmit hook architecture
 │   ├── tool-policy.md        # Runtime tool governance (allowed / excluded)
 │   ├── milestone-3.md        # Milestone 3 roadmap
@@ -315,7 +315,7 @@ sci-adk/
 │   └── handoffs/             # Per-session handoff logs (session-1..10, ...)
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
-├── tests/                    # Engineering-layer tests (1369 passing)
+├── tests/                    # Engineering-layer tests (2,653)
 │   ├── test_spec.py          # Spec invariants
 │   ├── test_evidence.py      # Evidence invariants
 │   ├── test_claim.py         # Claim invariants
@@ -346,7 +346,7 @@ sci-adk/
 ## Testing
 
 ```bash
-# All tests (1369 passing)
+# All tests (2,653; 14 need Docker)
 python3 -m pytest -q
 
 # Integration tests (require Docker)
@@ -413,7 +413,7 @@ These exclusions apply to *sci-adk's research runtime*, NOT the build harness. F
 | `design/render-architecture-reframe.md` | Render = record-fidelity spine + agent belief narrative + `\evval`/`\status` fidelity gate |
 | `design/paper-publishing-requirements.md` | F1 publishing requirements + F2 figure font/DPI + F3 reproduction bundle; `pubreqs` |
 | `design/near-submission-package.md` | Workspace-level near-submission package; `pkgreqs` + `package_requirements_clean` gate |
-| `design/paper-figures-and-si.md` | Native figures (pgfplots), SI auto-record-dump, `\ref`↔`\label` consistency gate |
+| `design/paper-figures-and-si.md` | Native figures (pgfplots), the deterministic record dump (now `runs/<id>/record.tex`; `si.tex` is authored), `\ref`↔`\label` consistency gate |
 | `design/research-session-enforcement.md` | Stop/UserPromptSubmit hook architecture |
 | `design/tool-policy.md` | Runtime tool governance (allowed / excluded) |
 | `design/milestone-3.md` | Milestone 3 roadmap |

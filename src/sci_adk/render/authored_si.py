@@ -11,9 +11,10 @@ This module fills that freed slot with the AUTHORED belief artifact -- the OVERF
 It REUSES the ``paper.py`` prose machinery, NOT the ``render_si_latex`` dump (REQ-SA-101):
 
   - the SAME per-slot pipeline ``render_paper_latex`` uses -- ``substitute_factrefs``
-    (fidelity, FAIL-LOUD) -> ``_novelty_prose`` (which calls ``_latex_sanitize_prose``,
-    so ``\\ref`` / ``\\cite`` / ``\\novelty`` survive verbatim and everything else is
-    escaped). So every measured value the SI states is the record's (REQ-SA-103), a
+    (fidelity, FAIL-LOUD) -> the ``\\novelty`` gate (an unbacked novelty assertion fails;
+    a backed one renders as its plain sentence plus the record's search scope) -- with the
+    authored LaTeX passed through verbatim (``\\ref`` / ``\\cite`` included, see
+    ``_render_si_novelty``). So every measured value the SI states is the record's (REQ-SA-103), a
     hand-authored table cell citing ``\\evval`` is gated cell-by-cell (REQ-SA-104), and a
     bare ``\\status`` resolves to the recorded verdict -- the SI narrative is the agent's,
     the numbers are the record's.
@@ -60,17 +61,20 @@ from sci_adk.render.figures import (
     render_figure,
 )
 from sci_adk.render.novelty import (
-    NOVELTY_NEWCOMMAND,
     NOVELTY_RENDER_RE,
-    has_novelty_markup,
+    NoveltySentence,
     novelty_scope_suffix,
+    require_novelty_text,
 )
-from sci_adk.render.paper import T1_FONT_LINES, _latex_sanitize
+from sci_adk.render.paper import HYPERREF_LINE, _latex_sanitize, text_font_lines
 from sci_adk.render.prose import AuthoredSI
 
 
 def _render_si_novelty(
-    text: str, spec: Spec, novelty_decisions: Sequence[EvidenceItem]
+    text: str,
+    spec: Spec,
+    novelty_decisions: Sequence[EvidenceItem],
+    found: Optional[List[NoveltySentence]] = None,
 ) -> str:
     """Render ``\\novelty{kind}{hyp}{text}`` markup in AUTHORED SI LaTeX (FAIL-LOUD gate).
 
@@ -81,9 +85,15 @@ def _render_si_novelty(
     ``_novelty_prose`` does, so the ``\\novelty`` gate is identical:
 
       - each gap between/around the spans -> emitted verbatim (the author's LaTeX);
-      - each span ``\\novelty{kind}{hyp}{inner}`` -> re-emitted SURVIVING into the ``.tex``
-        with the record-derived honest scope baked in by :func:`novelty.novelty_scope_suffix`
-        (FAIL-LOUD: an unsupported / unknown-hyp / bad-kind novelty raises ``ValueError``).
+      - each span ``\\novelty{kind}{hyp}{inner}`` -> the PLAIN sentence: the author's
+        ``inner`` (authored LaTeX, verbatim) followed by the record-derived scope from
+        :func:`novelty.novelty_scope_suffix`, ESCAPED (it comes from the record, where an
+        index name may carry a LaTeX special). No macro, no ``kind`` / ``hyp`` in the source.
+        FAIL-LOUD: an unsupported / unknown-hyp / bad-kind novelty raises ``ValueError``,
+        and so does an empty ``inner`` (:func:`novelty.require_novelty_text`).
+
+    When ``found`` is given, each rendered sentence is appended to it as a
+    :class:`novelty.NoveltySentence` for ``si.tex``.
 
     Text with NO ``\\novelty`` markup is returned unchanged. PURE + FAIL-LOUD.
     """
@@ -93,7 +103,11 @@ def _render_si_novelty(
         out.append(text[pos : match.start()])  # gap -> authored LaTeX, verbatim
         kind, hyp, inner = match.group(1), match.group(2), match.group(3)
         suffix = novelty_scope_suffix(kind, hyp, spec, novelty_decisions)  # fail-loud
-        out.append("\\novelty{" + kind + "}{" + hyp + "}{" + inner + suffix + "}")
+        require_novelty_text(kind, hyp, inner)  # fail-loud: the claim is inside the span
+        sentence = inner + _latex_sanitize(suffix)
+        out.append(sentence)
+        if found is not None:
+            found.append(NoveltySentence("si.tex", kind, hyp, sentence))
         pos = match.end()
     out.append(text[pos:])  # trailing gap / whole string if no spans
     return "".join(out)
@@ -117,6 +131,8 @@ def render_authored_si_latex(
     claims: Sequence[Claim],
     evidence: Optional[Sequence[EvidenceItem]] = None,
     bib_path: Optional[str] = None,
+    novelty_sentences: Optional[List[NoveltySentence]] = None,
+    draft_font_policy: bool = False,
 ) -> Optional[str]:
     """Render the AUTHORED ``si.tex`` (belief artifact ②) -- REUSE the prose pipeline.
 
@@ -143,6 +159,15 @@ def render_authored_si_latex(
             ``si.py:540-543``). ``None`` (a citation-free SI, or no pool) -> NO
             ``\\bibliography`` line (REQ-SA-602). The renderer stays PURE: it never
             reads the file; the caller (the compiler) builds + co-locates it.
+        novelty_sentences: when given, every ``\\novelty{kind}{hyp}{text}`` in a section
+            body is appended to it as a :class:`~sci_adk.render.novelty.NoveltySentence`
+            (document ``si.tex``). The SI carries only the plain sentence.
+        draft_font_policy: the figure font policy decided for the whole run
+            (:func:`paper.run_font_policy`: the draft's or the SI's figures), which the
+            compiler also passes to ``render_paper_latex``. The SI is submitted beside the
+            draft, so both are set in the same faces -- Times text and math, Helvetica sans
+            -- even when only one of them carries a figure; otherwise a figure-less SI keeps
+            Latin Modern.
 
     Returns:
         A STANDALONE LaTeX document string, or ``None`` when ``si`` is ``None``.
@@ -176,14 +201,15 @@ def render_authored_si_latex(
         # reuse, REQ-SA-101/103): (1) substitute_factrefs (\evval/\status fidelity, FAIL-LOUD;
         # a hand-authored table's \evval cells are substituted to recorded values CELL BY CELL,
         # REQ-SA-104), then (2) the \novelty render+gate (FAIL-LOUD on an unbacked novelty
-        # claim, scope baked from the record). \ref/\cite and all authored LaTeX pass through
-        # verbatim. A bare-literal number is outside the fidelity gate (the documented honest
-        # limit, identical to main.tex; the P2 number-audit -- already wired over si.tex --
-        # is the belief-side backstop).
+        # claim; plain sentence + record scope, binding collected). \ref/\cite and all
+        # authored LaTeX pass through verbatim. A bare-literal number is outside the fidelity
+        # gate (the documented honest limit, identical to main.tex; the P2 number-audit --
+        # already wired over si.tex -- is the belief-side backstop).
         return _render_si_novelty(
             substitute_factrefs(text.strip(), evidence, claims),
             spec,
             novelty_decisions,
+            found=novelty_sentences,
         )
 
     # Title: the agent's SI title, else spec.id (the same short fallback the paper uses).
@@ -195,15 +221,18 @@ def render_authored_si_latex(
     #    graphicx only for an image figure -- a figure-less SI stays minimal.
     has_native = any(f.kind == "native" for f in figures)
     has_image = any(f.kind == "image" for f in figures)
+    font_policy = has_native or has_image or draft_font_policy
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
-    lines.extend(T1_FONT_LINES)
-    lines.append(r"\usepackage{hyperref}")
+    lines.extend(text_font_lines(font_policy))
+    lines.append(HYPERREF_LINE)
     lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")
-    if has_native or has_image:
+    if font_policy:
         # Figure font policy (design/paper-publishing-requirements.md F2), mirroring the
-        # paper/dump: newtxmath (Times-compatible math) + helvet (Arial-compatible sans).
+        # paper/dump: Times text (newtxtext, in the font lines above) and math (newtxmath)
+        # + helvet (Arial-compatible sans). Also for a figure-less SI beside a draft the
+        # policy applies to, so the submission has one body face.
         lines.append(r"\usepackage{amsmath}")
         lines.append(r"\usepackage{newtxmath}")
         lines.append(r"\usepackage[scaled]{helvet}")
@@ -212,11 +241,8 @@ def render_authored_si_latex(
         lines.append(r"\pgfplotsset{compat=1.18}")
     if has_image:
         lines.append(r"\usepackage{graphicx}")
-    # \novelty{kind}{hyp}{text} survives into si.tex; this \newcommand makes LaTeX render
-    # only the text. Emitted ONLY when an authored section carries novelty markup.
-    has_nov = any(has_novelty_markup(s.body) for s in si.sections if s.body)
-    if has_nov:
-        lines.append(NOVELTY_NEWCOMMAND)
+    # No \novelty macro in the preamble: a novelty assertion renders as its plain sentence
+    # (_render_si_novelty); its {kind, hyp} binding lives in a side file, not in the source.
     # SI numbering convention (REQ-SA-106): tables/figures are S-prefixed, so a main-paper
     # plain-text "Figure S<n>" matches this document's printed number (cross-document \ref
     # via xr is DROPPED, design §6 -- linkage stays plain-text S-refs + the cross-doc gate).

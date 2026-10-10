@@ -70,14 +70,19 @@ artifacts; the kernel carries no domain code.
   including null and negative results. Each entry carries `bears_on[]` (which
   hypotheses it speaks to, and the direction: supports / contradicts / inconclusive)
   STRICTLY per the Spec MethodPlan's pre-registered mapping.
-- `provenance.code_ref` names the code that produced the result, and the reproduction
-  bundle ships and re-runs the file it names. Write the script's path (workspace- or
-  run-relative), optionally followed by ` sha256=<hex>` of that file as it ran
-  (`sha256sum <file>`); or, for code that is not a workspace file, the commit/ref. One
-  script per `code_ref`: descriptions, the scripts that built its inputs, and notes such
-  as "no git commit" go in the finding. A `code_ref` that does not resolve to a file is
-  kept as a pointer the bundle cannot run, and a file whose sha256 no longer matches is
-  not shipped as the recorded code.
+- `provenance.code_ref` names the code that produced the result. The reproduction bundle
+  ships the source files it names (under `paper/code/`) and checks each against its
+  recorded hash; it does not re-run them, because the record holds no command-line
+  arguments or input files. Write the script's path (workspace- or run-relative),
+  followed by ` sha256=<hex>` of that file as it ran (`sha256sum <file>`); or, for code
+  that is not a workspace file, the commit/ref. A script that built this result's inputs
+  is named the same way, `<path> sha256=<hex>`, after the first one, and ships too. Only
+  source files ship (program files such as `.py`, `.R`, `.jl`, `.m`, `.sh`, `.do`,
+  `.ipynb`, recognised by extension); a data file named with its hash
+  (`data/x.csv sha256=<hex>`) is listed with that hash in `paper/reproduce.py` and never
+  shipped. Descriptions and notes such as "no git commit" go in the finding. A
+  `code_ref` that does not resolve to a file is kept as a pointer, and a file whose
+  sha256 no longer matches is not shipped as the recorded code.
 - **Record the numbers a paper will state as values, not only prose.** Every count,
   constant and quoted value a paper may state goes into the finding JSON as a named
   number: `{"summary": "<what was done>", "<name>": <value>, ...}` (counts after each

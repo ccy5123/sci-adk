@@ -42,6 +42,7 @@ from sci_adk.core.spec import Spec
 from sci_adk.loop.claim_updater import _NOVELTY_KINDS
 from sci_adk.loop.literature_triggers import contested_open, novelty_open
 from sci_adk.loop.prior_work import prior_work_open
+from sci_adk.provenance import spec_digest
 
 
 class StatusReport(BaseModel):
@@ -69,6 +70,9 @@ class StatusReport(BaseModel):
             CONTESTED_RECORD decision yet.
         checkpoints_awaiting_verdict: hypothesis ids with a ``checkpoints/<hyp>.json``
             but no matching ``verdicts/<hyp>.json``.
+        spec_digest: :func:`sci_adk.provenance.spec_digest` of the recorded Spec -- the
+            value ``append-evidence`` / ``derive-claim`` check ``--spec-digest`` against
+            ("" when no spec). Not the sha256 of the spec.json file.
         headline: the one-line summary (line 1 of the rendered text).
     """
 
@@ -84,6 +88,7 @@ class StatusReport(BaseModel):
     novelty_unresolved: List[str] = Field(default_factory=list)
     contested_pending: List[str] = Field(default_factory=list)
     checkpoints_awaiting_verdict: List[str] = Field(default_factory=list)
+    spec_digest: str = Field(default="")
     headline: str = Field(default="")
 
 
@@ -146,6 +151,7 @@ def session_status(run_dir: Path) -> StatusReport:
             run_name=run_name,
             n_hypotheses=len(spec.hypotheses),
             checkpoints_awaiting_verdict=awaiting,
+            spec_digest=spec_digest(spec),
             headline=_headline(run_name, spec_id=spec.id, n_unresolved=0,
                                prior_work_open=False, n_novelty=0,
                                n_awaiting=len(awaiting), has_record=bool(awaiting)),
@@ -191,6 +197,7 @@ def session_status(run_dir: Path) -> StatusReport:
         novelty_unresolved=novelty_unresolved,
         contested_pending=contested_pending,
         checkpoints_awaiting_verdict=awaiting,
+        spec_digest=spec_digest(spec),
         headline=headline,
     )
 
@@ -209,10 +216,15 @@ def render_status_text(report: StatusReport) -> str:
     counts = ", ".join(
         f"{status}={n}" for status, n in sorted(report.claim_counts.items())
     )
+    noun = "hypothesis" if report.n_hypotheses == 1 else "hypotheses"
     lines.append(
-        f"  spec: {report.spec_id}  ({report.n_hypotheses} hypothesis"
-        f"{'es' if report.n_hypotheses != 1 else ''}, run '{report.run_name}')"
+        f"  spec: {report.spec_id}  ({report.n_hypotheses} {noun}, "
+        f"run '{report.run_name}')"
     )
+    # The value --spec-digest takes, on the same "spec_digest:" line init-spec and
+    # amend-spec print at freeze (not the sha256 of the spec.json file).
+    if report.spec_digest:
+        lines.append(f"  spec_digest: {report.spec_digest}")
     lines.append(f"  claims: {counts if counts else 'none recorded'}")
 
     if report.unresolved_claim_ids:

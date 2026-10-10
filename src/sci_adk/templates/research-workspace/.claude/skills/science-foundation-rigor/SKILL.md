@@ -114,7 +114,7 @@ verb, which enforces typing, provenance, and append-only-ness.
 | `sci-adk execute` | experiment | Runs the frozen MethodPlan, capturing provenance |
 | `sci-adk append-evidence` | experiment | Appends ONE typed, immutable Evidence entry with `bears_on[]` |
 | `sci-adk derive-claim` | experiment | Applies the DecisionRule; records Claim status + confidence + basis |
-| `sci-adk render` | publish | Renders `paper/{draft.tex, si.tex, figures/, references.bib}` from the record |
+| `sci-adk render` | publish | Renders `paper/draft.tex`, `figures/` and `references.bib` from the record, `paper/si.tex` only from an authored `--si si.json`; deposits the record dump at `runs/<id>/record.tex`, outside `paper/` |
 | `sci-adk verify` | verify | Read-only audit; exits 0 iff every recorded claim reproduces (the verdict) |
 | `sci-adk resolve` | experiment | Resolves the checkpoints the engine surfaced (verdict loop) |
 | `sci-adk status` | any | Read-only snapshot: open checkpoints, unresolved/contested claims (no LLM) |

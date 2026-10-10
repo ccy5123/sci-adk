@@ -280,6 +280,77 @@ def test_entry_text_must_be_a_literal_as_the_tokenizer_reads_it():
     assert "numbers[0]" in problem and "95" in problem
 
 
+# A literal beyond any float: "1081e637" (a checksum fragment the trial had to declare)
+# used to make printed_match compute 0.5 * 10**637 and crash verify with a traceback.
+
+def test_a_non_finite_literal_never_matches_and_does_not_overflow():
+    assert printed_match(1.0, parse_literal_text("1081e637")) is False
+    assert printed_match(0.0, parse_literal_text("0e999")) is False
+
+
+@pytest.mark.parametrize("entry", [
+    {"text": "1081e637", "source": ev("point")},
+    {"text": "1081e637", "formula": "a", "operands": {"a": ev("point")}},
+])
+def test_a_non_finite_literal_must_be_declared_an_identifier(entry):
+    (problem,) = _problems(entry)
+    assert "not a finite number" in problem and "identifier" in problem
+    assert _problems({"text": "1081e637", "role": "identifier"}) == []
+
+
+def test_a_checksum_needs_no_entry_and_its_old_fragments_go_stale():
+    docs = {"draft.tex": (
+        "the decrypted copy, which all steps read, has SHA-256 "
+        "1081e637f6bd39f9ba86d0e005cf657ea054ad302fd57e5d2e8d6841fd95c461. From "
+        r"OPERA\_Data.zip, SHA-256 "
+        "9dc5d6387201df0f66e9472b034aeaa09ef7a47f705b9b5f50d7c9af8a1aadc3, downloaded")}
+    numbers = _numbers({"text": "256", "role": "identifier"},
+                       {"text": "1081e637", "role": "identifier"},
+                       {"text": "9", "role": "identifier", "context": "9dc5d6387201"})
+    assert coverage_problems(numbers, docs) == []
+    stale = stale_entries(numbers, docs)
+    assert len(stale) == 2
+    assert "'1081e637'" in stale[0] and "'9'" in stale[1]
+
+
+# A date-time ("2026-10-08T10:03:39Z") is one literal, and it can only be an identifier: no
+# recorded field holds a time of day, so a source naming one is a coincidence.
+
+STAMP = "2026-10-08T10:03:39Z"
+STAMP_RECORD = NumberRecord(
+    spec_json=dict(SPEC, method={"approaches": [f"protocol created at {STAMP}"]}),
+    evidence=EVIDENCE, bib_years={"Arnot2006": "2006"})
+
+
+@pytest.mark.parametrize("entry", [
+    {"text": STAMP, "source": ev("point")},
+    {"text": STAMP, "source": {"spec_text": "method.approaches[0]"}},
+    {"text": STAMP, "source": {"bib": "Arnot2006"}},
+    {"text": STAMP, "formula": "a", "operands": {"a": ev("point")}},
+])
+def test_a_date_time_can_only_be_declared_an_identifier(entry):
+    (problem,) = resolution_problems(_numbers(entry), STAMP_RECORD)
+    assert "date-time" in problem and "identifier" in problem
+    assert resolution_problems(_numbers({"text": STAMP, "role": "identifier"}),
+                               STAMP_RECORD) == []
+
+
+def test_a_date_time_entry_covers_the_time_and_old_fragment_entries_go_stale():
+    docs = {"si.tex": (r"The amendment was recorded at \texttt{2026-10-08T14:05:17Z}; "
+                       r"the slope was 0.769.")}
+    slope = {"text": "0.769", "document": "si.tex", "source": ev("effect_size")}
+    numbers = _numbers({"text": "2026-10-08T14:05:17Z", "document": "si.tex",
+                        "role": "identifier"}, slope)
+    assert coverage_problems(numbers, docs) == []
+    assert stale_entries(numbers, docs) == []
+    # The entries the old split asked for cover nothing now, and the time needs its own.
+    old = _numbers(*({"text": t, "document": "si.tex", "role": "identifier"}
+                     for t in ("2026-10-08", "14", "05", "17")), slope)
+    (problem,) = coverage_problems(old, docs)
+    assert "2026-10-08T14:05:17Z" in problem
+    assert len(stale_entries(old, docs)) == 4
+
+
 # --------------------------------------------------------------------------- #
 # 3. stale entries + 4. identifiers (advisory)
 # --------------------------------------------------------------------------- #

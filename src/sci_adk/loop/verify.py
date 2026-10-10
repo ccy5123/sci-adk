@@ -43,6 +43,7 @@ kernel-side pure JSON; no ``kernel -> adapter`` import).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -71,7 +72,15 @@ from sci_adk.core.validity import (
     derive_novelty_status,
 )
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
-from sci_adk.loop.code_ref import describe_mismatch, resolve_code_ref
+from sci_adk.loop.code_ref import (
+    NON_REPRODUCIBLE_KINDS,
+    NamedData,
+    NamedScript,
+    describe_data_mismatch,
+    describe_mismatch,
+    resolve_code_ref_data_files,
+    resolve_code_ref_scripts,
+)
 from sci_adk.loop.compiler import ResearchCompiler, deposit_record_path
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.prior_work import prior_work_open
@@ -91,18 +100,24 @@ from sci_adk.render.declaration_checks import (
     opening_note_lines,
     review_note_lines,
 )
-from sci_adk.render.novelty import find_unsupported_novelty
+from sci_adk.render.novelty import (
+    NOVELTY_SENTENCES_FILE,
+    find_unbacked_novelty_sentences,
+    find_unsupported_novelty,
+    parse_novelty_sentences,
+)
 from sci_adk.render.number_audit import (
     RecordedValuePool,
     number_audit_problems,
     pool_from_record,
 )
 from sci_adk.render.number_checks import NumberRecord, number_list_checks
-from sci_adk.render.paper import check_paper_tool_vocabulary
+from sci_adk.render.paper import _latex_sanitize, check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
     bib_latex_safety_problems,
     bib_month_advisories,
+    bib_sort_advisories,
     bibliography_stems,
     body_word_range_problems,
     citation_disambiguation_problems,
@@ -124,6 +139,7 @@ from sci_adk.render.pubreqs_checks import (
     required_sections_problems,
     section_order_problems,
 )
+from sci_adk.render.reproduction import bundle_file_names, listed_scripts
 
 # The rendered paper SUBMISSION documents verify re-checks for internal \ref<->\label
 # integrity (design/paper-figures-and-si.md D4, Phase 3). Both are checked WITHIN
@@ -180,6 +196,9 @@ class VerifyOutcome:
         result: ``REPRODUCED`` | ``DIVERGED`` | ``UNRESOLVED``.
         rederived_basis: the re-derived ``Verdict.confidence.basis`` (the audit's
             own justification, distinct from the recorded claim's basis).
+        novelty_kind: ``"result"`` / ``"method"`` for a novelty claim
+            (``claim-novelty-{kind}-<hyp>``); ``None`` for the experiment claim. A
+            hypothesis can carry both, so this is what tells their outcomes apart.
     """
 
     hypothesis_id: str
@@ -187,6 +206,14 @@ class VerifyOutcome:
     rederived_status: Optional[ClaimStatus]
     result: str
     rederived_basis: str
+    novelty_kind: Optional[str] = None
+
+    @property
+    def label(self) -> str:
+        """The claim this outcome is for: ``H2`` or ``H2 (novelty, result)``."""
+        if self.novelty_kind:
+            return f"{self.hypothesis_id} (novelty, {self.novelty_kind})"
+        return self.hypothesis_id
 
 
 @dataclass(frozen=True)
@@ -218,14 +245,21 @@ class VerifyReport:
             REQ-SA-206): phrases/words that name the sci-adk machinery instead of the
             science (``sci-adk``, ``frozen Spec``, ``verdict``, ``Evidence record``, ...).
             EMPTY when the submission documents read as tool-agnostic science / no paper.
+            The distinct terms across all documents, first-seen order.
+        paper_tool_vocab_by_doc: the same leaks keyed by the document that carries them
+            (``"draft.tex"`` / ``"si.tex"``), so the author is sent to the right file. A
+            clean document has no entry; EMPTY when every document is clean / no paper.
         paper_tool_clean: True iff no submission document carries a tool-vocabulary leak
             (and True vacuously with no draft.tex/si.tex). Part of the HARD gate.
-        paper_novelty_problems: per-paper-document ``\\novelty{kind}{hyp}{...}`` assertions
-            (the novelty/priority markup) that do NOT re-derive SUPPORTED from the record
-            (N3 gate), keyed by file name. A SUPPORTED assertion is silent; an unsupported /
+        paper_novelty_problems: per-paper-document novelty/priority assertions that do NOT
+            re-derive SUPPORTED from the record (N3 gate), keyed by file name: the bindings
+            of ``novelty_sentences.json`` (each rendered plain sentence -> its {kind, hyp};
+            a binding whose sentence is no longer in its document is a problem too) and any
+            surviving ``\\novelty{kind}{hyp}{...}`` markup (drafts rendered before the
+            plain-sentence change). A SUPPORTED assertion is silent; an unsupported /
             unknown-hyp / bad-kind one (e.g. the backing ``found_nothing`` decision was
-            deleted) is a problem line. EMPTY when clean / no paper. BOTH ``draft.tex`` and
-            ``si.tex`` are scanned (no gap where an author sneaks ``\\novelty`` into SI prose).
+            deleted) is a problem line; a malformed side file is keyed by its own name.
+            EMPTY when clean / no paper. BOTH ``draft.tex`` and ``si.tex`` are covered.
         paper_novelty_clean: True iff no paper document carries an unsupported novelty
             assertion (and True vacuously with no paper). Part of the HARD gate.
         declaration_problems: the conclusion-declaration failures (design §11.3): a declared
@@ -305,6 +339,7 @@ class VerifyReport:
     paper_factrefs: Dict[str, List[str]] = field(default_factory=dict)
     paper_factref_clean: bool = field(default=True)
     paper_tool_vocab: List[str] = field(default_factory=list)
+    paper_tool_vocab_by_doc: Dict[str, List[str]] = field(default_factory=dict)
     paper_tool_clean: bool = field(default=True)
     paper_novelty_problems: Dict[str, List[str]] = field(default_factory=dict)
     paper_novelty_clean: bool = field(default=True)
@@ -446,6 +481,9 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
                         "recorded claim references a hypothesis absent from spec.json "
                         "(cannot re-derive belief from this Spec version)"
                     ),
+                    # A hypothesis can carry an experiment claim AND novelty claims; the
+                    # kind is what tells their outcomes apart in the report.
+                    novelty_kind=_novelty_kind_or_none(claim),
                 )
             )
             continue
@@ -488,7 +526,10 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # Tool-vocabulary gate (§10): the SUBMISSION documents (draft.tex AND the authored
     # si.tex; SPEC-SI-AUTHORING-001 REQ-SA-204) must read as tool-agnostic science. The
     # deposit's record.tex is EXEMPT (REQ-SA-206, lives outside paper/). READ-ONLY, no LLM.
-    paper_tool_vocab = _check_paper_tool_vocab(run_dir)
+    paper_tool_vocab_by_doc = _check_paper_tool_vocab(run_dir)
+    paper_tool_vocab = list(dict.fromkeys(
+        term for terms in paper_tool_vocab_by_doc.values() for term in terms
+    ))
     paper_tool_clean = not paper_tool_vocab
 
     # Novelty gate (N3): every \novelty{kind}{hyp}{...} in the paper (draft.tex AND si.tex)
@@ -594,6 +635,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_factrefs=paper_factrefs,
         paper_factref_clean=paper_factref_clean,
         paper_tool_vocab=paper_tool_vocab,
+        paper_tool_vocab_by_doc=paper_tool_vocab_by_doc,
         paper_tool_clean=paper_tool_clean,
         paper_novelty_problems=paper_novelty_problems,
         paper_novelty_clean=paper_novelty_clean,
@@ -848,6 +890,17 @@ def _novelty_kind_of(claim: Claim) -> Literal["result", "method"]:
     )
 
 
+def _novelty_kind_or_none(claim: Claim) -> Optional[Literal["result", "method"]]:
+    """The novelty kind of ``claim``, or ``None`` for an experiment claim or an id that is
+    not a recognised 2-kind novelty id (a label must never raise)."""
+    if not _is_novelty_claim(claim):
+        return None
+    try:
+        return _novelty_kind_of(claim)
+    except ValueError:
+        return None
+
+
 def _audit_novelty_claim(
     hypothesis: Hypothesis,
     kind: Literal["result", "method"],
@@ -885,6 +938,7 @@ def _audit_novelty_claim(
         rederived_status=rederived,
         result=result,
         rederived_basis=basis,
+        novelty_kind=kind,
     )
 
 
@@ -962,32 +1016,60 @@ def _check_paper_factrefs(run_dir: Path) -> Dict[str, List[str]]:
 def _check_paper_novelty(
     run_dir: Path, spec: Spec, novelty_decisions: List[EvidenceItem]
 ) -> Dict[str, List[str]]:
-    """Re-derive every ``\\novelty{kind}{hyp}{...}`` assertion in each paper document (N3).
+    """Re-derive every novelty assertion of each paper document (N3).
 
-    READ-ONLY (mirrors :func:`_check_paper_factrefs`): reads ``run_dir/paper/<doc>.tex`` for
-    each of ``_PAPER_DOCS`` that EXISTS and re-runs the SAME record re-derivation the
-    renderer did (:func:`sci_adk.render.novelty.find_unsupported_novelty`, which re-derives
-    via ``derive_novelty_status`` -- the single source of truth, NOT the recorded claim). A
-    document with an unsupported / unknown-hyp / bad-kind novelty assertion (e.g. the backing
-    ``found_nothing`` decision was deleted) yields its problem lines; a fully-supported (or
-    novelty-free) document yields none. Returns a map keyed by file name -> the problems
-    (only for documents that have any); an empty map means clean / no paper.
+    READ-ONLY (mirrors :func:`_check_paper_factrefs`). Two sources, both re-derived via
+    ``derive_novelty_status`` (the single source of truth, NOT the recorded claim):
 
-    BOTH ``draft.tex`` and ``si.tex`` are scanned -- there is no gap where an author could
-    sneak ``\\novelty`` into SI prose to dodge the gate (the SI also runs the N2 render gate).
+      - the binding side file ``run_dir/novelty_sentences.json`` that ``render`` writes:
+        the rendered paper carries each assertion as a PLAIN sentence (no markup a reviewer
+        would not recognize), and this file binds it to its {kind, hypothesis}. Every
+        binding must re-derive SUPPORTED, its sentence must end with the scope the record
+        gives now (escaped as the renderer escapes it) and must still be in its document
+        (:func:`sci_adk.render.novelty.find_unbacked_novelty_sentences`). A malformed file
+        is a loud failure keyed by its own name, never a silent skip.
+      - surviving ``\\novelty{kind}{hyp}{...}`` markup in ``run_dir/paper/<doc>.tex`` for
+        each of ``_PAPER_DOCS`` that EXISTS -- drafts rendered before the plain-sentence
+        change, or hand-edited ones (:func:`sci_adk.render.novelty.find_unsupported_novelty`),
+        so an older draft is checked as before.
+
+    An unsupported / unknown-hyp / bad-kind assertion (e.g. the backing ``found_nothing``
+    decision was deleted) yields its problem lines; a fully-supported (or novelty-free) paper
+    yields none. Returns a map keyed by file name -> the problems (only for files that have
+    any); an empty map means clean / no paper. BOTH ``draft.tex`` and ``si.tex`` are covered
+    -- there is no gap where an author could sneak a novelty claim into SI prose.
     """
     paper_dir = run_dir / "paper"
     problems: Dict[str, List[str]] = {}
-    if not paper_dir.is_dir():
-        return problems
-    for name in _PAPER_DOCS:
-        doc = paper_dir / name
-        if doc.is_file():
-            found = find_unsupported_novelty(
-                doc.read_text(encoding="utf-8"), spec, novelty_decisions
+    documents: Dict[str, str] = {}
+    if paper_dir.is_dir():
+        for name in _PAPER_DOCS:
+            doc = paper_dir / name
+            if doc.is_file():
+                documents[name] = doc.read_text(encoding="utf-8")
+    for name, text in documents.items():
+        found = find_unsupported_novelty(text, spec, novelty_decisions)
+        if found:
+            problems[name] = found
+
+    side = run_dir / NOVELTY_SENTENCES_FILE
+    if side.is_file():
+        try:
+            sentences = parse_novelty_sentences(
+                json.loads(side.read_text(encoding="utf-8")), spec.id
             )
-            if found:
-                problems[name] = found
+        except ValueError as exc:  # json.JSONDecodeError is a ValueError
+            # Keyed by the file name, which the CLI prints before each line.
+            problems[NOVELTY_SENTENCES_FILE] = [
+                f"{exc} -- render writes this file; re-render the paper instead of "
+                "editing it."
+            ]
+        else:
+            unbacked = find_unbacked_novelty_sentences(
+                sentences, documents, spec, novelty_decisions, escape=_latex_sanitize
+            )
+            for name, lines in unbacked.items():
+                problems[name] = sorted(set(problems.get(name, [])) | set(lines))
     return problems
 
 
@@ -1309,7 +1391,7 @@ def _append_search_log_finding(
         )
 
 
-def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
+def _check_paper_tool_vocab(run_dir: Path) -> Dict[str, List[str]]:
     """Re-scan the SUBMISSION documents for §10 tool-vocabulary leaks (READ-ONLY).
 
     SPEC-SI-AUTHORING-001 REQ-SA-204 (AC-B4): under the authoring flow ``si.tex`` is a
@@ -1323,18 +1405,18 @@ def _check_paper_tool_vocab(run_dir: Path) -> List[str]:
     ``environment:``. It lives OUTSIDE ``paper/`` (only ``_PAPER_DOCS`` under ``paper/``
     are scanned), so the exemption holds BY CONSTRUCTION -- the boundary cannot invert.
 
-    Returns the distinct forbidden terms found across the submission documents (empty =
-    clean / no submission docs), via the pure
-    :func:`sci_adk.render.paper.check_paper_tool_vocabulary`.
+    Returns the forbidden terms keyed by the document that carries them (a clean document
+    has no entry; empty = clean / no submission docs), via the pure
+    :func:`sci_adk.render.paper.check_paper_tool_vocabulary` run on each document.
     """
     paper_dir = run_dir / "paper"
-    leaks: List[str] = []
+    leaks: Dict[str, List[str]] = {}
     for name in _PAPER_DOCS:
         doc = paper_dir / name
         if doc.is_file():
-            for term in check_paper_tool_vocabulary(doc.read_text(encoding="utf-8")):
-                if term not in leaks:
-                    leaks.append(term)
+            terms = check_paper_tool_vocabulary(doc.read_text(encoding="utf-8"))
+            if terms:
+                leaks[name] = terms
     return leaks
 
 
@@ -1499,7 +1581,9 @@ def _check_paper_requirements(
     # that breaks math, a character pdflatex cannot typeset with the preamble render emits)
     # FAILS, naming the file, the entry key and the character. A run rendered before the copy
     # existed fails until it is re-rendered.
-    for _bib_name in ("references.bib", "references_SI.bib"):
+    # A cited entry whose first author BibTeX sorts after Z (a raw Ð Þ Đ Ŋ) is advisory.
+    si_tex = si_tex_path.read_text(encoding="utf-8") if si_tex_path.is_file() else ""
+    for _bib_name, _citing_tex in (("references.bib", draft_tex), ("references_SI.bib", si_tex)):
         _bib_file = run_dir / "paper" / _bib_name
         if not _bib_file.is_file():
             continue
@@ -1507,6 +1591,7 @@ def _check_paper_requirements(
         if not _braces_balanced(_bib_text):
             problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
         problems.extend(bib_latex_safety_problems(_bib_text, source=_bib_name))
+        warnings.extend(bib_sort_advisories(_citing_tex, _bib_text, source=_bib_name))
 
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
@@ -1519,15 +1604,9 @@ def _check_paper_requirements(
 # They must never enter the reproduction-bundle requirement: reproduction is about the
 # GENERATING code, and requiring an already-rendered ``reproduce.py`` to reference a
 # decision ref recorded AFTER render would break verify the moment a user honestly records
-# prior work / novelty / a contested decision (the field-report P3 trap).
-_NON_REPRODUCIBLE_KINDS = frozenset(
-    {
-        EvidenceKind.PRIOR_WORK_DECISION,
-        EvidenceKind.NOVELTY_DECISION,
-        EvidenceKind.CONTESTED_RECORD,
-        EvidenceKind.INQUIRY_DECISION,
-    }
-)
+# prior work / novelty / a contested decision (the field-report P3 trap). The compiler
+# leaves the same kinds out of the bundle (one shared set, loop/code_ref.py).
+_NON_REPRODUCIBLE_KINDS = NON_REPRODUCIBLE_KINDS
 
 
 def _reproduction_bundle_problems(
@@ -1542,53 +1621,77 @@ def _reproduction_bundle_problems(
     (loop/compiler.py ``_emit_reproduction_bundle``) -- are:
 
       1. ``paper/reproduce.py`` MUST EXIST and be non-empty. The compiler writes it whenever
-         ANY Evidence item carries a ``code_ref`` (scripts OR pure pointers). A contract that
-         declares ``reproduction_bundle`` but whose run has at least one ``code_ref`` yet no
-         ``reproduce.py`` is a real failure (the bundle was declared but not produced / was
-         hand-deleted).
+         ANY generating-code Evidence item carries a ``code_ref`` (scripts OR pure
+         pointers). A contract that declares ``reproduction_bundle`` but whose run has at
+         least one ``code_ref`` yet no ``reproduce.py`` is a real failure (the bundle was
+         declared but not produced / was hand-deleted).
 
-      2. ``reproduce.py`` MUST reference the REAL recorded ``code_ref``s. The driver embeds
-         every ``code_ref`` it was built from (in its ``SCRIPTS`` / ``POINTERS`` lists -- see
-         render/reproduction.render_reproduce_driver), so the gate confirms each ``code_ref``
-         recorded in the Evidence appears in the driver text. A ``reproduce.py`` that omits a
-         recorded ``code_ref`` references a bundle out of sync with the record (fail).
+      2. ``reproduce.py`` MUST list the REAL recorded ``code_ref``s. Its machine section
+         embeds every ``code_ref`` it was built from (render/reproduction
+         ``render_reproduce_driver``), so the gate confirms each ``code_ref`` recorded in the
+         Evidence appears in the driver text (verbatim, or as the Python literal it is
+         written as). A ``reproduce.py`` that omits one is out of sync with the record.
 
-      3. ``paper/code/`` is required NON-EMPTY ONLY when the run has RESOLVABLE SCRIPTS. The
-         compiler writes ``paper/code/`` only when at least one ``code_ref`` resolved to a
-         co-located script; a POINTER-ONLY run (an all-pointer run: bare git hashes, no
-         co-located scripts) honestly writes NO ``paper/code/`` dir. OF-4 (fail-open) wins over
-         §3.3's literal "non-empty": we CANNOT require ``paper/code/`` for an all-pointer
-         bundle -- the gate must PASS for an honest pointer-only ``reproduce.py``. We therefore
-         do NOT inspect ``paper/code/`` directly: requirement (2) already proves the driver
-         references the real refs, and whether a ref resolved to a script vs a pointer is the
-         compiler's fail-open decision, not a gate condition. (We never re-resolve paths or
-         execute code -- running recorded code inside the read-only verify gate is out of
-         scope and unsafe, design §3.3.)
+      3. Every script a ``code_ref`` names WITH a recorded ``sha256=`` that resolves in the
+         workspace (the compiler ships exactly these) MUST have a copy in ``paper/code/``
+         hashing to that value -- one line per missing script. This is what makes the
+         listing meaningful: the bundle holds the recorded code, byte for byte. A
+         POINTER-ONLY run (bare git hashes, no co-located scripts) honestly writes NO
+         ``paper/code/``; OF-4 (fail-open) wins over §3.3's literal "non-empty", so such a
+         run passes. A script named WITHOUT a hash is not pinned by the record, so its copy
+         is not checked here.
+
+      4. A ``code_ref`` that names a file AND records its ``sha256=``, where the file on disk
+         no longer hashes to that value, FAILS (one line per named script: the Evidence id,
+         the file, the recorded and actual hashes). Unlike a bare commit, this is not an
+         honest pointer: the record names code the workspace no longer holds, so the bundle
+         cannot ship it. Every script a ``code_ref`` names is read with the compiler's own
+         reading (:func:`sci_adk.loop.code_ref.resolve_code_ref_scripts`) -- the gate
+         re-reads and hashes files, it never executes them. A DATA file a ``code_ref`` names
+         with a hash is listed, never shipped, but the same holds for it: one the workspace
+         holds that no longer hashes to the recorded value FAILS (one line per file, naming
+         the first Evidence id that names it) -- the result was computed from other data.
+         A data file the workspace does not hold cannot be checked; that is an advisory
+         line (:func:`_reproduction_advisory`), not a failure.
+
+      5. ``reproduce.py``'s script list (its ``SCRIPTS`` literal, read with ``ast``, never
+         executed) MUST be the one the record implies: every script the bundle ships, under
+         the name the compiler gives it, and for a script whose hash the record holds, that
+         hash. A missing entry, an entry no ``code_ref`` names, or an entry with another
+         hash FAILS -- a reader's ``python reproduce.py`` checks the shipped copies against
+         that list, so a list that drifted from the record would vouch for the wrong code.
+         A script named without a hash is not pinned by the record, so only its name is
+         compared. When the record ships no script, the list is not required.
 
     The set of recorded ``code_ref``s is read from the Evidence log (the same list verify
     already loaded). A run with NO ``code_ref`` at all (the compiler writes no bundle) but a
     contract that declares ``reproduction_bundle`` is a real failure: the contract asked for a
     bundle the record cannot back -- the absent ``reproduce.py`` is reported.
 
-      4. A ``code_ref`` that names a file AND records its ``sha256=``, where the file on disk
-         no longer hashes to that value, FAILS (one line per item: the Evidence id, the file,
-         the recorded and actual hashes). Unlike a bare commit, this is not an honest
-         pointer: the record names code the workspace no longer holds, so the bundle cannot
-         reproduce that result. Resolved with the compiler's own reading
-         (:func:`sci_adk.loop.code_ref.resolve_code_ref`) -- the gate re-reads the files,
-         it never executes them.
-
     Returns the failure lines (empty = the bundle satisfies the contract).
     """
     reproducible = _reproducible_code_refs(evidence)
     workspace = run_dir.parent.parent
+    named = [
+        (ev_id, ns)
+        for ev_id, ref in reproducible
+        for ns in resolve_code_ref_scripts(ref, run_dir, workspace)
+    ]
     problems = [
         "reproduction bundle: "
-        + describe_mismatch(ev_id, res)
-        + " -- the bundle cannot run the recorded code (restore that version of the "
+        + describe_mismatch(ev_id, ns.resolution)
+        + " -- the bundle cannot ship the recorded code (restore that version of the "
         "file, or re-run and record new Evidence)"
-        for ev_id, ref in reproducible
-        if (res := resolve_code_ref(ref, run_dir, workspace)).hash_mismatch
+        for ev_id, ns in named
+        if ns.resolution.hash_mismatch
+    ]
+    problems += [
+        "reproduction bundle: "
+        + describe_data_mismatch(ev_id, data)
+        + " -- the recorded result was computed from other data (restore that version of "
+        "the file, or re-run and record new Evidence)"
+        for ev_id, data in _named_data_files(run_dir, reproducible)
+        if data.hash_mismatch
     ]
     recorded_refs = sorted({ref for _ev_id, ref in reproducible})
 
@@ -1608,13 +1711,158 @@ def _reproduction_bundle_problems(
     if not driver.strip():
         return problems + ["reproduction bundle: paper/reproduce.py is present but empty"]
 
-    # The driver must reference each recorded code_ref (it embeds them in SCRIPTS/POINTERS).
-    missing_refs = [ref for ref in recorded_refs if ref not in driver]
+    # The driver must list each recorded code_ref (its machine section embeds them).
+    missing_refs = [
+        ref for ref in recorded_refs if ref not in driver and repr(ref) not in driver
+    ]
     if missing_refs:
+        # Usually Evidence recorded after the last render: the driver is behind the record.
         return problems + [
             "reproduction bundle: paper/reproduce.py does not reference recorded "
-            f"code_ref(s): {', '.join(missing_refs)}"
+            f"code_ref(s): {', '.join(missing_refs)} -- "
+            "re-run sci-adk render to refresh paper/"
         ]
+    return (
+        problems
+        + _shipped_copy_problems(run_dir / "paper" / "code", named)
+        + _script_list_problems(driver, _expected_bundle_scripts(named), named)
+    )
+
+
+def _named_data_files(
+    run_dir: Path, reproducible: List[Tuple[str, str]]
+) -> List[Tuple[str, NamedData]]:
+    """Each distinct data file the generating ``code_ref``s name with a hash, as the
+    workspace holds it now, with the first Evidence id naming it. Read-only (stats and
+    hashes the files)."""
+    workspace = run_dir.parent.parent
+    seen: Dict[Tuple[str, str], Tuple[str, NamedData]] = {}
+    for ev_id, ref in reproducible:
+        for data in resolve_code_ref_data_files(ref, run_dir, workspace):
+            seen.setdefault((data.path, data.recorded_sha256), (ev_id, data))
+    return list(seen.values())
+
+
+def _expected_bundle_scripts(
+    named: List[Tuple[str, NamedScript]],
+) -> Dict[str, Tuple[str, bool, str]]:
+    """The script list the record implies: ``paper/code/`` name -> (sha256, hash recorded?,
+    the first Evidence id naming it), built the way the compiler builds the bundle (one
+    entry per distinct content, named by :func:`bundle_file_names`). Read-only."""
+    contents: Dict[str, Tuple[str, bool, str]] = {}
+    for ev_id, ns in named:
+        script = ns.resolution.script
+        if script is None:
+            continue
+        try:
+            sha = hashlib.sha256(script.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        recorded = ns.recorded_sha256 is not None
+        if sha not in contents:
+            contents[sha] = (script.name, recorded, ev_id)
+        elif recorded and not contents[sha][1]:
+            contents[sha] = (contents[sha][0], True, contents[sha][2])
+    names = bundle_file_names([(sha, name) for sha, (name, _r, _e) in contents.items()])
+    return {names[sha]: (sha, recorded, ev_id)
+            for sha, (_name, recorded, ev_id) in contents.items()}
+
+
+def _script_list_problems(
+    driver: str,
+    expected: Dict[str, Tuple[str, bool, str]],
+    named: List[Tuple[str, NamedScript]] = (),
+) -> List[str]:
+    """Requirement 5 of :func:`_reproduction_bundle_problems`: ``reproduce.py``'s script
+    list against the one the record implies. Read-only; one line per discrepancy.
+
+    A listed script that a ``code_ref`` still names but the workspace no longer holds (moved
+    or deleted after render) is reported as such, WITHOUT the re-render advice: a re-render
+    would remove its copy from ``paper/code/``, the last one there is. It is matched by its
+    recorded hash, or, recorded without one, by its file name. When the record ships no
+    script, the list is not required: only such gone scripts are reported."""
+    rerender = " -- re-run sci-adk render to refresh paper/"
+    listed = listed_scripts(driver)
+    if not expected:
+        return [line for name, sha, _r in listed or []
+                if (line := _gone_script_line(name, sha, named)) is not None]
+    if listed is None:
+        return ["reproduction bundle: paper/reproduce.py has no script list in the current "
+                "format to check against the record" + rerender]
+    listed_hash = {name: sha for name, sha, _recorded in listed}
+    problems: List[str] = []
+    for name, (sha, recorded, ev_id) in expected.items():
+        if name not in listed_hash:
+            problems.append(
+                f"reproduction bundle: paper/reproduce.py does not list {name} "
+                f"(sha256={sha}), which {ev_id}'s code_ref names" + rerender
+            )
+        elif recorded and listed_hash[name] != sha:
+            problems.append(
+                f"reproduction bundle: paper/reproduce.py lists {name} with "
+                f"sha256={listed_hash[name]}, but the record names it with sha256={sha}"
+                + rerender
+            )
+    for name, sha in listed_hash.items():
+        if name in expected:
+            continue
+        line = _gone_script_line(name, sha, named)
+        problems.append(
+            line if line is not None
+            else f"reproduction bundle: paper/reproduce.py lists {name}, which no recorded "
+            "code_ref names" + rerender
+        )
+    return problems
+
+
+def _gone_script_line(
+    name: str, listed_sha: str, named: List[Tuple[str, NamedScript]]
+) -> Optional[str]:
+    """The line for a listed bundle entry whose script a ``code_ref`` names but the workspace
+    no longer holds -- matched by recorded hash, or (no hash recorded) by file name -- naming
+    the first Evidence id; ``None`` when no ``code_ref`` names such a script. PURE."""
+    for ev_id, ns in named:
+        resolution = ns.resolution
+        if resolution.script is not None or resolution.named_path is not None:
+            continue  # held (or held with another hash: reported as a mismatch)
+        if ns.recorded_sha256 is not None:
+            if ns.recorded_sha256 != listed_sha:
+                continue
+        elif ns.path.replace("\\", "/").rsplit("/", 1)[-1] != name:
+            continue
+        recorded = f" (sha256={ns.recorded_sha256})" if ns.recorded_sha256 else ""
+        return (
+            f"reproduction bundle: {ev_id}'s code_ref names {ns.path}{recorded}, but the "
+            "workspace no longer holds it; restore the file before re-rendering"
+        )
+    return None
+
+
+def _shipped_copy_problems(code_dir: Path, named: List[Tuple[str, NamedScript]]) -> List[str]:
+    """One line per recorded-hash script that resolves but has no matching copy in
+    ``paper/code/`` (requirement 3 of :func:`_reproduction_bundle_problems`). Read-only."""
+    shipped_hashes = set()
+    if code_dir.is_dir():
+        for path in sorted(code_dir.iterdir()):
+            if path.is_file():
+                try:
+                    shipped_hashes.add(hashlib.sha256(path.read_bytes()).hexdigest())
+                except OSError:
+                    continue
+    problems: List[str] = []
+    reported: set[Tuple[str, str]] = set()
+    for ev_id, ns in named:
+        expected = ns.recorded_sha256
+        if ns.resolution.script is None or expected is None or expected in shipped_hashes:
+            continue
+        if (ns.path, expected) in reported:
+            continue
+        reported.add((ns.path, expected))
+        problems.append(
+            f"reproduction bundle: paper/code/ holds no copy of {ns.path} "
+            f"(sha256={expected}), which {ev_id}'s code_ref names -- "
+            "re-run sci-adk render to refresh paper/"
+        )
     return problems
 
 
@@ -1633,13 +1881,16 @@ def _reproducible_code_refs(evidence: List[EvidenceItem]) -> List[Tuple[str, str
 
 
 def _reproduction_advisory(run_dir: Path, evidence: List[EvidenceItem]) -> List[str]:
-    """A NON-GATING line when a rendered bundle drives no script at all.
+    """NON-GATING lines about a rendered bundle: it ships no script at all, or a data file
+    a ``code_ref`` names with a hash is not in the workspace.
 
     A bare-commit ``code_ref`` is an honest pointer, so the F3 gate stays fail-open for it.
     But when EVERY generating-code ``code_ref`` of a run with a rendered
-    ``paper/reproduce.py`` is a pointer, the bundle re-runs nothing -- which is easy to miss
-    when the gate passes. Same reading as the compiler (:func:`resolve_code_ref`). No
-    ``reproduce.py`` (no bundle rendered, e.g. a record-only deposit) or no generating
+    ``paper/reproduce.py`` names no script that resolves, the bundle holds no code -- which
+    is easy to miss when the gate passes. Same reading as the compiler
+    (:func:`resolve_code_ref_scripts`). A data file the workspace does not hold cannot be
+    hash-checked (one held with another hash fails the gate instead), one line per file.
+    No ``reproduce.py`` (no bundle rendered, e.g. a record-only deposit) or no generating
     ``code_ref`` -> nothing to say.
     """
     if not (run_dir / "paper" / "reproduce.py").is_file():
@@ -1647,14 +1898,26 @@ def _reproduction_advisory(run_dir: Path, evidence: List[EvidenceItem]) -> List[
     reproducible = _reproducible_code_refs(evidence)
     if not reproducible:
         return []
-    workspace = run_dir.parent.parent
-    if any(resolve_code_ref(ref, run_dir, workspace).script for _id, ref in reproducible):
-        return []
-    return [
-        f"reproduce.py drives no script: all {len(reproducible)} code_refs are pointers "
-        "(none names an existing script file whose recorded sha256, if any, matches); a "
-        "code_ref names its script as the path, optionally followed by sha256=<hex>"
+    notes = [
+        f"reproduction bundle: {ev_id}'s code_ref names data file {data.path} "
+        f"(sha256={data.recorded_sha256}), which the workspace does not hold, so its hash "
+        "is not checked"
+        for ev_id, data in _named_data_files(run_dir, reproducible)
+        if data.missing
     ]
+    workspace = run_dir.parent.parent
+    if any(
+        ns.resolution.script
+        for _id, ref in reproducible
+        for ns in resolve_code_ref_scripts(ref, run_dir, workspace)
+    ):
+        return notes
+    return [
+        f"the reproduction bundle ships no script: all {len(reproducible)} code_refs are "
+        "pointers (none names an existing script file whose recorded sha256, if any, "
+        "matches); a code_ref names its script as the path, optionally followed by "
+        "sha256=<hex>"
+    ] + notes
 
 
 # -- package-requirements gate (design/near-submission-package.md §3) --------
@@ -1849,7 +2112,8 @@ def _check_package_requirements(
     # there unchanged and re-rendering a run never touches them.
     # A bare month name BibTeX does not define (month = June) is advisory: BibTeX only warns,
     # but the reference list loses the month (render's per-run copy writes the macro itself).
-    for _bib_name in ("references.bib", _REFERENCES_SI_BIB):
+    # So is a cited entry whose first author BibTeX sorts after Z (a raw non-ASCII letter).
+    for _bib_name, _citing_tex in (("references.bib", main_tex), (_REFERENCES_SI_BIB, si_tex)):
         _bib_file = manuscript_dir / _bib_name
         if not _bib_file.is_file():
             continue
@@ -1862,6 +2126,11 @@ def _check_package_requirements(
         )
         warnings.extend(
             bib_month_advisories(_bib_text, source=_bib_name, package_source=_bib_source)
+        )
+        warnings.extend(
+            bib_sort_advisories(
+                _citing_tex or "", _bib_text, source=_bib_name, package_source=_bib_source
+            )
         )
 
     # The character policy behind that check assumes the T1 font encoding, which the

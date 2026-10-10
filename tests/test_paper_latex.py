@@ -741,6 +741,11 @@ def test_tool_vocabulary_does_not_flag_ordinary_scientific_english():
         "Events were gated on forward scatter, and the recorded counts are shown.",
         "The specification of the instrument is given by the manufacturer.",
         "Evidence from three independent laboratories supports the effect.",
+        # "decision rule" alone is standard statistics (Wald; Bayes decision rules); only
+        # the compounds naming the authoring machinery are banned.
+        "Under the decision rule, the slope supports the hypothesis when its 95% "
+        "confidence interval lies within the band 0.7-1.0.",
+        "A Bayes decision rule minimizes the posterior expected loss.",
     ):
         assert check_paper_tool_vocabulary(sentence) == [], f"false positive: {sentence}"
 
@@ -762,8 +767,68 @@ def test_tool_vocabulary_catches_run_artifact_ids_and_filenames():
         "The frozen contract lives in pubreqs.json beside spec.json.",
         "As recorded in declarations.json and review.json.",
         "The open questions are listed in checkpoints.md.",
+        # an amended Spec keeps its earlier versions under spec_history/
+        "The first version of the protocol is kept as spec_history/spec.v1.json.",
+        "Version 12 is spec.v12.json.",
     ):
         assert check_paper_tool_vocabulary(leak), f"not caught: {leak}"
+
+
+def test_tool_vocabulary_id_match_stops_before_the_sentence_period():
+    """An id that ends a sentence is reported without the full stop.
+
+    The trial run's own audit put evidence ids at the ends of sentences; the reported
+    token is what the author searches for, so it must be the id itself.
+    """
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    assert check_paper_tool_vocabulary(
+        "The reference pairs were ordered opposite to log Kow, as recorded in "
+        "evi-obs-20261008-h2-discriminating-cases."
+    ) == ["evi-obs-20261008-h2-discriminating-cases"]
+    assert check_paper_tool_vocabulary(
+        "The literature record is evi-con-record-20261008-124215-bc1c921c. It says so."
+    ) == ["evi-con-record-20261008-124215-bc1c921c"]
+    # an inner dot is part of the id; only the trailing one is punctuation
+    assert check_paper_tool_vocabulary("See evi-run.v2.final.") == ["evi-run.v2.final"]
+    assert check_paper_tool_vocabulary("See claim-hyp-001.") == ["claim-hyp-001"]
+
+
+def test_tool_vocabulary_reports_the_spec_history_file_and_directory():
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    assert check_paper_tool_vocabulary(
+        "The first version of the protocol is kept as spec_history/spec.v1.json."
+    ) == ["spec.v1.json", "spec_history"]
+
+
+def test_tool_vocabulary_catches_the_spec_history_directory_alone():
+    # The directory an amendment keeps earlier Spec versions in is as internal as the
+    # files in it; in a prose slot its underscore reaches the source escaped.
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    for leak, token in (
+        ("Earlier versions of the protocol are kept under spec_history/.", "spec_history"),
+        (r"Earlier versions of the protocol are kept under spec\_history/.",
+         r"spec\_history"),
+        ("Spec_History holds the earlier versions.", "Spec_History"),
+    ):
+        assert token in check_paper_tool_vocabulary(leak), leak
+
+
+def test_tool_vocabulary_matches_artifact_file_names_in_any_case():
+    # A sentence-initial capital (or a shouted name) is still the same internal file.
+    from sci_adk.render.paper import check_paper_tool_vocabulary
+
+    for leak, token in (
+        ("Checkpoints.md lists the open questions.", "Checkpoints.md"),
+        ("NUMBERS.JSON lists every number.", "NUMBERS.JSON"),
+        ("Declarations.json binds each conclusion.", "Declarations.json"),
+        ("The first version is SPEC.V1.JSON.", "SPEC.V1.JSON"),
+        ("The bindings are in Novelty_Sentences.json.", "Novelty_Sentences.json"),
+        ("Science.md records the working notes.", "Science.md"),
+    ):
+        assert token in check_paper_tool_vocabulary(leak), leak
 
 
 def test_tool_vocabulary_leaves_legitimate_file_mentions_alone():

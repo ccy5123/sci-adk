@@ -25,6 +25,7 @@ suite -- single source of truth).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -313,3 +314,158 @@ def test_spec_digest_mismatch_carries_spec_id_and_truncated_digests():
     # diagnostic, not a degenerate empty __str__ that trivially satisfies the asserts above).
     assert "a" * 12 in msg, "message omits the expected-digest prefix"
     assert "b" * 12 in msg, "message omits the actual-digest prefix"
+
+
+# -- (d) the rejection says which digest is expected and where to get it -----------------
+
+def test_wrong_digest_message_names_the_spec_digest_and_where_to_get_it(tmp_path, capsys):
+    run_dir, spec = _seed_run(tmp_path)
+    ev_file = _write_evidence_file(tmp_path, spec)
+    rc = main([
+        "append-evidence", str(run_dir), "--evidence", str(ev_file),
+        "--spec-digest", "0" * 64,
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    # which digest: the Spec digest over the canonical Spec, not the file's bytes
+    assert "Spec digest" in err
+    assert "not the sha256 of the spec.json file" in err
+    # where to get it: a read-only verb that prints it for this run
+    assert f"sci-adk status {run_dir}" in err
+
+
+def test_passing_the_spec_json_file_hash_is_named_as_such(tmp_path, capsys):
+    # A trial session passed `sha256sum spec.json`. The Spec was NOT revised, so the
+    # message must not send the worker off to re-fetch or amend it.
+    import hashlib
+
+    run_dir, spec = _seed_run(tmp_path)
+    ev_file = _write_evidence_file(tmp_path, spec)
+    file_hash = hashlib.sha256((run_dir / "spec.json").read_bytes()).hexdigest()
+    assert file_hash != spec_digest(spec)
+
+    rc = main([
+        "append-evidence", str(run_dir), "--evidence", str(ev_file),
+        "--spec-digest", file_hash,
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "is the sha256 of the spec.json file" in err
+    assert "revised" not in err
+    assert f"sci-adk status {run_dir}" in err
+    assert not (run_dir / "evidence" / "evi-fixed-0001.json").exists()
+
+
+def test_the_digest_status_prints_is_accepted_by_append_evidence(tmp_path, capsys):
+    run_dir, spec = _seed_run(tmp_path)
+    ev_file = _write_evidence_file(tmp_path, spec)
+    main(["status", str(run_dir)])
+    printed = _extract_digest_line(capsys.readouterr().out)
+
+    rc = main([
+        "append-evidence", str(run_dir), "--evidence", str(ev_file),
+        "--spec-digest", printed,
+    ])
+    assert rc == 0
+    assert (run_dir / "evidence" / "evi-fixed-0001.json").exists()
+
+
+# -- (e) the flag's help and the rejection name the right digest, once ------------------
+
+def _squash(text: str) -> str:
+    """``text`` without whitespace: argparse wraps help lines, also at hyphens."""
+    return "".join(text.split())
+
+
+@pytest.mark.parametrize("verb", ["append-evidence", "derive-claim"])
+def test_spec_digest_help_names_the_printed_digest_not_the_file(verb, capsys):
+    # The help said the value "must match runs/<id>/spec.json", which reads as the sha256
+    # of that file -- the value a trial session then passed.
+    with pytest.raises(SystemExit):
+        main([verb, "--help"])
+    help_text = _squash(capsys.readouterr().out)
+    assert _squash("must match runs/<id>/spec.json") not in help_text
+    assert _squash("printed as 'spec_digest:'") in help_text
+    for printer in ("init-spec", "amend-spec", "sci-adk status"):
+        assert _squash(printer) in help_text, printer
+    assert _squash("not the sha256 of the spec.json file") in help_text
+
+
+def _rejection(tmp_path, capsys, passed, *, amend: bool = False) -> tuple[str, str]:
+    """append-evidence with ``passed(run_dir, spec)`` as --spec-digest (taken before any
+    amendment); return (run_dir, stderr)."""
+    run_dir, spec = _seed_run(tmp_path)
+    ev_file = _write_evidence_file(tmp_path, spec)
+    value = passed(run_dir, spec)
+    if amend:
+        assert main(["amend-spec", str(run_dir), "--rationale", "tighten the wording"]) == 0
+    capsys.readouterr()
+    rc = main([
+        "append-evidence", str(run_dir), "--evidence", str(ev_file),
+        "--spec-digest", value,
+    ])
+    assert rc == 2
+    assert not (run_dir / "evidence" / "evi-fixed-0001.json").exists()
+    return str(run_dir), capsys.readouterr().err
+
+
+def test_the_generic_rejection_states_which_digest_and_where_once(tmp_path, capsys):
+    run_dir, err = _rejection(tmp_path, capsys, lambda _r, _s: "0" * 64)
+    assert err.count("sci-adk status") == 1
+    assert err.count("spec.json file") == 1
+    assert err.count("--spec-digest takes") == 1
+    assert f"sci-adk status {run_dir}" in err
+
+
+def test_the_file_hash_rejection_states_which_digest_and_where_once(tmp_path, capsys):
+    import hashlib
+
+    def file_hash(run_dir, _spec):
+        return hashlib.sha256((Path(run_dir) / "spec.json").read_bytes()).hexdigest()
+
+    _run_dir, err = _rejection(tmp_path, capsys, file_hash)
+    assert "is the sha256 of the spec.json file" in err
+    assert err.count("sci-adk status") == 1
+    assert err.count("spec.json file") == 1
+    assert err.count("--spec-digest takes") == 1
+
+
+def test_the_generic_rejection_does_not_claim_the_spec_was_revised(tmp_path, capsys):
+    # Nothing shows the Spec changed: the value is just not a digest of any version of it.
+    _run_dir, err = _rejection(tmp_path, capsys, lambda _r, _s: "0" * 64)
+    assert "revised" not in err
+    assert "amended" not in err
+    assert "not the digest of" in err
+
+
+def test_the_digest_of_an_earlier_spec_version_is_named_as_such(tmp_path, capsys):
+    run_dir, err = _rejection(tmp_path, capsys, lambda _r, spec: spec_digest(spec),
+                              amend=True)
+    assert "the digest of an earlier Spec version (v1" in err
+    assert "spec_history/spec.v1.json" in err
+    assert "now v2" in err
+    assert err.count("sci-adk status") == 1
+    # it IS a Spec digest: the "not the file hash" sentence does not apply
+    assert "spec.json file" not in err
+
+
+def test_derive_claim_names_the_digest_of_an_earlier_spec_version(tmp_path, capsys):
+    run_dir, spec = _seed_run_with_evidence(tmp_path)
+    v1_digest = spec_digest(spec)
+    assert main(["amend-spec", str(run_dir), "--rationale", "tighten the wording"]) == 0
+    capsys.readouterr()
+    rc = main(["derive-claim", str(run_dir), "--no-strict-science",
+               "--spec-digest", v1_digest])
+    assert rc == 2
+    assert "the digest of an earlier Spec version (v1" in capsys.readouterr().err
+    assert not (run_dir / "claims" / f"claim-{_HYP_ID}.json").exists()
+
+
+def test_spec_digest_mismatch_message_for_an_earlier_version():
+    exc = SpecDigestMismatch(spec_id="s", expected="a" * 64, actual="b" * 64,
+                             run_dir="runs/s", earlier_version=2, current_version=3)
+    msg = str(exc)
+    assert exc.earlier_version == 2
+    assert "earlier Spec version (v2" in msg and "spec_history/spec.v2.json" in msg
+    assert "now v3" in msg
+    assert msg.count("sci-adk status runs/s") == 1

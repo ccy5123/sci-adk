@@ -149,6 +149,12 @@ after a failure except by an explicit re-freeze (anti-moving-the-goalposts).
 - **Record / belief separation.** No new empirical belief: every number is a recorded
   Claim that reproduces. The package frames and discusses those results; it asserts no
   un-reproduced value.
+- **Novelty claims are checked per run only.** The package gate does not check novelty
+  sentences in `main.tex` / `si.tex`; each run's rendered novelty sentence is checked by
+  that run's `sci-adk verify`. To carry a novelty claim into the package, copy the run's
+  rendered sentence from `runs/<id>/paper/` with its scope unchanged, from a run that
+  verifies; do not write a new or reworded one. `\novelty` markup in `package_src/` is not
+  rendered.
 - **Frozen contract.** `pkgreqs.json` is a frozen contract (digest, like the Spec and
   `pubreqs.json`); relaxing a gate-bearing field needs an explicit amendment re-freeze.
 

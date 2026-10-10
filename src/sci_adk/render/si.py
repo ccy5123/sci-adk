@@ -43,15 +43,15 @@ from sci_adk.render.figures import (
     order_figures_by_reference,
     render_figure,
 )
-from sci_adk.render.novelty import NOVELTY_NEWCOMMAND, has_novelty_markup
 from sci_adk.render.paper import (
-    T1_FONT_LINES,
+    HYPERREF_LINE,
     _confidence_display,
     _latex_evidence_validity_label,
     _latex_sanitize,
     _novelty_prose,
     _result_summary,
     _status_str,
+    text_font_lines,
 )
 from sci_adk.render.prose import SIProse
 from sci_adk.render.reproduction import (
@@ -264,7 +264,7 @@ def render_si_latex(
 
     def _si_slot(text: str) -> str:
         # SI prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
-        # render \novelty{} markup (scope baked / HARD fail) + the prose sanitizer
+        # render \novelty{} markup (plain sentence + record scope / HARD fail) + the sanitizer
         # (\ref/\cite preserved). Same contract as the paper's prose.
         return _novelty_prose(
             substitute_factrefs(text.strip(), evidence, claims),
@@ -290,13 +290,14 @@ def render_si_latex(
     has_image = any(f.kind == "image" for f in figures)
     lines.append(r"\documentclass{article}")
     lines.append(r"\usepackage[utf8]{inputenc}")
-    lines.extend(T1_FONT_LINES)
-    lines.append(r"\usepackage{hyperref}")
+    lines.extend(text_font_lines(has_native or has_image))
+    lines.append(HYPERREF_LINE)
     lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")
     # Figure font policy (design/paper-publishing-requirements.md F2), mirroring the paper:
-    # newtxmath (Times-compatible MATH only, body text unchanged) + helvet (Arial-compatible
-    # sans for figure text). Only for a figure-bearing SI -- a figure-less SI is unchanged.
+    # Times text (newtxtext, in the font lines above) and math (newtxmath) + helvet
+    # (Arial-compatible sans for figure text). Only for a figure-bearing SI -- a figure-less
+    # SI keeps Latin Modern.
     if has_native or has_image:
         lines.append(r"\usepackage{amsmath}")
         lines.append(r"\usepackage{newtxmath}")
@@ -313,14 +314,8 @@ def render_si_latex(
     has_repro_listing = reproduction_uses_listings(repro_listings)
     if has_repro_listing:
         lines.append(r"\usepackage{listings}")
-    # \novelty{kind}{hyp}{text} survives into si.tex; this \newcommand makes LaTeX render
-    # only the text. Emitted ONLY when SI prose carries novelty markup, so a no-novelty SI
-    # is byte-identical to the no-prose dump (regression invariant).
-    has_nov = prose is not None and any(
-        has_novelty_markup(s) for s in (prose.overview, prose.notes) if s
-    )
-    if has_nov:
-        lines.append(NOVELTY_NEWCOMMAND)
+    # No \novelty macro in the preamble: a novelty assertion in the SI prose renders as its
+    # plain sentence (paper._novelty_prose).
     # SI numbering convention: tables/figures are S-prefixed (Table S1, Figure S1, ...),
     # so a main-paper cross-reference written as the plain text "Table S1" / "Figure S1"
     # matches this document's printed numbers (cross-document \ref is deferred -- the xr

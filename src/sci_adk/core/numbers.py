@@ -270,7 +270,9 @@ class NumberEntry(BaseModel):
     Attributes:
         text: the literal as the tokenizer reads it in the rendered document: an optional
             minus, digits, decimal point, thousands commas, an exponent, or hyphen-joined
-            digit groups (``17109-49-8``) -- never a unit or ``%`` (``95%`` is ``95``).
+            digit groups (``17109-49-8``) -- never a unit or ``%`` (``95%`` is ``95``). An
+            ISO-8601 date-time (``2026-10-08T10:03:39Z``) is one literal, declared only
+            with role ``identifier``.
         document: ``draft.tex`` (default) or ``si.tex``.
         role: ``recorded`` | ``derived`` | ``citation`` | ``identifier``. When omitted it
             follows from what the entry carries: a bib source -> citation, any other

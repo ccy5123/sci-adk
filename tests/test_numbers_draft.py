@@ -98,7 +98,7 @@ def test_single_ambiguous_and_unresolved_proposals():
     assert "source" not in by["341"]
     assert by["6973"]["unresolved"] is True
     assert by["17109-49-8"]["unresolved"] is True
-    assert summary == {"resolved": 3, "ambiguous": 1, "unresolved": 2}
+    assert summary == {"resolved": 3, "ambiguous": 1, "unresolved": 2, "identifier": 0}
     assert draft["spec_id"] == "sp-x"
 
 
@@ -123,10 +123,67 @@ def test_each_text_is_proposed_once_per_document_in_source_order():
         ("0.769", "draft.tex"), ("341", "draft.tex"), ("0.769", "si.tex")]
 
 
+def test_a_checksum_does_not_crash_the_helper_and_is_not_proposed():
+    # Run SPEC-BCFKOW-001: "1081e637..." read as 1081e637 made printed_match compute
+    # 0.5 * 10**637 (OverflowError) before any proposal was written.
+    docs = {"draft.tex": ("the decrypted copy has SHA-256 "
+                          "1081e637f6bd39f9ba86d0e005cf657ea054ad302fd57e5d2e8d6841fd95c461 "
+                          "for 341 chemicals"),
+            "si.tex": "a lone fragment 1081e637 still has no recorded value"}
+    draft, summary = propose_numbers(docs, RECORD, "sp-x")
+    assert [(e["text"], e["document"]) for e in draft["numbers"]] == [
+        ("256", "draft.tex"), ("341", "draft.tex"), ("1081e637", "si.tex")]
+    assert _by_text(draft)["1081e637"]["unresolved"] is True
+
+
 def test_a_spec_numeric_field_is_a_candidate():
     draft, _ = propose_numbers({"draft.tex": "threshold 0.5"}, RECORD, "sp-x")
     assert _by_text(draft)["0.5"]["source"] == {
         "spec": "hypotheses[0].decision_rule.params.value"}
+
+
+# Run SPEC-BCFKOW-001's si.tex: its times split at ':' and the helper matched the pieces
+# to recorded counts by coincidence ('12' -> finding.glycerol_log10_code, '36' ->
+# finding.logkow_5_to_6_chemicals). A recorded count equal to a piece is the trap.
+SI_TIMES = (
+    r"were recorded at \texttt{2026-10-08T14:48:59Z}. The first record selection was "
+    r"recorded at \texttt{2026-10-08T14:49:19Z}. The decrypted copy has SHA-256 "
+    r"\texttt{1081e637f6bd39f9}\allowbreak\texttt{ba86d0e005cf657e}\allowbreak"
+    r"\texttt{a054ad302fd57e5d}\allowbreak\texttt{2e8d6841fd95c461}. The sample was "
+    r"recorded at \texttt{2026-10-08T16:53:12Z} and the slope fit at "
+    r"\texttt{2026-10-08T16:53:36Z}.")
+TRAP_RECORD = NumberRecord(
+    spec_json={"id": "sp-x", "method": {"approaches": [
+        "the slope fit is recorded at 2026-10-08T16:53:36Z", "48 positions, 59 rows"]}},
+    evidence=[_ev("evi-trap", point=12.0, finding=json.dumps({
+        "chemicals": 36, "rows": 48, "cols": 49, "a": 53, "b": 59, "c": 19, "d": 14,
+        "e": 16, "f": 1081, "g": 637, "h": 2026, "i": 10, "j": 8}))],
+)
+
+
+def test_a_date_time_is_proposed_as_an_identifier_never_with_a_source():
+    draft, summary = propose_numbers({"si.tex": SI_TIMES}, TRAP_RECORD, "sp-x")
+    stamps = ["2026-10-08T14:48:59Z", "2026-10-08T14:49:19Z", "2026-10-08T16:53:12Z",
+              "2026-10-08T16:53:36Z"]
+    assert [e["text"] for e in draft["numbers"]] == stamps[:2] + ["256"] + stamps[2:]
+    by = _by_text(draft)
+    for stamp in stamps:   # even the one the Spec text also writes
+        assert by[stamp] == {"text": stamp, "document": "si.tex", "role": "identifier"}
+        NumberEntry.model_validate(by[stamp])     # a valid entry as proposed
+    # The "256" of "SHA-256" is part of the algorithm's name: an identifier too
+    # (tests/test_numbers_names_and_stale.py).
+    assert by["256"] == {"text": "256", "document": "si.tex", "role": "identifier"}
+    assert summary == {"resolved": 0, "ambiguous": 0, "unresolved": 0, "identifier": 5}
+
+
+def test_no_fragment_of_a_digest_or_a_date_time_is_ever_proposed():
+    draft, _ = propose_numbers({"si.tex": SI_TIMES}, TRAP_RECORD, "sp-x")
+    texts = {e["text"] for e in draft["numbers"]}
+    assert texts.isdisjoint({"12", "36", "48", "49", "53", "59", "19", "14", "16",
+                             "1081", "1081e637", "637", "2026", "10", "08",
+                             "2026-10-08"})
+    assert all("source" not in e and "candidates" not in e
+               for e in draft["numbers"] if e["text"] != "256")
 
 
 # --------------------------------------------------------------------------- #
@@ -208,6 +265,15 @@ def test_the_verb_names_resolved_literals_stated_more_than_once(tmp_path):
     assert rc == 0
     assert "0.61 x2" in out
     assert "341 x" not in out
+
+
+def test_the_verb_counts_the_date_times_proposed_as_identifiers(tmp_path):
+    run_dir = _run(tmp_path, r"Fitted at \texttt{2026-10-08T16:53:36Z}: 0.61.")
+    rc, out, _ = _cli("numbers", "draft", str(run_dir))
+    assert rc == 0
+    assert "2 literal(s)" in out
+    assert "1 resolved" in out and "1 identifier" in out
+    assert "2026-10-08T16:53:36Z" in out   # each exemption the helper made is named
 
 
 def test_the_verb_reads_the_prose_the_way_render_will(tmp_path):

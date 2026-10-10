@@ -10,8 +10,9 @@ A real run's experimentalist recorded code_refs like::
 The compiler resolved the WHOLE string as a path, so every item became a POINTER, the
 rendered ``paper/reproduce.py`` drove nothing, and the F3 gate passed by design (a
 pointer-only bundle is fail-open). The fixed reading: a leading path token, optionally
-followed by ``sha256=<64 hex>``; the rest is free text. A matching hash ships the script; a
-mismatching one is a pointer and is reported (render warning; F3 FAIL when the contract
+followed by ``sha256=<64 hex>``, plus every later path followed by its own hash (see
+test_reproduction_bundle.py); other free text is ignored. A matching hash ships the script;
+a mismatching one is not shipped and is reported (render warning; F3 FAIL when the contract
 declares the bundle). A bare commit or an unresolvable token stays a pointer. verify adds a
 non-gating advisory when every code_ref of a rendered bundle is a pointer.
 
@@ -147,7 +148,10 @@ def _freeze_bundle_contract(run_dir: Path) -> None:
 
 
 def _pointer_advisories(report) -> list[str]:
-    return [n for n in report.paper_advisory if n.startswith("reproduce.py drives no script")]
+    return [
+        n for n in report.paper_advisory
+        if n.startswith("the reproduction bundle ships no script")
+    ]
 
 
 # -- parsing (pure) -------------------------------------------------------------------
@@ -243,7 +247,7 @@ def test_resolve_long_free_text_is_a_pointer_not_an_error(tmp_path):
 # -- the rendered bundle --------------------------------------------------------------
 
 
-def test_real_world_code_ref_ships_and_drives_the_script(tmp_path):
+def test_real_world_code_ref_ships_every_script_it_names(tmp_path):
     _write_scripts(tmp_path)
     ref = _real_world_ref(_sha(_S6), _sha(_S5))
     run_dir = _seed(tmp_path, "rep-ship", ref)
@@ -251,11 +255,12 @@ def test_real_world_code_ref_ships_and_drives_the_script(tmp_path):
 
     code_dir = run_dir / "paper" / "code"
     assert (code_dir / "s6_h2_rho.py").read_text(encoding="utf-8") == _S6
-    # The secondary script named in the free text is not followed.
-    assert sorted(p.name for p in code_dir.iterdir()) == ["s6_h2_rho.py"]
+    # The second script, named with its hash in the free text, is shipped too.
+    assert (code_dir / "s5_h2_sample.py").read_text(encoding="utf-8") == _S5
+    assert sorted(p.name for p in code_dir.iterdir()) == ["s5_h2_sample.py", "s6_h2_rho.py"]
     driver = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
     scripts_block = driver.split("SCRIPTS = [", 1)[1].split("]", 1)[0]
-    assert "s6_h2_rho.py" in scripts_block
+    assert "s6_h2_rho.py" in scripts_block and "s5_h2_sample.py" in scripts_block
     assert repr(ref) in driver  # the full recorded code_ref, embedded verbatim
     compile(driver, "reproduce.py", "exec")
     assert _S6.strip() in deposit_record_path(run_dir).read_text(encoding="utf-8")
@@ -270,10 +275,13 @@ def test_hash_mismatch_is_not_shipped_and_is_warned(tmp_path, capsys):
 
     assert main(["render", str(run_dir)]) == 0
     err = capsys.readouterr().err
-    assert not (run_dir / "paper" / "code").exists()
+    # The changed script is not shipped; the matching second script is.
+    assert sorted(p.name for p in (run_dir / "paper" / "code").iterdir()) == ["s5_h2_sample.py"]
     driver = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
-    pointers_block = driver.split("POINTERS = [", 1)[1].split("]", 1)[0]
-    assert repr(ref) in pointers_block
+    results_block = driver.split("RESULTS = [", 1)[1]
+    assert repr(ref) in results_block
+    # ...and the bundle lists it as named but not held.
+    assert repr((f"{_ANALYSIS}/s6_h2_rho.py",)) in results_block
     assert _EV in err
     assert stale in err
     assert _sha(_S6) in err
@@ -284,7 +292,8 @@ def test_render_survives_a_long_free_text_code_ref(tmp_path):
     run_dir = _seed(tmp_path, "rep-long", ref)
     _render(tmp_path, run_dir)
     driver = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
-    assert repr(ref) in driver.split("POINTERS = [", 1)[1]
+    assert repr(ref) in driver.split("RESULTS = [", 1)[1]
+    assert "SCRIPTS = [\n]" in driver
 
 
 def test_bare_commit_stays_a_pointer(tmp_path):
@@ -293,7 +302,8 @@ def test_bare_commit_stays_a_pointer(tmp_path):
     compiler = _render(tmp_path, run_dir)
     assert not (run_dir / "paper" / "code").exists()
     driver = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
-    assert repr(commit) in driver.split("POINTERS = [", 1)[1]
+    assert repr(commit) in driver.split("RESULTS = [", 1)[1]
+    assert "SCRIPTS = [\n]" in driver
     assert compiler.code_ref_warnings == []
 
 
@@ -352,7 +362,7 @@ def test_verify_all_pointer_bundle_is_advised_not_gated(tmp_path):
     advisories = _pointer_advisories(report)
     assert len(advisories) == 1
     assert advisories[0].startswith(
-        "reproduce.py drives no script: all 1 code_refs are pointers"
+        "the reproduction bundle ships no script: all 1 code_refs are pointers"
     )
 
 
@@ -370,6 +380,6 @@ def test_cli_verify_prints_the_pointer_advisory(tmp_path, capsys):
     _freeze_bundle_contract(run_dir)
     capsys.readouterr()
     assert main(["verify", str(run_dir)]) == 0
-    assert "reproduce.py drives no script: all 1 code_refs are pointers" in (
+    assert "the reproduction bundle ships no script: all 1 code_refs are pointers" in (
         capsys.readouterr().out
     )
