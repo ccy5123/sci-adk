@@ -91,8 +91,13 @@ of the two explicit options.
 
 Enforcement lives in the harness, not in memory (a prompt decays; a hook does not):
 
-- A **Stop hook** (`.claude/hooks/sci-adk/stop-verify-gate.sh`) blocks ending
-  the session while any run with recorded belief fails `sci-adk verify`.
+- A **Stop hook** (`.claude/hooks/sci-adk/stop-verify-gate.sh`) runs
+  `sci-adk verify` on every run with recorded belief. A recorded claim that does
+  not reproduce (`sci-adk verify --claims-only` fails) blocks ending the session
+  every time. A failure only on the paper side (manuscript, numbers, publishing
+  requirements, deposit files, package) blocks once, with the reasons; if this
+  session does not own the paper, say so and stop again — the session then ends
+  with a warning naming the run, for the session that owns the paper to fix.
 - A **UserPromptSubmit hook** (`.claude/hooks/sci-adk/reanchor.sh`) re-injects
   this protocol + the current run's `sci-adk status` every turn.
 - The **`science-orchestrator` output style**

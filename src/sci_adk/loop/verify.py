@@ -354,12 +354,27 @@ class VerifyReport:
             amendment receipt under its bundle name; ``""`` when it cannot be computed.
         protocol_history: for an amended run whose deposit checks pass, the "consistent"
             line of the earlier-protocols check (D5); ``""`` otherwise.
+        paper_side_checked: True when the paper-side checks ran (the default). False for a
+            ``verify_run(..., claims_only=True)`` report: the paper-side checks were NOT run
+            and every paper-side field holds its vacuous default, so read only the
+            record-side fields (``outcomes``, ``all_reproduced``, ``search_log_*``,
+            ``digest``) and ``passed`` / ``claims_passed``.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
             declarations_clean and numbers_clean and paper_cross_doc_clean and
             paper_requirements_clean and search_log_clean and deposit_files_clean``.
             This is what the CLI exits
-            on; ``all_reproduced`` alone is the claim signal.
+            on; ``all_reproduced`` alone is the claim signal. In a claims-only report
+            (``paper_side_checked`` False) it equals ``claims_passed``.
+
+    The claims-only boundary (``claims_passed``) splits ``passed`` into its RECORD side --
+    ``all_reproduced`` (every recorded claim re-derives) and ``search_log_clean`` (every
+    ``found_nothing`` behind a novelty claim rests on a sound pre-freeze search) -- and its
+    PAPER side: paper consistency, residual fact macros, tool vocabulary, novelty
+    sentences, declarations, numbers, cross-document references, publishing requirements
+    (with the prior-work-before-publishing line) and deposit files. Every paper-side check
+    is vacuous until the run has a ``paper/`` or one of its declaration files; none of
+    them can change what a recorded claim re-derives to.
     """
 
     spec_id: str
@@ -392,7 +407,17 @@ class VerifyReport:
     deposit_files_clean: bool = field(default=True)
     protocol_digest: str = field(default="")
     protocol_history: str = field(default="")
+    paper_side_checked: bool = field(default=True)
     passed: bool = field(default=False)
+
+    @property
+    def claims_passed(self) -> bool:
+        """The record-side gate: every claim reproduces and every novelty null is sound.
+
+        What ``sci-adk verify --claims-only`` exits on; the paper side is left out (see
+        the class docstring for the boundary).
+        """
+        return self.all_reproduced and self.search_log_clean
 
 
 @dataclass(frozen=True)
@@ -540,7 +565,9 @@ class PackageVerifyReport:
     passed: bool = field(default=True)
 
 
-def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
+def verify_run(
+    run_dir: Path, strict_science: bool = False, claims_only: bool = False
+) -> VerifyReport:
     """Re-derive belief from the recorded run and compare it to the recorded Claims.
 
     PURE + READ-ONLY: re-applies the frozen ``DecisionRule`` to the recorded Evidence
@@ -558,6 +585,11 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             audit reports DIVERGED. Default False (the lenient PRIMITIVE contract): the
             science re-check is skipped, so a faithful record re-derives exactly as before
             (existing callers/behaviour unchanged). The CLI ``verify --strict-science`` opts in.
+        claims_only: when True, run only the RECORD side (claim re-derivation + the
+            novelty search-log rule) and skip every paper-side check, so neither a failing
+            nor an unreadable paper-side file can affect the result. The report then has
+            ``paper_side_checked`` False and ``passed == claims_passed``. Default False.
+            The CLI ``verify --claims-only`` opts in (the workspace Stop hook's claim test).
 
     Returns:
         A :class:`VerifyReport` -- inspect ``all_reproduced`` for the CI gate.
@@ -646,6 +678,28 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         )
 
     all_reproduced = bool(outcomes) and all(o.result == REPRODUCED for o in outcomes)
+
+    # Search-log gate (design/parallel-literature-search.md §4.4): a found_nothing novelty
+    # decision whose recorded log shows fewer than two indexes that answered fails the run;
+    # one with no log at all is an advisory line only. A logged search run after the
+    # freeze also fails; a flagged novelty kind with nothing recorded is advisory.
+    # READ-ONLY, no LLM. Record side: it judges the null a novelty claim stands on.
+    search_log_problems, search_log_notes = _check_search_logs(novelty_decisions, spec)
+    search_log_clean = not search_log_problems
+
+    if claims_only:
+        # The record side alone (claims_passed): no paper-side file is read.
+        return VerifyReport(
+            spec_id=spec.id,
+            outcomes=outcomes,
+            digest=record_digest(run_dir),
+            all_reproduced=all_reproduced,
+            paper_advisory=search_log_notes,
+            search_log_problems=search_log_problems,
+            search_log_clean=search_log_clean,
+            paper_side_checked=False,
+            passed=all_reproduced and search_log_clean,
+        )
 
     # Phase 3 (D4): re-check the RENDERED paper's internal \ref<->\label integrity, as a
     # third party would -- READ-ONLY (read each .tex; never recompile, never write, no
@@ -744,14 +798,6 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # that fails loud on each missing element and is additive, not a new pass/fail conjunct.
     deposit_problems = deposit_completeness_problems(deposit_record_path(run_dir))
     deposit_complete = not deposit_problems
-
-    # Search-log gate (design/parallel-literature-search.md §4.4): a found_nothing novelty
-    # decision whose recorded log shows fewer than two indexes that answered fails the run;
-    # one with no log at all is an advisory line only. A logged search run after the
-    # freeze also fails; a flagged novelty kind with nothing recorded is advisory.
-    # READ-ONLY, no LLM.
-    search_log_problems, search_log_notes = _check_search_logs(novelty_decisions, spec)
-    search_log_clean = not search_log_problems
 
     # Literature key agreement: a PDF in literature/pdfs/ whose name is not a
     # references.bib key cannot be found from the \cite that names it. ADVISORY ONLY

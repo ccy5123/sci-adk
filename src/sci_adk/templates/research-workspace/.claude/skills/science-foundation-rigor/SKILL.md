@@ -214,7 +214,9 @@ trigger moment (pre-registration / amendment), never retrofitted (anti-HARKing).
 the recorded Evidence + verdict trails and exits 0 iff every recorded claim
 reproduces from the record. It also runs the paper-consistency gate (`\ref`↔`\label`,
 figure sources, novelty markup) over the rendered `.tex`. The Stop hook fires it at
-session end; its exit code closes the session or sends it back to resolve.
+session end: a claim that does not reproduce (`sci-adk verify --claims-only` fails)
+sends the session back to resolve every time; a failure only on the paper side
+blocks the first Stop with its reasons, then lets the session end with a warning.
 
 Guard agents (`evaluator-*`) are advisory information amplifiers — they catch
 problems earlier and explain them better, but they are NEVER the verdict authority.

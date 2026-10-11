@@ -271,6 +271,13 @@ def build_parser() -> argparse.ArgumentParser:
              "(DIVERGED). Opt-in (default off) so a plain audit re-derives belief exactly "
              "as recorded",
     )
+    verify.add_argument(
+        "--claims-only", dest="claims_only", action="store_true", default=False,
+        help="judge only the record side: exit 0 iff every recorded claim reproduces and "
+             "every novelty found-nothing rests on a sound search log. The paper-side "
+             "checks (manuscript, numbers, publishing requirements, deposit files) are not "
+             "run; plain `verify` stays the full gate. Takes a run dir, not a workspace",
+    )
 
     prior_work = sub.add_parser(
         "prior-work",
@@ -2123,6 +2130,20 @@ def _err_in_order(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _print_search_log_failures(report) -> None:
+    """Print the search-log gate's failures (design/parallel-literature-search.md §4.4).
+
+    A novelty found-nothing whose recorded log shows fewer than two indexes that answered
+    (or a search run after the freeze) fails the gate -- in the full verify and in
+    ``--claims-only`` alike, since it is the record a novelty claim stands on.
+    """
+    if not report.search_log_clean:
+        _err_in_order(
+            "  search log FAILED (a recorded null rests on fewer than two indexes):")
+        for problem in report.search_log_problems:
+            _err_in_order(f"    - {problem}")
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     """Headless read-only belief audit over an existing run dir (design §6.2/§7.1, F6).
 
@@ -2141,6 +2162,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         is_workspace = (run_dir / "runs").is_dir() and (
             (run_dir / "package").is_dir() or (run_dir / "pkgreqs.json").is_file()
         )
+        if is_workspace and args.claims_only:
+            # The package gate is paper-side: there is no claim audit to run on a workspace.
+            _err_in_order(f"error: --claims-only audits one run dir (runs/<id>/); {run_dir} "
+                          "is a workspace, whose package gate is a paper-side check -- run "
+                          f"`sci-adk verify {run_dir}` for it")
+            return 2
         if is_workspace:
             return _run_package_gate(run_dir)
         _err_in_order(f"error: no spec.json found in run dir: {run_dir}")
@@ -2153,7 +2180,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     from sci_adk.loop.verify import verify_run
 
     try:
-        report = verify_run(run_dir, strict_science=args.strict_science)
+        report = verify_run(run_dir, strict_science=args.strict_science,
+                            claims_only=args.claims_only)
     except ValueError as e:
         _err_in_order(f"error: {e}")
         return 1
@@ -2175,6 +2203,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     else:
         _err_in_order("  NOT reproduced: at least one claim DIVERGED or is UNRESOLVED "
                       "(see above)")
+
+    if args.claims_only:
+        # The record side only (VerifyReport.claims_passed): no paper-side line is printed,
+        # because no paper-side check ran.
+        _print_search_log_failures(report)
+        print(f"  paper-side checks not judged (--claims-only); `sci-adk verify {run_dir}` "
+              "is the full gate")
+        return 0 if report.passed else 1
 
     # Phase 3 (design/paper-figures-and-si.md D4): paper-consistency is a HARD gate.
     # Report each rendered document's internal \ref<->\label integrity; a broken
@@ -2290,13 +2326,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         for note in report.paper_advisory:
             print(f"  advisory: {note} (advisory only -- not gated)")
 
-    # Search-log gate (design/parallel-literature-search.md §4.4): a novelty found-nothing
-    # whose recorded log shows fewer than two indexes that answered fails the combined gate.
-    if not report.search_log_clean:
-        _err_in_order(
-            "  search log FAILED (a recorded null rests on fewer than two indexes):")
-        for problem in report.search_log_problems:
-            _err_in_order(f"    - {problem}")
+    _print_search_log_failures(report)
 
     # Deposit files (design/deposit-files.md D5): paper/deposit/ must hold exactly the files
     # its manifest lists, as runs/<id>/ calls for, and the record's protocol files must agree.

@@ -148,7 +148,10 @@ the Stage 6 CLI gate is the hard verdict regardless.
 
 The Stop hook fires → runs `sci-adk verify`. Its exit code is the sole verdict:
 exit 0 → session closes, `paper/` is ready for Overleaf folder upload; non-zero
-(DIVERGED / UNRESOLVED) → resolve and loop back to Stage 3/4. Call
+with a claim that does not reproduce (DIVERGED / UNRESOLVED) → resolve and loop
+back to Stage 3/4 (this blocks every Stop); non-zero only on the paper side → the
+first Stop is blocked with the reasons — fix them if this session owns the paper,
+otherwise say so and stop again; the session ends with a warning. Call
 `sci-adk status <run>` freely between stages — it is a cheap, read-only snapshot of
 recorded claim statuses and open decisions.
 

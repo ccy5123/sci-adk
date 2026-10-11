@@ -53,7 +53,7 @@ Grouped by lifecycle role. Positional args in `<…>`; `?` = optional positional
 
 | Verb | Positional | Flags |
 |------|-----------|-------|
-| `verify` | `<run_dir>` | `--strict-science` |
+| `verify` | `<run_dir>` | `--strict-science`, `--claims-only` (added 2026-10-11) |
 | `resolve` | `<run_dir>` | (none) |
 | `prior-work` | `<run_dir>` | `--searched DOI… \| --skip` (required, exclusive), `--reason`, `--target-id`, `--allow-no-email` |
 | `novelty` | `<run_dir>` | `--hypothesis` (req), `--kind result\|method` (req), `--searched \| --skip` (req, exclusive), `--outcome`, `--reason`, `--allow-no-email` |

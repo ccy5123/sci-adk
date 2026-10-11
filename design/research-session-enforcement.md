@@ -1,6 +1,6 @@
 # Research-Session Enforcement Architecture
 
-> Status: v0.2 DESIGN (2026-06-18) — architecture + decisions D1-D4 resolved; implementation pending
+> Status: v0.3 DESIGN (2026-06-18; D2 amended 2026-10-11) — architecture + decisions D1-D4 resolved; implementation pending
 > Purpose: make a Claude Code research session *stay* in the sci-adk discipline instead of drifting out of it
 > Scope: design only. No code/hook/harness is changed by this document.
 
@@ -63,10 +63,12 @@ The same pattern, with `sci-adk` standing in for the `moai` binary. sci-adk alre
 wiring + a persona + an entry point. Five layers, strongest first:
 
 ### Layer 1 — Hard gate: `Stop` hook → `sci-adk verify`
-A `Stop` hook runs `sci-adk verify <run>`; if any recorded Claim is `DIVERGED` or a checkpoint is
-unresolved, the hook exits 2 → **the session cannot end while its belief is not reproducible from the
-record**. This is the sci-adk-native equivalent of MoAI's `Stop → quality.yaml` gate, and it is the
-spine: "done" stops meaning "the agent said done" and starts meaning "`verify` reproduces."
+A `Stop` hook runs `sci-adk verify --claims-only <run>`; if any recorded Claim is `DIVERGED` or a
+checkpoint is unresolved, the hook exits 2 → **the session cannot end while its belief is not
+reproducible from the record**. This is the sci-adk-native equivalent of MoAI's `Stop → quality.yaml`
+gate, and it is the spine: "done" stops meaning "the agent said done" and starts meaning "`verify`
+reproduces." A failure of the full `verify` that is only on the paper side (the manuscript and its
+declaration files, or the workspace package) blocks the first Stop only — see D2 below.
 
 ### Layer 2 — Re-anchor: `UserPromptSubmit` hook
 On every user turn, inject a short protocol reminder **plus the current run state** (open
@@ -90,7 +92,7 @@ Layers 1-2 just make that policy unskippable.
 
 | MoAI lever | sci-adk equivalent | status |
 |------------|--------------------|--------|
-| `Stop → moai hook stop → quality.yaml` | `Stop → sci-adk verify <run>` (exit 2 on DIVERGED/unresolved) | gate exists; wrapper missing |
+| `Stop → moai hook stop → quality.yaml` | `Stop → sci-adk verify --claims-only <run>` (exit 2 on DIVERGED/unresolved; paper-side failures block once, D2) | gate exists; wrapper missing |
 | `UserPromptSubmit → inject HARD rules` | `UserPromptSubmit → inject protocol + run state` | wrapper + read-only state verb missing |
 | `quality.yaml enforce_quality/max_errors` | Spec `DecisionRule` + ConfigHalt/ValidityHalt | exists |
 | `outputStyle: MoAI` persona | `researcher` output style | missing |
@@ -145,6 +147,37 @@ the hard part (a deterministic, tamper-evident gate) is already built.
   Exploratory turns with no run pass (exit 0); the verify gate bites only when there is recorded
   belief to protect — low noise, so the gate stays enabled. The "you never started a run" nudge is
   Layer 2 (re-anchor) + Layer 4 (`/research`), not a hard Stop block.
+  - **Amendment (2026-10-11): two failure classes.** Observed on a real workspace: an experiment
+    session whose only failure was on the paper side (ten SI numbers not yet declared, which the
+    paper session declares) was told not to touch the paper; the hook blocked it 18 times, named
+    the wrong cause ("resolve DIVERGED/UNRESOLVED claims"), and Claude Code force-ended the turn
+    twice. The hook now separates the classes `verify` already computes:
+    - *Claim reproduction* blocks **every** Stop: `sci-adk verify --claims-only <run>` fails —
+      a recorded claim is `DIVERGED` / `UNRESOLVED`, a `found_nothing` behind a novelty claim
+      rests on an unsound search log, or the record cannot be read (no `spec.json`, a malformed
+      artifact). The message names the run and the claim lines that failed.
+    - *Paper side* blocks **once**: the claims reproduce but the full `sci-adk verify <run>`
+      fails (paper consistency, residual fact macros, tool vocabulary, novelty sentences,
+      declarations, numbers, cross-document references, publishing requirements, deposit files),
+      or the workspace package gate `sci-adk verify <workspace>` fails. The first Stop is blocked
+      with the `FAILED` headers and their first bullets from verify's output. Claude Code marks
+      the retried Stop with `"stop_hook_active": true` in the hook-input JSON; on that retry the
+      hook exits 0 and warns on stderr and through a JSON `systemMessage` on stdout naming the
+      run, so the session that owns the paper fixes it.
+    - `verify`'s exit code is unchanged and stays the verdict. The boundary is
+      `VerifyReport.claims_passed` (`all_reproduced and search_log_clean`); `--claims-only` runs
+      none of the paper-side checks, so an unreadable or failing paper-side file cannot turn a
+      paper-side problem into a claim block.
+    - Caveat: `stop_hook_active` says only that *some* Stop hook blocked earlier in the turn. A
+      paper-side failure that first appears on such a retry (for example after the claims were
+      fixed) is warned about, not blocked.
+    - Caveat: the protocol-history checks (shipped protocol files, amendment receipts against
+      `spec.json`, `spec_history/`) report through the deposit-files block, so they sit on the
+      paper side of this boundary and block once. The claims still re-derive in those cases; the
+      earlier versions and receipts are outside the record digest (design/deposit-files.md D11).
+      Moving them into `claims_passed` would change the default gate's meaning and was not done.
+    - An installed sci-adk older than the hook (no `--claims-only`) cannot separate the two
+      classes: the hook then blocks every Stop on any verify failure and says to upgrade.
 - **D3 — Distribution → `src/sci_adk/templates/research-workspace/` (package data) + a
   `sci-adk init-session <dir>` installer.** The kit ships as package data — inside the wheel, not
   just an editable checkout (MANIFEST.in `graft` + `include-package-data`; the hidden `.claude/`
@@ -187,6 +220,6 @@ These decisions imply two new, additive sci-adk CLI verbs to build (no kernel ch
 
 ---
 
-Version: 0.2.0
+Version: 0.3.0 (2026-10-11: D2 amended -- claim failures block every Stop, paper-side failures once)
 Status: DESIGN (decisions D1-D4 resolved; implementation pending)
 Relates to: `design/rigor-shell-architecture.md` (kernel + seam), `.claude/rules/sci-adk-constitution.md` (two-environment rule), `design/tool-policy.md`.

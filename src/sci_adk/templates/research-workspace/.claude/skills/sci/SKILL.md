@@ -199,7 +199,9 @@ record — that is the failure this split exists to prevent.
   judge yet. Authoring the manuscript narrative here is OPTIONAL and normally skipped.
   Do not deposit with a plain render without `--prose`: it also writes a skeleton
   `paper/draft.tex`, which `verify` judges as the manuscript and fails against the
-  frozen contract, so the Stop hook blocks the end of the session.
+  frozen contract, so the Stop hook blocks the end of the session (a paper-side
+  failure blocks once; the session then ends with a warning, and the paper fails
+  `verify` until Session B fixes it).
 - **Session B (a NEW top-level session)** is the one running `/sci publish` for the
   paper, and its input is `runs/<id>/record.tex` — not this conversation. It spawns
   `expert-writer` to author the paper (step 2): the writer authors a `prose.json` (and an

@@ -28,8 +28,11 @@ The `/sci` commands ship with the kit: `plan`, `experiment`, `publish`, `verify`
 
 - **`stop-verify-gate.sh`** (Stop hook) — blocks ending the session while any
   run that has recorded belief (a `runs/<id>/claims/*.json`) fails
-  `sci-adk verify`. "Done" stops meaning "the agent said done" and starts
-  meaning "`verify` reproduces the recorded belief".
+  `sci-adk verify --claims-only` (a claim that does not reproduce). "Done" stops
+  meaning "the agent said done" and starts meaning "`verify` reproduces the
+  recorded belief". A failure only on the paper side (the manuscript and its
+  declaration files, or the workspace package) blocks the first Stop with the
+  reasons and is a warning after that.
 - **`reanchor.sh`** (UserPromptSubmit hook) — every turn, re-injects the
   protocol reminder + the current run's `sci-adk status` into context. The
   direct antidote to compaction drift.
