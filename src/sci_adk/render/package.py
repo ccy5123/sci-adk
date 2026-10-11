@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
-from sci_adk.core.pkgreqs import ALL_RUNS, PackageReqs
+from sci_adk.core.pkgreqs import ALL_RUNS, PackageReqs, valid_reference_style
 from sci_adk.core.spec import Spec
 from sci_adk.loop.verify import verify_run
 from sci_adk.render.deposit import (
@@ -70,7 +70,7 @@ from sci_adk.render.deposit import (
     package_rows,
     plan_run_deposit,
 )
-from sci_adk.render.paper import TIMES_FONT_LINES
+from sci_adk.render.paper import TIMES_FONT_LINES, _latex_sanitize, _one_line
 # The 6 canonical package folders are defined in the pure gate module (kernel-side, no
 # verify_run dependency) so importing it here does not re-introduce a circular import; the
 # assembler and the gate share that one source of truth.
@@ -801,6 +801,9 @@ def _skeleton_main_tex(
         else ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion"]
     )
     ref_style = (pkgreqs.reference_style if pkgreqs else None) or "plainnat"
+    # It is written as the \bibliographystyle argument: a contract built without validation
+    # cannot put more than a style name there.
+    valid_reference_style(ref_style)
 
     lines: List[str] = []
     lines.append(r"\documentclass{article}")
@@ -838,7 +841,7 @@ def _skeleton_main_tex(
                 "% (skeleton) author the " + _tex_escape(name) + " section to the package "
                 "spec; the manuscript names the science, not the toolchain."
             )
-    lines.append(r"\bibliographystyle{" + _tex_escape(ref_style) + r"}")
+    lines.append(r"\bibliographystyle{" + ref_style + r"}")
     lines.append(r"\bibliography{references}")
     lines.append(r"\end{document}")
     return "\n".join(lines) + "\n"
@@ -967,16 +970,12 @@ def _load_spec(run_dir: Path) -> Spec:
 
 
 def _tex_escape(s: str) -> str:
-    """Minimal LaTeX escaping for skeleton metadata (the record dump's esc, kept local)."""
-    return (
-        str(s)
-        .replace("\\", r"\textbackslash{}")
-        .replace("_", r"\_")
-        .replace("%", r"\%")
-        .replace("&", r"\&")
-        .replace("#", r"\#")
-        .replace("$", r"\$")
-    )
+    """Record or contract text (a run id, a hypothesis statement, a section name) as LaTeX text
+    on one line: render's sanitizer (``paper._latex_sanitize`` after ``paper._one_line``), so
+    every LaTeX special is escaped, a symbol becomes its LaTeX form, a character pdflatex
+    cannot typeset its placeholder, and a line break cannot end a ``%`` comment line or put a
+    blank line into ``\\section{}``."""
+    return _latex_sanitize(_one_line(str(s)))
 
 
 def _write_verify_logs(workspace_dir: Path, package_dir: Path, runs: List[str]) -> None:

@@ -190,9 +190,10 @@ def test_a_withheld_rows_sha256_also_in_names_record_tex(tmp_path):
     run_dir = _trial_run(tmp_path)
     _withhold(run_dir)
     _render(run_dir)
-    rows = _manifest_rows(run_dir)[1:]
+    *rows, record_row = _manifest_rows(run_dir)[1:]
     assert len(rows) == 3
     assert {r[4] for r in rows} == {"record.tex"}
+    assert record_row[0] == "record.tex"        # the file the cells name ships with the paper
     assert verify_run(run_dir).deposit_file_problems == []
 
 
@@ -448,7 +449,8 @@ def test_the_per_run_and_package_rows_of_a_withheld_run_agree_but_for_paths(tmp_
     _withhold(run_dir)
     _render(run_dir)
     assemble_package(ws)
-    per_run = [r[1:4] + r[5:] for r in _manifest_rows(run_dir)[1:]]
+    # the package ships its own record (06_provenance/record.tex), not the per-run copy
+    per_run = [r[1:4] + r[5:] for r in _manifest_rows(run_dir)[1:] if r[3] != "record"]
     package = [[r["sha256"], r["bytes"], r["kind"], r["cite"], r["license"],
                 r["description"]] for r in _deposit_csv(ws) if r["run"] == _TRIAL_ID]
     assert per_run == package

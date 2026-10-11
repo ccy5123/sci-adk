@@ -14,7 +14,9 @@
 > (hard migration, no back-compat); per-{hyp, kind} claims, decisions, derivation, and the
 > CLI `--kind` flag are now live. The render-time `\novelty{}` markup + scoped-render (N2)
 > and the render/verify novelty GATE (N3) remain deferred. The paper-render (Low) novelty
-> gate remains deferred.
+> gate remains deferred. **v0.7 (2026-10-11):** article numbers the registrar BibTeX lacks
+> are added by hand, and verify names each cited article missing one (see "Article numbers
+> are added by hand").
 
 sci-adk acquires the literature the way a researcher does: when starting, when
 unsure, or when checking whether something has already been done, you *search*
@@ -75,6 +77,36 @@ acquisition is record, not belief (design/abstractions.md).
 
 A failed DOI (no downloadable OA PDF) is a valid outcome recorded in the
 finding, not an error (Invariant E2: null results are results).
+
+## Article numbers are added by hand (v0.7, 2026-10-11)
+
+The store's BibTeX (`runs/<spec.id>/literature/references.bib`) is the registrar's own entry,
+which paperforge requests through doi.org content negotiation. Crossref's BibTeX has no field
+for the article number that some journals give each paper instead of a page range. The trial
+store (lit-search-trial-2, 40 entries) has two such entries, Mansouri2018 and Krotko2020, both
+in the Journal of Cheminformatics: journal, volume and issue, but no pages. plainnat printed
+Mansouri et al. (J Cheminform (2018) 10:10) as "Journal of Cheminformatics, 10 (1), March 2018".
+
+sci-adk does not fill the number in, because nothing it reads holds it. sci-adk itself makes no
+network call. The paperforge sidecar (`pdfs/<key>.json`) keeps the DOI, title, first author,
+year and the PDF's source. paperforge does query Crossref's JSON API (`metadata.py`), but only to
+name files when OpenAlex returns nothing, it asks for author, year and title only, and it writes
+the answer nowhere sci-adk reads. Reading Crossref's `article-number` would need a new network
+call, which the tool policy does not add for this.
+
+So the author adds the number to the store entry as `pages = {<n>}`; plainnat then prints
+"10(1):10". plainnat prints `eid` the same way but not ACM's `articleno` (both measured with
+bibtex). The store is the place to edit. Render rewrites `paper/references.bib` and
+`paper/references_SI.bib` from it on every render, and a later acquisition call keeps earlier
+store text byte for byte (`literature_merge.merge_bib`), so the added field survives both.
+
+`sci-adk verify` names each cited `@article` that has a journal and a volume but neither
+`pages` nor `eid`, in a `bib article number:` line that does not gate. A
+run gets one line per bibliography that cites the entry (`paper/references.bib` against
+`draft.tex`, `paper/references_SI.bib` against `si.tex`), naming the store file and saying to
+re-render. The package gate adds the same line to its warnings, naming the file the package
+copies its bibliography from (`package_src/...`), since re-rendering a run does not change
+that copy. The check is `pkgreqs_checks.bib_article_number_advisories`.
 
 ## Halt gates (hand back to the human)
 
@@ -451,10 +483,13 @@ old SUPPORTS-only gate was an artifact of the A-design and is removed in B-repla
 - `src/sci_adk/loop/decision_record.py` -- the single shared decision-writer reused by
   all three triggers (`write_decision_evidence`).
 - `src/sci_adk/core/validity.py` -- `derive_novelty_status(hyp, kind, novelty_decisions)` (the pure novelty-status rule, now per-{hyp, kind}; the old `check_novelty_adequacy` HALT was removed in B-replace).
+- `src/sci_adk/render/pkgreqs_checks.py` -- `bib_article_number_advisories` (v0.7: a cited
+  article with a journal and a volume but neither pages nor eid; called by
+  `loop/verify.py` per run and in the package gate).
 - `design/tool-policy.md` -- paperforge tool record + web_search discovery pairing.
 
 ---
 
-Version: 0.6.0
-Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18); 2-kind Novelty core (N1) implemented — hard migration, no back-compat (2026-06-18)
-Last Updated: 2026-06-18
+Version: 0.7.0
+Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18); 2-kind Novelty core (N1) implemented — hard migration, no back-compat (2026-06-18); article-number advisory, numbers added by hand (2026-10-11)
+Last Updated: 2026-10-11

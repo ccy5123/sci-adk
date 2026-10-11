@@ -187,7 +187,8 @@ def test_manifest_starts_with_the_marker_and_lists_the_protocol_rows_by_path(tmp
     header, *rows = _manifest_rows(run_dir)
     assert header == ["file", "sha256", "bytes", "kind", "sha256_also_in", "cite",
                       "license", "description"]
-    assert [r[0] for r in rows] == [f"protocol/{n}" for n in _PROTOCOL_FILES]
+    # the record ships beside the protocol and sorts after it (tests/test_deposit_record_copy.py)
+    assert [r[0] for r in rows] == [*(f"protocol/{n}" for n in _PROTOCOL_FILES), "record.tex"]
     by_file = {r[0]: r for r in rows}
     v1 = by_file["protocol/protocol-v1.json"]
     assert v1[1:4] == [_V1_SHA, "17552", "protocol"]
@@ -215,7 +216,7 @@ def test_unamended_run_ships_protocol_v1_alone(tmp_path):
     assert (_deposit(run_dir) / "protocol" / "protocol-v1.json").read_bytes() == (
         run_dir / "spec.json").read_bytes()
     rows = _manifest_rows(run_dir)[1:]
-    assert [r[0] for r in rows] == ["protocol/protocol-v1.json"]
+    assert [r[0] for r in rows] == ["protocol/protocol-v1.json", "record.tex"]
     assert rows[0][7] == "protocol, version 1 (current)"
 
 
@@ -705,13 +706,15 @@ def test_an_invalid_persisted_declaration_stops_the_render_before_anything_is_wr
 # 17 -- withheld protocol (per run)
 # --------------------------------------------------------------------------- #
 
-def test_a_withheld_protocol_ships_the_manifest_alone_with_the_checksums(tmp_path):
+def test_a_withheld_protocol_ships_the_manifest_and_the_record_with_the_checksums(tmp_path):
     run_dir = _trial_run(tmp_path)
     _withhold(run_dir)
     _render(run_dir)
 
-    assert sorted(p.name for p in _deposit(run_dir).iterdir()) == ["manifest.csv"]
-    rows = _manifest_rows(run_dir)[1:]
+    # the record ships whether or not the protocol does (tests/test_deposit_record_copy.py)
+    assert sorted(p.name for p in _deposit(run_dir).iterdir()) == ["manifest.csv", "record.tex"]
+    *rows, record_row = _manifest_rows(run_dir)[1:]
+    assert record_row[0] == "record.tex"
     assert len(rows) == 3
     by_sha = {r[1]: r for r in rows}
     assert set(by_sha) == {_V1_SHA, _V2_SHA, _A2_SHA}
@@ -731,7 +734,7 @@ def test_a_withheld_unamended_run_has_one_row(tmp_path):
     _withhold(run_dir)
     _render(run_dir)
     rows = _manifest_rows(run_dir)[1:]
-    assert len(rows) == 1 and rows[0][0] == ""
+    assert [r[0] for r in rows] == ["", "record.tex"]
 
 
 def test_withholding_changes_neither_the_record_nor_the_digests(tmp_path):

@@ -157,7 +157,8 @@ def test_package_rows_match_the_per_run_rows_but_for_paths(tmp_path):
     ws = _ws(tmp_path)
     _ship_all(ws)
     assemble_package(ws)
-    per_run = [r[1:4] + r[5:] for r in _manifest_rows(_trial(ws))[1:]]
+    # the package ships its own record (06_provenance/record.tex), not the per-run copy
+    per_run = [r[1:4] + r[5:] for r in _manifest_rows(_trial(ws))[1:] if r[3] != "record"]
     package = [[r["sha256"], r["bytes"], r["kind"], r["cite"], r["license"], r["description"]]
                for r in _deposit_csv(ws)]
     assert sorted(per_run) == sorted(package)

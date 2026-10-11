@@ -7,8 +7,9 @@ The gap this closes: the LaTeX renderer routes EVERY interpolated string -- incl
 (:func:`order_figures_by_reference`, which scans the rendered body for ``\\ref{fig:<id>}``)
 NEVER saw a real ref authored in prose and silently fell back to supply order. The fix is
 a PROSE-ONLY sanitizer that preserves an EXACT allowlist of reference/citation commands
-(``\\ref`` ``\\eqref`` ``\\autoref`` ``\\cite`` ``\\citep`` ``\\citet``) verbatim while
-escaping everything else.
+(``\\ref`` ``\\autoref`` ``\\cite`` ``\\citep`` ``\\citet``) verbatim while escaping
+everything else. ``\\eqref`` was on the list until prose was found unable to resolve one (no
+equation in prose, no amsmath in a figure-less draft); it now prints as literal text.
 
 Coverage here:
   - the sanitizer unit (allowlist preserved verbatim; specials around them still escaped;
@@ -90,7 +91,6 @@ class TestLatexSanitizeProse:
         # Every member of the allowlist survives verbatim.
         for cmd, arg in [
             ("ref", "fig:x"),
-            ("eqref", "eq:1"),
             ("autoref", "sec:intro"),
             ("cite", "Smith2020"),
             ("citep", "a,b"),
@@ -103,8 +103,8 @@ class TestLatexSanitizeProse:
         # A multi-key cite (comma-separated keys) is a single allowlisted span.
         assert _latex_sanitize_prose(r"prior work \citep{a,b}") == r"prior work \citep{a,b}"
 
-    def test_eqref_preserved(self):
-        assert _latex_sanitize_prose(r"by \eqref{eq:1}") == r"by \eqref{eq:1}"
+    def test_eqref_is_escaped(self):
+        assert _latex_sanitize_prose(r"by \eqref{eq:1}") == r"by \textbackslash{}eqref\{eq:1\}"
 
     def test_underscore_inside_key_not_escaped(self):
         # The label/key inside the span is a reference KEY -- an underscore there must

@@ -29,10 +29,11 @@ src/sci_adk/core/spec.py (the Spec freeze discipline).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # The IMRaD default (mirrors PubReqs.DEFAULT_REQUIRED_SECTIONS; SPEC-PAPER-GATE-001
 # REQ-PG-105): the fixed required-sections set offered by the "use defaults" fast-path,
@@ -55,6 +56,22 @@ DEFAULT_IMAGE_MIN_DPI = 300
 # The model normalizes a bare ``"all"`` string to this literal so callers can test
 # ``pkgreqs.runs == ALL_RUNS`` uniformly.
 ALL_RUNS = "all"
+
+# A BibTeX style name (plainnat, apalike, unsrtnat ...): the package main.tex is assembled with
+# \bibliographystyle{<reference_style>}, so a brace or a backslash there would end the argument
+# and run what follows.
+_REFERENCE_STYLE_RE = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def valid_reference_style(style: str) -> str:
+    """``style`` when it is a BibTeX style name (letters, digits, ``_``, ``.``, ``-``), else
+    ``ValueError``. PURE."""
+    if not _REFERENCE_STYLE_RE.fullmatch(style):
+        raise ValueError(
+            f"reference_style {style!r} is not a BibTeX style name (letters, digits, _ . - "
+            "only, e.g. plainnat): it is written as the \\bibliographystyle argument"
+        )
+    return style
 
 
 class PackageReqs(BaseModel):
@@ -82,7 +99,8 @@ class PackageReqs(BaseModel):
             package ``main.tex`` figures; None disables the DPI gate. Mirrors PubReqs.
             Default :data:`DEFAULT_IMAGE_MIN_DPI`.
         reference_style: the declared bib style (e.g. "natbib"/"plainnat") checked present in
-            ``main.tex`` (a ``\\bibliographystyle`` wiring), or None to skip.
+            ``main.tex`` (a ``\\bibliographystyle`` wiring), or None to skip. A BibTeX style
+            name (:func:`valid_reference_style`), else ``ValueError``.
         abstract_max_words: the venue abstract word limit (e.g. 300); None disables the
             abstract word-count gate.
         body_word_range: a GATING ``(min, max)`` body word range (e.g. (4000, 7000)); the body
@@ -141,6 +159,11 @@ class PackageReqs(BaseModel):
         description="Free-form conditions surfaced but NEVER gated",
     )
 
+    @field_validator("reference_style")
+    @classmethod
+    def _bibtex_style_name(cls, v: Optional[str]) -> Optional[str]:
+        return valid_reference_style(v) if v else v
+
     # @MX:ANCHOR: [AUTO] the FROZEN package-requirements contract -- the workspace-level
     #   record the verify umbrella gate (package_requirements_clean) checks the assembled
     #   package against.
@@ -152,6 +175,7 @@ class PackageReqs(BaseModel):
 
 __all__ = [
     "PackageReqs",
+    "valid_reference_style",
     "DEFAULT_REQUIRED_SECTIONS",
     "DEFAULT_IMAGE_MIN_DPI",
     "ALL_RUNS",

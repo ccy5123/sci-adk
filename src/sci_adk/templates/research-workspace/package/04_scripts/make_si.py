@@ -19,7 +19,7 @@ Narrative grouping (optional): if ``package/narrative.json`` is present, it supp
 author-controlled metadata that groups the runs into the paper's narrative -- a JSON object::
 
     {
-      "title": "Supporting Information\\\\<paper title>",
+      "title": "Supporting Information: <paper title>",
       "author": "<author>",
       "runs": [
         {"id": "<run-id>", "label": "<one-line description>", "section": "<group>"},
@@ -55,6 +55,7 @@ import json
 import os
 import re
 import stat
+import unicodedata
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # package/04_scripts
@@ -69,21 +70,100 @@ BASIS = re.compile(r"'point'=([-\d.eE]+)\s*(<=|>=|<|>|==)\s*([-\d.eE]+)")
 SY = {"supported": "S", "refuted": "R", "contested": "C", "proposed": "P"}
 
 
-def esc(s):
-    return (str(s).replace("\\", "\\textbackslash{}").replace("_", "\\_")
-            .replace("%", "\\%").replace("&", "\\&").replace("#", "\\#"))
-
-
-# Every character LaTeX treats specially in text, for author-written text (a declared file's
-# description) that may hold any of them.
+# -- escaping: the rules sci-adk's renderer applies ------------------------------------------
+# A self-contained copy of sci_adk.render.paper._latex_sanitize and _one_line: this script runs
+# from a shipped package where sci-adk need not be installed, and the record must not change
+# with the environment that builds it. Every text the record prints -- the title, the author,
+# run ids, labels, groups, outcomes, protocol and data descriptions -- goes through tex(): line
+# ends normalized, control characters removed, whitespace collapsed to one line (each sits in a
+# macro argument or a table cell, where a blank line stops pdflatex), the LaTeX specials
+# escaped, and every other non-ASCII character mapped, kept or folded as render does (a
+# character with no form prints as "?"). sci-adk's test suite compares tex() with the
+# renderer over a broad sample.
 _TEX_SPECIAL = {
-    "\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "&": r"\&", "#": r"\#",
-    "%": r"\%", "_": r"\_", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+    '\\': r'\textbackslash{}',
+    '&': r'\&',
+    '%': r'\%',
+    '$': r'\$',
+    '#': r'\#',
+    '_': r'\_',
+    '{': r'\{',
+    '}': r'\}',
+    '~': r'\textasciitilde{}',
+    '^': r'\textasciicircum{}',
 }
+# Curated Unicode -> LaTeX (sci_adk.render.paper._UNICODE_MAP).
+_UNICODE_MAP = {
+    '₀': '$_0$', '₁': '$_1$', '₂': '$_2$', '₃': '$_3$',
+    '₄': '$_4$', '₅': '$_5$', '₆': '$_6$', '₇': '$_7$',
+    '₈': '$_8$', '₉': '$_9$', '⁰': '$^0$', '¹': '$^1$',
+    '²': '$^2$', '³': '$^3$', '⁴': '$^4$', '⁵': '$^5$',
+    '⁶': '$^6$', '⁷': '$^7$', '⁸': '$^8$', '⁹': '$^9$',
+    '⁺': '$^+$', '⁻': '$^-$', 'ⁿ': '$^n$', '≥': r'$\geq$',
+    '≤': r'$\leq$', '≠': r'$\neq$', '±': r'$\pm$', '×': r'$\times$',
+    '÷': r'$\div$', '−': '$-$', '≈': r'$\approx$', '≡': r'$\equiv$',
+    '∝': r'$\propto$', '·': r'$\cdot$', '∙': r'$\cdot$', '∞': r'$\infty$',
+    '∑': r'$\sum$', '∏': r'$\prod$', '∫': r'$\int$', '√': r'$\surd$',
+    '∂': r'$\partial$', '∇': r'$\nabla$', '∈': r'$\in$', '∉': r'$\notin$',
+    '⊂': r'$\subset$', '⊆': r'$\subseteq$', '∪': r'$\cup$', '∩': r'$\cap$',
+    '→': r'$\rightarrow$', '←': r'$\leftarrow$', '↔': r'$\leftrightarrow$', '⇒': r'$\Rightarrow$',
+    '⇐': r'$\Leftarrow$', 'α': r'$\alpha$', 'β': r'$\beta$', 'γ': r'$\gamma$',
+    'δ': r'$\delta$', 'ε': r'$\epsilon$', 'ζ': r'$\zeta$', 'η': r'$\eta$',
+    'θ': r'$\theta$', 'ι': r'$\iota$', 'κ': r'$\kappa$', 'λ': r'$\lambda$',
+    'μ': r'$\mu$', 'ν': r'$\nu$', 'ξ': r'$\xi$', 'ο': 'o',
+    'π': r'$\pi$', 'ρ': r'$\rho$', 'σ': r'$\sigma$', 'ς': r'$\varsigma$',
+    'τ': r'$\tau$', 'υ': r'$\upsilon$', 'φ': r'$\phi$', 'χ': r'$\chi$',
+    'ψ': r'$\psi$', 'ω': r'$\omega$', 'Γ': r'$\Gamma$', 'Δ': r'$\Delta$',
+    'Θ': r'$\Theta$', 'Λ': r'$\Lambda$', 'Ξ': r'$\Xi$', 'Π': r'$\Pi$',
+    'Σ': r'$\Sigma$', 'Φ': r'$\Phi$', 'Ψ': r'$\Psi$', 'Ω': r'$\Omega$',
+    'µ': r'$\mu$', '°': r'\textdegree{}', '–': '--', '—': '---',
+    '‘': '`', '’': "'", '“': '``', '”': "''",
+    '…': r'\ldots{}',
+}
+# Latin-1 Supplement + Latin Extended-A pass through inputenc, except the letters with no
+# glyph (sci_adk.render.paper._ACCENT_LO/_ACCENT_HI/_UNDEFINED_LATIN_A).
+_ACCENT_LO = 0x00C0
+_ACCENT_HI = 0x017E
+_UNDEFINED_LATIN_A = frozenset('ĦħĸĿŀŉŦŧ')
+_UNICODE_PLACEHOLDER = "?"
+# C0 controls other than tab and line feed, and DEL: pdflatex stops on each.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
-def esc_text(s):
-    return "".join(_TEX_SPECIAL.get(ch, ch) for ch in str(s))
+def _clean_text(s):
+    return _CONTROL_RE.sub("", s.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _one_line(s):
+    return " ".join(_clean_text(s).split())
+
+
+def _escape(s):
+    return "".join(_TEX_SPECIAL.get(ch, ch) for ch in s)
+
+
+def _sanitize(s):
+    out = []
+    for ch in _escape(_clean_text(s)):
+        if ord(ch) < 0x80:
+            out.append(ch)
+        elif ch in _UNICODE_MAP:
+            out.append(_UNICODE_MAP[ch])
+        elif _ACCENT_LO <= ord(ch) <= _ACCENT_HI and ch not in _UNDEFINED_LATIN_A:
+            out.append(ch)
+        else:  # NFKD fold: ASCII fallout escaped, combining marks dropped, the rest "?"
+            for f in unicodedata.normalize("NFKD", ch):
+                if ord(f) < 0x80:
+                    out.append(_escape(f))
+                elif not unicodedata.combining(f):
+                    out.append(_UNICODE_PLACEHOLDER)
+    return "".join(out)
+
+
+def tex(s):
+    """``s`` as the record prints it: on one line and escaped as sci-adk's renderer escapes
+    text (see the comment above)."""
+    return _sanitize(_one_line(str(s)))
 
 
 def discover_runs():
@@ -324,7 +404,7 @@ def protocol_section(runs):
         r"order."
     )
     for rid, _label, _section in runs:
-        L.append(r"\subsection*{Run \texttt{" + esc(rid) + r"}}")
+        L.append(r"\subsection*{Run \texttt{" + tex(rid) + r"}}")
         try:
             entries, digest = protocol_history(os.path.join(RUNS, rid))
         except (OSError, ValueError, AttributeError, TypeError):
@@ -336,8 +416,8 @@ def protocol_section(runs):
             # "created <time>" / "recorded <time>": the time in an \mbox, so a line never
             # breaks at one of its hyphens (as the per-run record.tex sets it).
             verb, _, at = when.partition(" ")
-            L.append(r"  \item[\texttt{" + esc(name) + r"}] " + esc(description) + "; "
-                     + esc(verb) + r" \mbox{" + esc(at) + "}; " + checksum)
+            L.append(r"  \item[\texttt{" + tex(name) + r"}] " + tex(description) + "; "
+                     + tex(verb) + r" \mbox{" + tex(at) + "}; " + checksum)
         L.append(r"\end{description}")
         L.append("\\noindent Protocol digest:\\\\\n{\\small\\texttt{" + digest + "}}")
     return L
@@ -411,7 +491,7 @@ def declared_files_section(runs):
         r"listed: nothing in the record fixes its bytes."
     )
     for rid, files in blocks:
-        L.append(r"\subsection*{Run \texttt{" + esc(rid) + r"}}")
+        L.append(r"\subsection*{Run \texttt{" + tex(rid) + r"}}")
         if files is None:
             L.append(r"\emph{The declaration of this run could not be read.}")
             continue
@@ -422,8 +502,8 @@ def declared_files_section(runs):
             sentence = description.strip()
             if sentence and not sentence.endswith("."):
                 sentence += "."
-            L.append(r"  \item[\texttt{" + esc_text(evidence) + r"}] "
-                     + (esc_text(sentence) + " " if sentence else "") + checksum)
+            L.append(r"  \item[\texttt{" + tex(evidence) + r"}] "
+                     + (tex(sentence) + " " if sentence else "") + checksum)
         L.append(r"\end{description}")
     return L
 
@@ -459,8 +539,8 @@ def build():
     L.append(r"\usepackage[margin=1in]{geometry}")
     L.append(r"\usepackage{booktabs}\usepackage{longtable}")
     L.append(r"\usepackage[hidelinks]{hyperref}")
-    L.append(r"\title{" + title + r"}")
-    L.append(r"\author{" + esc(author) + r"}\date{}")
+    L.append(r"\title{" + tex(title) + r"}")
+    L.append(r"\author{" + tex(author) + r"}\date{}")
     L.append(r"\begin{document}\maketitle")
     L.append(r"\section{Overview}")
     # M5 (REQ-SA-506): this is the package RECORD, presented as the record/provenance -- not as
@@ -496,10 +576,10 @@ def build():
     for rid, label, section, nh, verd, dg in idx_rows:
         if any_section and section != cur:
             cur = section
-            banner = esc(section) if section else r"(ungrouped)"
+            banner = tex(section) if section else r"(ungrouped)"
             L.append(r"\multicolumn{5}{l}{\textit{" + banner + r"}}\\")
-        L.append(f"\\texttt{{{esc(rid)}}} & {esc(label)} & {nh} & {esc(verd)} & "
-                 f"\\texttt{{{dg}}} \\\\")
+        L.append(f"\\texttt{{{tex(rid)}}} & {tex(label)} & {nh} & {tex(verd)} & "
+                 f"\\texttt{{{tex(dg)}}} \\\\")
     L.append(r"\bottomrule\end{longtable}")
 
     # Claims table -- the deterministic point statistic + pre-registered op/threshold/verdict.
@@ -514,9 +594,9 @@ def build():
     for rid, label, section, nh, verd, dg in idx_rows:
         for hyp, st, pt, op, th in claim_blocks[rid]:
             opx = {"<=": r"$\leq$", ">=": r"$\geq$", "<": r"$<$", ">": r"$>$",
-                   "==": r"$=$", "": ""}.get(op, esc(op))
-            L.append(f"{esc(hyp)} & {esc(pt)} & {opx} & {esc(th)} & "
-                     f"\\textbf{{{SY.get(st, st)}}} \\\\")
+                   "==": r"$=$", "": ""}.get(op, tex(op))
+            L.append(f"{tex(hyp)} & {tex(pt)} & {opx} & {tex(th)} & "
+                     f"\\textbf{{{tex(SY.get(st, st))}}} \\\\")
     L.append(r"\bottomrule\end{longtable}")
 
     # Each run's protocol history and protocol digest (design/deposit-files.md D11).

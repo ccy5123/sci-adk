@@ -137,7 +137,8 @@ def test_session_a_record_only_render_then_verify_exits_zero(tmp_path, capsys):
 
 def test_record_only_record_tex_is_byte_identical_to_full_render(tmp_path):
     """One source for the record: --record-only writes exactly the record.tex a full
-    render writes (bibliography line and inlined reproduction code included)."""
+    render writes (inlined reproduction code included; no bibliography line, as the record
+    cites nothing -- design/deposit-files.md §7 Q12)."""
     run_dir = _seed(tmp_path, "rec-same", code_ref="code/gen.py")
     script = run_dir / "code" / "gen.py"
     script.parent.mkdir(parents=True, exist_ok=True)
@@ -152,7 +153,7 @@ def test_record_only_record_tex_is_byte_identical_to_full_render(tmp_path):
     assert main(["render", str(run_dir), "--record-only"]) == 0
     record_only = deposit_record_path(run_dir).read_text(encoding="utf-8")
     assert not (run_dir / "paper").exists()
-    assert r"\bibliography{references}" in record_only
+    assert r"\bibliography" not in record_only
     assert "print('regenerate')" in record_only
 
     assert main(["render", str(run_dir)]) == 0

@@ -52,7 +52,8 @@ gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
   paper is the argument and the SI (`paper/si.tex`) is its authored overflow — both are
   belief documents you write, and every quantitative statement in either must trace to
   the record. The record itself is the engine's deterministic dump,
-  `runs/<id>/record.tex`: deposited, never submitted, never authored.
+  `runs/<id>/record.tex`: deposited, never authored; a full render ships a byte copy of it
+  with the paper as `paper/deposit/record.tex`.
 
 ## Implementation Guide (5 minutes)
 
@@ -87,7 +88,7 @@ Two documents, two jobs, and they are not written together:
 |---|---|---|
 | What | the deterministic record dump | the argument |
 | Written by | the engine, no authoring judgement | the writer, in a separate paper session |
-| Submitted | no | yes |
+| Submitted | no; a byte copy ships as `paper/deposit/record.tex` | yes |
 | Vocabulary | the record's own, freely | tool-agnostic science |
 
 If you are the session that ran the experiments, your publish job ends at the record:
@@ -98,7 +99,7 @@ manuscript and fails it against the frozen `pubreqs.json`, and the session canno
 
 The paper session is a NEW top-level session, the one running `/sci publish` for the
 paper. It spawns `expert-writer` to author the paper (steps 1–5 below), then runs the
-audit itself (step 6). For the writer, **`record.tex` is the input** — the complete
+audit itself (step 6) and the blind conclusions reviewer (step 7). For the writer, **`record.tex` is the input** — the complete
 Evidence, the numeric tables, the figures, the verdicts with their frozen decision
 rules. Read it and work out what was found and what it means. A verdict decided by a
 threshold or interval rule carries no degree of belief: report the recorded estimate and
@@ -121,7 +122,11 @@ Then the writer:
 5. runs `sci-adk verify <run>`;
 6. once it passes, the paper session — the session driving `/sci publish` — runs the
    independent paper audit (below): it spawns the readers and refuters and writes the
-   audit file, and the writer revises from that file, then repeats steps 2–5.
+   audit file, and the writer revises from that file, then repeats steps 2–5;
+7. after the final audit-driven revision, the paper session runs the blind conclusions
+   reviewer (below); when the reviewer reads a conclusion differently from its
+   declaration or notes anything, the writer gets one more pass on those notes only, and
+   the reviewer runs once more.
 
 **No gate can tell whether you actually did this in a separate session.** The
 separation is a discipline, not a check. What the engine can see is whether the
@@ -234,10 +239,13 @@ A run without `numbers.json` is still checked by the older pattern audit.
 Every full render writes `paper/deposit/`: the run's protocol under `deposit/protocol/` (the
 exact bytes of each frozen version, `protocol-v1.json`, `protocol-v2.json`, …, and of each
 amendment receipt, `amendment-v2.json`, …), the data files you declare under `deposit/data/`
-(study files) and `deposit/inputs/` (third-party files), and `deposit/manifest.csv`, which
-lists every file with its SHA-256, size and terms, and the SHA-256 of each declared file that
-does not ship. `sci-adk verify` re-hashes every file against the record. Render owns
-`paper/deposit/`: never put or edit a file there — `verify` fails a file render did not write.
+(study files) and `deposit/inputs/` (third-party files), `deposit/record.tex` (a byte copy of
+the record, `runs/<id>/record.tex`: every recorded item with its time and checksums), and
+`deposit/manifest.csv`, which lists every file with its SHA-256, size and terms, and the
+SHA-256 of each declared file that does not ship. `sci-adk verify` re-hashes every file
+against the record and fails a `deposit/record.tex` that is not byte-identical to
+`runs/<id>/record.tex` (re-render after the record changes). Render owns `paper/deposit/`:
+never put or edit a file there — `verify` fails a file render did not write.
 
 **Declare the data in `drafts/<spec-id>/paper/deposit.json`**, beside `prose.json`, and pass
 it with `--deposit` (step 3 above). Render validates it and keeps a copy at
@@ -286,15 +294,19 @@ empty stops shipping data.
 (for example, its proposal includes a collaborator's unpublished results), the declaration
 carries `"protocol": "withheld"` and a one-line `"protocol_reason"`, with or without `files`.
 Render then ships no protocol file, and the manifest keeps each file's SHA-256 with the reason.
+`deposit/record.tex` still ships: it prints the hypotheses with their decision rules and each
+protocol file's time and SHA-256, never the proposal itself.
 `verify` reports, as an advisory and never a failure, that readers cannot check the protocol or
 what the paper says about it, such as when it was written. The paper and SI then name no
 protocol file: `verify` fails every sentence that does, by bundle path or bare name. A
 declaration without the two keys ships the protocol again.
 
 **Name the deposited files by their bundle paths** — `deposit/protocol/protocol-v1.json`,
-`deposit/protocol/amendment-v2.json`, `deposit/data/results.csv`, `deposit/manifest.csv` — in
-the SI and in the availability statement, never by a record name (`spec.json`,
-`spec_history/…`, `checkpoints/…`, `deposit.json`), which the vocabulary check fails. `verify`
+`deposit/protocol/amendment-v2.json`, `deposit/data/results.csv`, `deposit/record.tex`,
+`deposit/manifest.csv` — in the SI and in the availability statement (a time recorded with an
+analysis step is in `deposit/record.tex`, so a sentence about it can name that file), never by
+a record name (`spec.json`, `spec_history/…`, `checkpoints/…`, `deposit.json`), which the
+vocabulary check fails. `verify`
 fails a `deposit/…` path that names no file the bundle holds; a cited file that is not shipped
 has no bundle path, so cite it by its checksum. In LaTeX write a path as
 `\path{deposit/data/results.csv}`, which needs no `\_`.
@@ -307,9 +319,10 @@ has no bundle path, so cite it by its checksum. In LaTeX write a path as
 
 The availability statement names the folders, the manifest and the terms:
 
-> The protocol in both versions and its amendment (\path{deposit/protocol/}) and the analysis
-> scripts (\path{code/}; \path{reproduce.py} lists them and checks each against its SHA-256)
-> are distributed with this paper; \path{deposit/manifest.csv} lists every file with its
+> The protocol in both versions and its amendment (\path{deposit/protocol/}), the record of
+> every analysis step with its time (\path{deposit/record.tex}) and the analysis scripts
+> (\path{code/}; \path{reproduce.py} lists them and checks each against its SHA-256) are
+> distributed with this paper; \path{deposit/manifest.csv} lists every file with its
 > SHA-256 and the terms it is distributed under, and gives the SHA-256 of each data file that
 > is not distributed. Files produced in this study are distributed under CC BY 4.0.
 
@@ -492,6 +505,27 @@ runs in its own worktree: give the readers and refuters the manuscript path in t
 they read — the workspace, after the writer's output is merged back — and give the
 writer the audit file's content or its absolute path, to read and never edit.
 
+**Author instructions.** The orchestrator and the user give the writer instructions, with
+the decisions behind them, in files beside the paper source: how a number is printed and
+why, a term to keep, a claim not to make. The author instructions are the files the
+orchestrator or the user wrote for the writer in `drafts/<spec-id>/paper/` — not the audit
+files, which are other readers' findings, and not the paper's source (`prose.json`,
+`si.json`). List each one by path in every reader's and every refuter's prompt, and give
+the writer the same files, as content or absolute paths (its worktree may not hold
+`drafts/`): readers and refuters weigh them as instructions and do not audit them. Never
+tell a reader or refuter to keep out of `drafts/`: a reader who cannot see an instruction
+recommends the change it forbids, and the writer applies it.
+
+**A finding that conflicts with an author instruction is not applied by the writer.** A
+reader names the instruction a finding conflicts with; the writer returns, unapplied, any
+finding that asks for what an instruction forbids, named or not. For each such finding the
+orchestrator keeps the instruction or asks the user with `AskUserQuestion`, showing the
+finding, the instruction and the reason the instruction gives, and records the outcome
+against the finding in the audit file: the instruction kept, or the user's choice and
+reason. A finding the user chooses goes to the writer to apply — in the audit file, or on
+its own when the writer has already returned it — and the orchestrator notes the choice in
+the instruction file, so a later reader weighs the instruction as it now stands.
+
 1. **Read.** Spawn `Agent(subagent_type: "evaluator-paper")` once per lens, in
    parallel: `number-sources`, `claims-vs-design`, `position-and-proportion`,
    `reader-vocabulary`, `result-fidelity`, `structure-and-methods`. Each prompt names the
@@ -531,12 +565,34 @@ new file, never overwriting the first: a same-day re-run writes
 `drafts/<spec-id>/paper/audit-<date>-2.md`. Its surviving findings go to the writer once,
 and then the audit ends; what that revision does not fix stays listed as open.
 
-After the revision passes `verify`, if any declared sentence or the opening changed,
-re-run `evaluator-conclusions` on the revised paper, then `sci-adk verify` to surface its
-readings — the earlier reading was of the old text.
-
 The audit is advisory. Nothing in it is read by `sci-adk verify`, whose exit code
 remains the verdict; a finding asks for a sentence to be read again and decides nothing.
+
+### After the audit: the blind conclusions reviewer
+
+The reviewer must read the text the paper's reader will read, and its notes must still get
+a turn. So the session driving `/sci publish` runs it after the final audit-driven
+revision — once the audit has ended, or once the first `verify` pass when the audit upheld
+nothing:
+
+1. Spawn `Agent(subagent_type: "evaluator-conclusions")` with the run, the hypothesis
+   ids, the declared sentences and the identifier entries of `numbers.json` (text,
+   document, context) — never the declared statuses or the path to `declarations.json`.
+   It writes `runs/<id>/review.json`; run `sci-adk verify` to surface its readings.
+2. If `verify` prints readings that disagree with a declaration (cannot-tell included),
+   or the review holds `opening_notes` or `notes`, give the writer one more pass on those
+   notes only: the sentences read differently, the terms of the opening and the
+   identifiers read as quantities, as `verify` prints them and as `review.json` holds
+   them (content or an absolute path). The writer rewrites each named passage at the
+   strength the record supports, never by adding a hedge, and touches nothing else; then
+   it runs `sci-adk numbers draft`, `sci-adk render`, updates the declarations and runs
+   `sci-adk verify`. A note that conflicts with an author instruction is handled like an
+   audit finding that does (above).
+3. Re-run the reviewer once on the revised paper, then `sci-adk verify`. What this second
+   reading still reports does not go back to the writer: `verify` keeps printing it as a
+   non-gating advisory, and the orchestrator reports it to the user.
+
+A reviewer that reads every conclusion as declared and notes nothing ends this at step 1.
 
 ### Render
 
@@ -549,14 +605,14 @@ paper/
 ├── si.tex           # Supporting Information, authored (written only with --si si.json)
 ├── figures/         # body-order numbered figure files
 ├── references.bib   # bibliography
-└── deposit/         # protocol files, declared data, manifest.csv (render owns it; above)
+└── deposit/         # protocol files, declared data, record.tex, manifest.csv (render owns it; above)
 ```
 
 Both `.tex` files are authored. The deterministic record dump (Evidence record +
 quantitative table + Claims with their C3 bases + decision rules + figures +
-record-integrity) is NOT in `paper/`: every render deposits it as `runs/<id>/record.tex`,
-outside the submission. The whole `paper/` folder is self-contained for a single
-Overleaf folder upload.
+record-integrity) is not one of them: every render deposits it as `runs/<id>/record.tex`,
+and a full render ships a byte copy of it as `paper/deposit/record.tex`. The whole `paper/`
+folder is self-contained for a single Overleaf folder upload.
 
 ### Compile check
 
@@ -616,6 +672,16 @@ failure except by an explicit re-freeze (anti-moving-the-goalposts).
 - **Cross-doc SI references are PLAIN TEXT.** A main-paper → SI-figure reference must
   be plain text (e.g. "Figure S1"), NOT `\ref{fig:SI-...}` — the within-document gate
   flags a cross-doc `\ref` as dangling (cross-doc `\ref` resolution is deferred).
+- **Lead-in labels.** Methods/Results lead-in labels may be written as
+  `\paragraph{Label.}` with brace-free text, not in the abstract.
+- **Symbols in prose are characters, not LaTeX.** A `PaperProse` / `SIProse` slot is
+  escaped as text: write `≥`, `H₂O`, `30 °C`, `α` (render maps them) or plain ASCII, never
+  `$\geq$`, `H$_2$O` or `30\textdegree{}C`, which print as literal text (render names each
+  such command, and each character it prints as `?`, in a warning). Only the authored SI
+  body (`si.json` sections) is verbatim LaTeX; there a symbol is LaTeX (`$\alpha$`,
+  `$\geq$`): pdflatex stops on a Greek letter, a relation sign or CJK written as a
+  character, and render names each in a warning (accented Latin letters and dashes are
+  fine).
 - **Novelty markup is HARD-gated.** A `\novelty{result|method}{hyp}{text}` marker (in
   the prose JSON) may only be used for a kind whose novelty flag is supported on the
   record (a `found_nothing` search exists). Do not assert novelty the record does not
@@ -656,7 +722,8 @@ acquisition design.
   told what you declared) and answers only "which status does this sentence assert?".
   `verify` computes the disagreement and surfaces it as a non-gating advisory, so a
   faithful paper produces silence. It catches both overstatement and understatement,
-  and it can never fail a run. Run it before close; do not show it the declaration list.
+  and it can never fail a run. Run it after the final audit-driven revision (above); do
+  not show it the declaration list.
   Give it the identifier entries of `numbers.json`: it notes any that reads, in its
   sentence, as a reported quantity (advisory, like its readings). Its cold reading of the
   opening against the frozen venue writes each term that venue's reader would not know to

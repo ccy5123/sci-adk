@@ -87,11 +87,13 @@ from sci_adk.render.figures import (
     image_figure_filename,
     order_figures_by_reference,
 )
-from sci_adk.render.authored_si import render_authored_si_latex
+from sci_adk.render.authored_si import authored_si_warnings, render_authored_si_latex
 from sci_adk.render.bib_latex import paper_bib
 from sci_adk.render.deposit import (
     MANIFEST_NAME,
     OWNED_DIRS,
+    RECORD_BIB_NAME,
+    RECORD_NAME,
     DataPlan,
     DepositWrite,
     ProtocolPlan,
@@ -104,6 +106,7 @@ from sci_adk.render.deposit import (
     prepare_deposit_write,
     protocol_digest,
     protocol_record_problems,
+    record_bibliography,
     unlisted_paths,
 )
 from sci_adk.render.novelty import (
@@ -112,8 +115,14 @@ from sci_adk.render.novelty import (
     novelty_sentences_payload,
     parse_novelty_sentences,
 )
-from sci_adk.render.paper import render_paper_latex, run_font_policy
-from sci_adk.render.pkgreqs_checks import bib_subset, cited_keys
+from sci_adk.render.paper import (
+    _clean_text,
+    is_doi,
+    prose_warnings,
+    render_paper_latex,
+    run_font_policy,
+)
+from sci_adk.render.pkgreqs_checks import bib_command_problems, bib_subset, cited_keys
 from sci_adk.render.prose import AuthoredSI, PaperProse, SIProse
 from sci_adk.render.reproduction import (
     ReproListing,
@@ -137,7 +146,9 @@ ExperimentFn = Callable[[Spec, Path], Sequence[EvidenceItem]]
 # BELIEF submission documents ``draft.tex``/``si.tex``). Keeping it out of ``paper/`` makes
 # the record EXEMPT from the per-run tool-vocab gate BY CONSTRUCTION (that gate scans only
 # ``paper/`` documents; REQ-SA-206 / AC-B6) and gives the M2 deposit-completeness checker a
-# single source of truth for where the record artifact lives.
+# single source of truth for where the record artifact lives. A full render also ships a
+# byte copy as ``paper/deposit/record.tex`` (design/deposit-files.md D4, D13); the gate reads
+# ``paper/draft.tex`` and ``paper/si.tex`` by name, so the copy is exempt the same way.
 RECORD_ARTIFACT_NAME: str = "record.tex"
 
 
@@ -237,11 +248,15 @@ class DepositSummary:
 @dataclass(frozen=True)
 class _DepositPrep:
     """A deposit checked before anything under ``paper/`` is written (D13), applied after
-    ``record.tex`` (the manifest's ``sha256_also_in`` searches it).
+    ``record.tex`` (it ships as ``paper/deposit/record.tex``, and the manifest's
+    ``sha256_also_in`` searches it).
 
     ``persist`` holds the bytes of a declaration given with ``--deposit``, written to
     ``runs/<id>/deposit.json`` when the render completes (D2); ``declaration`` says which
-    declaration the render used."""
+    declaration the render used; ``record_tex`` is the text of the ``record.tex`` this render
+    writes, rendered with ``plan`` before the check; ``record_bib`` the bytes the paper's
+    ``references.bib`` will hold when that record names it (shipped beside the record
+    copy), else ``None``."""
 
     plan: ProtocolPlan
     write: DepositWrite
@@ -249,6 +264,8 @@ class _DepositPrep:
     data: DataPlan = DataPlan()
     persist: Optional[bytes] = None
     declaration: str = ""
+    record_tex: str = ""
+    record_bib: Optional[bytes] = None
 
 
 def _listing_text(raw: bytes) -> Optional[str]:
@@ -316,6 +333,16 @@ class ResearchCompiler:
         # manifest cells, render-written files whose bytes changed. The CLI prints them.
         self.deposit_summary: Optional[DepositSummary] = None
         self.deposit_warnings: List[str] = []
+        # What the last render's prose sanitizer did to the written prose: a short line per slot
+        # and command printed as literal text, the rule once, a line per slot naming the
+        # characters replaced by '?' (render/paper.prose_warnings). The CLI prints them as
+        # warnings.
+        self.prose_warnings: List[str] = []
+        # What the last render left out of or found in the references it wrote: a recorded DOI
+        # that is not of the DOI form (left out of the no-bibliography DOI list), a command
+        # in a bibliography it wrote that can read or write a file, define a macro or end the
+        # document. The CLI prints them as warnings.
+        self.reference_warnings: List[str] = []
 
     def compile(
         self,
@@ -705,8 +732,10 @@ class ResearchCompiler:
         out); this stage is the composition root that locates the citations + bib and
         co-locates figure/bib sources into ``paper/`` for Overleaf self-containment.
 
-        Deposit files (design/deposit-files.md): the protocol history and the declared data
-        files ship under ``paper/deposit/`` with their manifest. ``deposit`` is a declaration
+        Deposit files (design/deposit-files.md): the protocol history, the declared data
+        files and a byte copy of ``record.tex`` ship under ``paper/deposit/`` with their
+        manifest; the record is rendered before anything is written, so its copy is checked
+        under the D13 rules with the other files. ``deposit`` is a declaration
         given with ``--deposit``; it is validated before anything is written and persisted as
         ``runs/<id>/deposit.json`` when the render completes. Without it the persisted
         declaration is used (D2). The data checks read ``evidence`` -- the list this render
@@ -734,15 +763,50 @@ class ResearchCompiler:
         # in place; the bindings of its novelty sentences are carried into the side file
         # below. Read BEFORE anything is written: an unreadable side file stops the render.
         kept_si_bindings = self._kept_si_bindings(run_dir, spec.id) if si is None else []
+        # The authored SI body is LaTeX written as is: a character pdflatex cannot typeset there
+        # is named too (render does not map it as it does in a prose slot).
+        self.prose_warnings = prose_warnings(prose, si_prose) + authored_si_warnings(si)
+        self.reference_warnings = []
 
-        # Deposit files (design/deposit-files.md D1-D3, D13): the protocol history and the
-        # declared data ship under paper/deposit/. Checked here, before anything is written:
-        # an invalid declaration (given or persisted), a missing source, a symbolic link on
-        # the way, a manifest render did not write, or a file render did not write at a
-        # target path stops the render with paper/ and runs/<id>/deposit.json untouched.
+        # The record (record.tex) is rendered here, before anything is written, so its bytes
+        # are known to the deposit check below: paper/deposit/record.tex is its byte copy.
+        # F3 reproduction bundle (design/paper-publishing-requirements.md §3): resolve every
+        # script each Evidence item's provenance.code_ref names (or a bare-ref pointer),
+        # then (a) inline each distinct script once in the record's "Reproduction code"
+        # section, (b) ship one copy per distinct script into paper/code/, and (c) write
+        # paper/reproduce.py (a manifest + hash check; it runs nothing).
+        # The compiler -- the SOLE filesystem toucher -- does the resolution + fs; the
+        # renderer stays pure (it receives the resolved listings). When NO Evidence item
+        # carries a code_ref, repro_listings is empty -> no section, no paper/code/, no
+        # reproduce.py (the run's paper/ is byte-identical to today; the F3 regression
+        # invariant). Resolution is fail-open: a bare commit ref is a POINTER, never an error.
+        # Resolution only reads.
+        repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
+        si_figures = list(si_figures or [])
+        # The record's only use of the bibliography is its stem (``references``), the same for
+        # the run's own references.bib and its paper/ copy, so it is located, not co-located.
+        # The record loads it only when its SI prose cites (render_si_latex; design/
+        # deposit-files.md §7 Q12), so the usual record carries no \bibliography line.
+        record_bib = self._locate_bib_path(run_dir)
+
+        def record_for(protocol: Optional[ProtocolPlan]) -> str:
+            return self._record_text(
+                spec, claims_list, evidence_list,
+                repro_listings=repro_listings, figures=si_figures, prose=si_prose,
+                bib_path=record_bib, protocol=protocol,
+            )
+
+        # Deposit files (design/deposit-files.md D1-D3, D13): the protocol history, the
+        # declared data and the record ship under paper/deposit/. Checked here, before anything
+        # is written: an invalid declaration (given or persisted), a missing source, a symbolic
+        # link on the way, a manifest render did not write, or a file render did not write at
+        # a target path stops the render with paper/ and runs/<id>/deposit.json untouched.
         self.deposit_summary = None
         self.deposit_warnings = []
-        deposit_prep = self._prepare_deposit(run_dir, spec.id, deposit)
+        deposit_prep = self._prepare_deposit(run_dir, spec.id, deposit, record_for)
+        record_tex = (
+            deposit_prep.record_tex if deposit_prep is not None else record_for(None)
+        )
 
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
@@ -757,7 +821,8 @@ class ResearchCompiler:
         # not mark a hypothesis resolved when only a novelty axis -- not the experiment claim
         # the checkpoint tracks -- has been decided.
         pending_dicts = self._open_checkpoints(claims_list, checkpoints_list)
-        cited_dois = self._gather_cited_dois(evidence_list, run_dir)
+        rejected_dois: List[Tuple[str, str]] = []
+        cited_dois = self._gather_cited_dois(evidence_list, run_dir, rejected=rejected_dois)
 
         paper_dir = run_dir / "paper"
         paper_dir.mkdir(parents=True, exist_ok=True)
@@ -767,9 +832,20 @@ class ResearchCompiler:
         # The compiler does the copy (the renderer stays pure); it then passes the
         # CO-LOCATED path, whose stem is "references", to the renderer.
         bib_path = self._colocate_bib(run_dir, paper_dir)
+        # Without a bibliography the References are the cited DOIs as \url entries; a recorded
+        # value that is not a DOI is left out of that list, and named.
+        self.reference_warnings = (
+            [
+                f"cited DOI {value!r} (recorded in {where}) is not a DOI (10.<registrant>/"
+                "<suffix of printable ASCII without spaces, braces, backslash, % # or ^>), so "
+                "it is left out of the References list; correct it where it is recorded"
+                for value, where in rejected_dois
+            ]
+            if bib_path is None
+            else []
+        )
 
         figures = list(figures or [])
-        si_figures = list(si_figures or [])
 
         # The .tex is THE paper artifact (Overleaf default pdflatex). Deterministic and
         # offline -- no LLM, no network (render_paper_latex is pure). The Markdown
@@ -816,6 +892,7 @@ class ResearchCompiler:
         # paper/si.tex slot stays empty (backward compatible with M1). This is the single
         # end-to-end wiring point that fills ② alongside ① (above) and ③ (below).
         si_path: Optional[Path] = None
+        si_bib_path: Optional[str] = None
         if si is not None:
             # SPEC-SI-AUTHORING-001 M6 (REQ-SA-604/605/606): the authored si.tex gets its OWN
             # cited-only references_SI.bib -- a SUBSET of the run's ONE literature pool, NOT a
@@ -838,29 +915,36 @@ class ResearchCompiler:
                 si_path = paper_dir / "si.tex"
                 si_path.write_text(si_tex, encoding="utf-8")
 
+        # The copies keep every command as acquired: one that can read or write a file, define
+        # a macro or end the document is named here (and fails verify) -- the deposit's copy
+        # holds the paper's bytes, so the two written here cover it. A literature store that is
+        # not UTF-8 is copied as is (_colocate_bib): read for the scan as verify reads it, and
+        # named, since pdflatex reads the bibliography as UTF-8.
+        for written in (bib_path, si_bib_path):
+            if written is not None and Path(written).is_file():
+                raw = Path(written).read_bytes()
+                try:
+                    bib_text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    bib_text = raw.decode("utf-8", errors="replace")
+                    self.reference_warnings.append(
+                        f"paper/{Path(written).name} is not UTF-8: it is the run's literature "
+                        "references.bib copied byte for byte, and pdflatex reads a "
+                        "bibliography as UTF-8, so it stops on the non-ASCII bytes -- save the "
+                        "literature references.bib as UTF-8 and render again"
+                    )
+                self.reference_warnings.extend(
+                    f"{line} (verify fails the paper until it is removed)"
+                    for line in bib_command_problems(bib_text, source=Path(written).name)
+                )
+
         self._write_novelty_sentences(run_dir, spec.id, novelty_found + kept_si_bindings)
 
-        # F3 reproduction bundle (design/paper-publishing-requirements.md §3): resolve every
-        # script each Evidence item's provenance.code_ref names (or a bare-ref pointer),
-        # then (a) inline each distinct script once in the record's "Reproduction code"
-        # section, (b) ship one copy per distinct script into paper/code/, and (c) write
-        # paper/reproduce.py (a manifest + hash check; it runs nothing).
-        # The compiler -- the SOLE filesystem toucher -- does the resolution + fs; the
-        # renderer stays pure (it receives the resolved listings). When NO Evidence item
-        # carries a code_ref, repro_listings is empty -> no section, no paper/code/, no
-        # reproduce.py (the run's paper/ is byte-identical to today; the F3 regression
-        # invariant). Resolution is fail-open: a bare commit ref is a POINTER, never an error.
-        repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
-
-        # The deposit record.tex (SPEC-SI-AUTHORING-001 M1) -- the SAME writer the
-        # record-only render uses, so the two cannot drift. Its Protocol history section
-        # (design/deposit-files.md D11) reads the protocol plan checked above.
-        record_path = self._write_record(
-            spec, claims_list, evidence_list, run_dir,
-            repro_listings=repro_listings, figures=si_figures, prose=si_prose,
-            bib_path=bib_path,
-            protocol=deposit_prep.plan if deposit_prep is not None else None,
-        )
+        # The deposit record.tex (SPEC-SI-AUTHORING-001 M1), rendered above by the SAME
+        # renderer the record-only render uses (_record_text), so the two cannot drift. Its
+        # Protocol history section (design/deposit-files.md D11) reads the protocol plan
+        # checked above.
+        record_path = self._store_record(run_dir, record_tex)
 
         # Land the bundle (paper/code/ + paper/reproduce.py). paper/code/ is written only when
         # at least one named script resolved; a pointer-only set (every code_ref a bare
@@ -869,9 +953,10 @@ class ResearchCompiler:
         # the previous render wrote and this one does not. See _emit_reproduction_bundle.
         self._emit_reproduction_bundle(repro_listings, paper_dir, spec.id)
 
-        # paper/deposit/: the protocol copies, the shipped data files and the manifest, whose
-        # sha256_also_in column searches the record.tex just written; then the data checks
-        # against the Evidence this render was given, and the names check.
+        # paper/deposit/: the protocol copies, the shipped data files, the byte copy of the
+        # record.tex just written, and the manifest, whose sha256_also_in column searches that
+        # record; then the data checks against the Evidence this render was given, and the
+        # names check.
         if deposit_prep is not None:
             self._emit_deposit(deposit_prep, record_path, evidence_list)
 
@@ -902,10 +987,11 @@ class ResearchCompiler:
         ``paper/`` (no draft, no SI, no figures, no bib copy, no ``reproduce.py``).
 
         ``record.tex`` is byte-identical to the one a full render writes for the same
-        record: both go through :meth:`_write_record`, and the record's only external
-        reference -- ``\\bibliography{references}`` -- is emitted from the bib's stem, which
-        is ``references`` whether the path is the run's own ``references.bib`` (here) or its
-        ``paper/`` copy (the full render). Figures in the record come only from the
+        record: both go through :meth:`_write_record`, and the record's only possible external
+        reference -- ``\\bibliography{references}``, written only when the record's SI prose
+        cites (never here: this stage passes no prose) -- is emitted from the bib's stem,
+        which is ``references`` whether the path is the run's own ``references.bib`` (here) or
+        its ``paper/`` copy (the full render). Figures in the record come only from the
         library-only ``si_figures`` (never passed here), and reproduction code is inlined
         verbatim, so the record references no file under ``paper/``.
 
@@ -1013,8 +1099,9 @@ class ResearchCompiler:
         data tables, the supplementary figures, the inlined reproduction code, and the
         verdicts with their frozen decision rules. It lives at the run root via
         ``deposit_record_path`` -- OUTSIDE ``paper/``, which holds the belief documents --
-        so the per-run tool-vocabulary gate never scans it (REQ-SA-206, by construction).
-        ``render_si_latex`` is reused verbatim (REQ-SA-201).
+        so the per-run tool-vocabulary gate never scans it (REQ-SA-206, by construction); a
+        full render ships its byte copy as ``paper/deposit/record.tex``, which that gate does
+        not read either. ``render_si_latex`` is reused verbatim (REQ-SA-201).
 
         ``digest=None`` on purpose: at compile time the Evidence may not yet be persisted
         (the loop persists AFTER compile), so a digest here would cover an incomplete run
@@ -1024,11 +1111,38 @@ class ResearchCompiler:
         ``spec.json`` on disk) adds the Protocol history section (design/deposit-files.md
         D11).
         """
-        record_tex = render_si_latex(
+        return ResearchCompiler._store_record(run_dir, ResearchCompiler._record_text(
+            spec, claims, evidence, repro_listings=repro_listings, figures=figures,
+            prose=prose, bib_path=bib_path, protocol=protocol,
+        ))
+
+    @staticmethod
+    def _record_text(
+        spec: Spec,
+        claims: Sequence[Claim],
+        evidence: Sequence[EvidenceItem],
+        *,
+        repro_listings: Sequence[ReproListing],
+        figures: Optional[Sequence[AnyFigure]],
+        prose: Optional[SIProse],
+        bib_path: Optional[str],
+        protocol: Optional[ProtocolPlan] = None,
+    ) -> str:
+        """The text of the deposit's ``record.tex`` (see :meth:`_write_record`), written
+        nowhere: a full render computes it before anything is written, so the deposit check
+        knows the bytes of its copy ``paper/deposit/record.tex`` (design/deposit-files.md
+        D13). Pure: ``render_si_latex`` reads only its arguments (of the bibliography, only
+        its stem)."""
+        return render_si_latex(
             spec, claims, evidence, figures=figures, digest=None,
             prose=prose, paper_body=None, bib_path=bib_path,
             repro_listings=repro_listings, protocol=protocol,
         )
+
+    @staticmethod
+    def _store_record(run_dir: Path, record_tex: str) -> Path:
+        """Write ``record_tex`` to the deposit's ``record.tex`` (``deposit_record_path``) and
+        return its path -- the one place the record's bytes are written."""
         record_path = deposit_record_path(run_dir)
         record_path.write_text(record_tex, encoding="utf-8")
         return record_path
@@ -1155,7 +1269,9 @@ class ResearchCompiler:
 
     @staticmethod
     def _gather_cited_dois(
-        evidence: Sequence[EvidenceItem], run_dir: Path
+        evidence: Sequence[EvidenceItem],
+        run_dir: Path,
+        rejected: Optional[List[Tuple[str, str]]] = None,
     ) -> List[str]:
         """Collect the DOIs to cite for this run, de-duplicated, first-seen order.
 
@@ -1165,14 +1281,23 @@ class ResearchCompiler:
           (b) the run's literature ``manifest.csv`` (see ``_LITERATURE_DIRS``; the shape
               where literature was acquired ad-hoc with no LITERATURE EvidenceItem).
 
+        Only a value of the DOI form is collected (``paper.is_doi``): without a bibliography
+        each DOI goes into ``\\url{https://doi.org/<doi>}`` as written. Any other value is
+        appended to ``rejected`` (when given) as ``(value, where it was recorded)``, once.
+
         Pure parsing of recorded artifacts -- no acquisition, no network.
         """
         seen: List[str] = []
 
-        def _add(doi: Optional[str]) -> None:
-            d = (doi or "").strip()
-            if d and d not in seen:
-                seen.append(d)
+        def _add(doi: object, source: str) -> None:
+            d = doi.strip() if isinstance(doi, str) else ""
+            if not d or d in seen:
+                return
+            if not is_doi(d):
+                if rejected is not None and all(d != value for value, _ in rejected):
+                    rejected.append((d, source))
+                return
+            seen.append(d)
 
         # (a) LITERATURE evidence findings.
         for ev in evidence:
@@ -1190,15 +1315,16 @@ class ResearchCompiler:
             for bucket in ("acquired", "failed"):
                 for entry in summary.get(bucket, []) or []:
                     if isinstance(entry, dict):
-                        _add(entry.get("doi"))
+                        _add(entry.get("doi"), f"the LITERATURE Evidence item '{ev.id}'")
 
         # (b) manifest.csv on disk.
         manifest = ResearchCompiler._literature_file(run_dir, "manifest.csv")
         if manifest is not None:
+            where = manifest.relative_to(run_dir).as_posix()
             try:
                 with manifest.open(encoding="utf-8", newline="") as fh:
                     for row in csv.DictReader(fh):
-                        _add(row.get("doi"))
+                        _add(row.get("doi"), where)
             except (OSError, csv.Error):
                 pass
 
@@ -1261,6 +1387,20 @@ class ResearchCompiler:
         return str(dest)
 
     @classmethod
+    def _paper_bib_bytes(cls, run_dir: Path) -> Optional[bytes]:
+        """The bytes :meth:`_colocate_bib` writes to ``paper/references.bib``, computed before
+        anything is written (``None``: the run has no ``references.bib``). The deposit ships
+        them beside the record copy when the record names its bibliography, and checks that
+        target with the others (design/deposit-files.md D13, §7 Q12)."""
+        src = cls._locate_bib_path(run_dir)
+        if src is None:
+            return None
+        try:
+            return paper_bib(Path(src).read_text(encoding="utf-8")).encode("utf-8")
+        except UnicodeDecodeError:
+            return Path(src).read_bytes()
+
+    @classmethod
     def _colocate_si_bib(
         cls, run_dir: Path, paper_dir: Path, si: AuthoredSI
     ) -> Optional[str]:
@@ -1284,7 +1424,8 @@ class ResearchCompiler:
         if not subset:
             return None
         dest = paper_dir / "references_SI.bib"
-        dest.write_text(subset, encoding="utf-8")
+        # surrogateescape: a store that is not UTF-8 is subset byte for byte (_si_bib_subset).
+        dest.write_bytes(subset.encode("utf-8", errors="surrogateescape"))
         return str(dest)
 
     @classmethod
@@ -1294,10 +1435,18 @@ class ResearchCompiler:
         src = cls._locate_bib_path(run_dir)
         if src is None:
             return None
-        keys = cited_keys("\n".join(s.body for s in si.sections if s.body))
+        # The bodies as render writes them (cleaned of control characters, _clean_text), so a
+        # key the rendered si.tex cites is the key the subset holds.
+        keys = cited_keys("\n".join(_clean_text(s.body) for s in si.sections if s.body))
         if not keys:
             return None
-        pool = Path(src).read_text(encoding="utf-8")
+        try:
+            pool = Path(src).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Not UTF-8: copied as is like paper/references.bib (_colocate_bib), so the SI's
+            # entries keep its bytes (each byte that is not UTF-8 held as a surrogate).
+            raw = Path(src).read_bytes().decode("utf-8", errors="surrogateescape")
+            return bib_subset(raw, keys) or None
         return bib_subset(paper_bib(pool), keys) or None
 
     def _colocate_figures(
@@ -1469,13 +1618,18 @@ class ResearchCompiler:
 
     @staticmethod
     def _prepare_deposit(
-        run_dir: Path, spec_id: str, given: Optional[DeclarationFile] = None
+        run_dir: Path,
+        spec_id: str,
+        given: Optional[DeclarationFile],
+        record_for: Callable[[Optional[ProtocolPlan]], str],
     ) -> Optional[_DepositPrep]:
         """Plan ``paper/deposit/`` and check it can be written (design/deposit-files.md D2,
         D13).
 
         ``given`` is a declaration passed with ``--deposit`` (validated here, persisted by
         :meth:`_emit_deposit`); without it the persisted ``runs/<id>/deposit.json`` is read.
+        ``record_for`` renders the run's ``record.tex`` for the protocol plan; its bytes are
+        the target ``paper/deposit/record.tex`` (D4, D13), checked with the others.
         ``None`` when the run has no ``spec.json`` on disk (a library caller rendering an
         in-memory Spec): there is no recorded protocol to ship. The record-side protocol
         problems (receipts, history files, ``prior_version_id`` links) are kept as warnings.
@@ -1502,21 +1656,35 @@ class ResearchCompiler:
             label = f"runs/{spec_id}/{DEPOSIT_FILE}" if declaration is not None else ""
         plan = plan_protocol(run_dir, declaration)
         data = plan_data(run_dir, declaration)
-        write = prepare_deposit_write(run_dir / "paper", {**plan.targets(), **data.targets()})
+        record_tex = record_for(plan)
+        record_bytes = record_tex.encode("utf-8")
+        # A record whose SI prose cites names \bibliography{references}: its copy ships the
+        # bibliography beside it (the bytes _colocate_bib will write), so paper/deposit/ builds
+        # alone with bibtex (design/deposit-files.md §7 Q12).
+        record_bib = (
+            ResearchCompiler._paper_bib_bytes(run_dir)
+            if record_bibliography(record_bytes) is not None else None
+        )
+        targets = {**plan.targets(), **data.targets(), RECORD_NAME: record_bytes}
+        if record_bib is not None:
+            targets[RECORD_BIB_NAME] = record_bib
+        write = prepare_deposit_write(run_dir / "paper", targets)
         fails, notes = protocol_record_problems(plan)
         return _DepositPrep(
             plan=plan, write=write, warnings=tuple(fails + notes), data=data,
             persist=given.data if given is not None else None, declaration=label,
+            record_tex=record_tex, record_bib=record_bib,
         )
 
     def _emit_deposit(
         self, prep: _DepositPrep, record_path: Path, evidence: Sequence[EvidenceItem] = ()
     ) -> None:
         """Apply a checked deposit: persist a declaration given with ``--deposit``, write the
-        protocol copies and the shipped data files, remove the render-written files this
-        render no longer ships, drop emptied render folders, write the manifest; then run the
-        data checks on ``evidence`` (the list this render was given) and the names check,
-        keeping their failures as warnings (D5).
+        protocol copies, the shipped data files and the byte copy of ``record.tex``
+        (``record_path``, just written), remove the render-written files this render no longer
+        ships, drop emptied render folders, write the manifest; then run the data checks on
+        ``evidence`` (the list this render was given) and the names check, keeping their
+        failures as warnings (D5).
 
         Only what :func:`prepare_deposit_write` allowed is touched (D13): new paths and paths
         a trusted previous manifest listed are written; removals are render-written files
@@ -1532,15 +1700,31 @@ class ResearchCompiler:
             target = deposit_dir / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+        # The copy must equal the bytes runs/<id>/record.tex holds, which are the bytes the
+        # check saw (both come from prep.record_tex) unless writing the text changed its line
+        # ends; then the copy follows the file.
+        record = record_path.read_bytes()
+        copy = deposit_dir / RECORD_NAME
+        if not (copy.is_file() and copy.read_bytes() == record):
+            copy.write_bytes(record)
+        # The record's bibliography follows paper/references.bib (written by _colocate_bib)
+        # the same way: its copy holds the bytes the paper's file holds.
+        record_bib: Optional[bytes] = None
+        bib_name = record_bibliography(record)
+        if bib_name is not None and prep.record_bib is not None:
+            source = paper_dir / bib_name
+            record_bib = source.read_bytes() if source.is_file() else prep.record_bib
+            bib_copy = deposit_dir / bib_name
+            if not (bib_copy.is_file() and bib_copy.read_bytes() == record_bib):
+                bib_copy.write_bytes(record_bib)
         for rel in write.removals:
             (deposit_dir / rel).unlink()
         for sub in OWNED_DIRS:
             folder = deposit_dir / sub
             if folder.is_dir() and not folder.is_symlink() and not any(folder.iterdir()):
                 folder.rmdir()
-        record_text = record_path.read_text(encoding="utf-8")
         (deposit_dir / MANIFEST_NAME).write_text(
-            manifest_text(deposit_rows(prep.plan, prep.data, record_text)),
+            manifest_text(deposit_rows(prep.plan, prep.data, record, record_bib)),
             encoding="utf-8", newline="\n",
         )
         bib = paper_dir / "references.bib"
@@ -1552,11 +1736,14 @@ class ResearchCompiler:
             name: (paper_dir / name).read_text(encoding="utf-8", errors="replace")
             for name in ("draft.tex", "si.tex") if (paper_dir / name).is_file()
         }
-        name_fails, _ = deposit_name_problems(docs, prep.plan, prep.data)
+        name_fails, _ = deposit_name_problems(
+            docs, prep.plan, prep.data, RECORD_BIB_NAME if record_bib is not None else None)
         # A file this render neither wrote nor removed stays under paper/deposit/ (a lost or
         # untrusted manifest, a hand-added file): verify's inventory will fail it, so say so
         # now. A changed file left in place already has its warning.
-        listed = {**prep.plan.targets(), **prep.data.targets()}
+        listed = {**prep.plan.targets(), **prep.data.targets(), RECORD_NAME: record}
+        if record_bib is not None:
+            listed[RECORD_BIB_NAME] = record_bib
         stray = [
             f"paper/deposit/{rel} stays, but the new manifest does not list it (left from an "
             "earlier render, or added by hand); verify fails until it is moved away"

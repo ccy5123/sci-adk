@@ -1,13 +1,15 @@
 # Deposit files: shipping the protocol history and declared data with the paper
 
-> Status: **v0.5 (2026-10-11) — approved for implementation 2026-10-11.** Phase 1 built
+> Status: **v0.6 (2026-10-11) — approved for implementation 2026-10-11.** Phase 1 built
 > 2026-10-11: 1a (the per-run protocol bundle) and 1b (`record.tex`, `run_index.csv` and the
 > package). Phase 2 (declared data) built 2026-10-11. Phase 3 (instructions and Evidence
 > times) built 2026-10-11. The core, render and verify paths and the package hardened
-> 2026-10-11. See the change log.
+> 2026-10-11. The record ships in the per-run bundle as `paper/deposit/record.tex` (built
+> 2026-10-11). See the change log.
 > Revised after a review of v0.1 and a second review of v0.2 (the points of both and where
 > each is resolved are listed at the end); v0.4 records the two decisions taken on 2026-10-11
-> (§7 Resolved, change log); v0.5 records the third (§7 Q9) and the hardening. Where code
+> (§7 Resolved, change log); v0.5 records the third (§7 Q9) and the hardening; v0.6 the
+> fourth (§7 Q10: the record ships with the paper). Where code
 > forces a deviation, the implementer makes the smallest one and records it in the change log.
 > Found on the second trial workspace (run SPEC-BCFKOW-001, `~/research/lit-search-trial-2`).
 > Builds on `design/si-belief-record-split.md` (the record is the deposit),
@@ -122,10 +124,11 @@ The switch needs no declared data. With it:
   `06_provenance/protocol/<id>/` absent (D8);
 - the manifest keeps one row for every version and every amendment, each with an empty
   `file`, the SHA-256 and size of the record's file, and the reason (D4);
-- `record.tex` keeps its Protocol history section (times, checksums, protocol digest, D11), the
-  protocol digest is still printed, and `verify` still compares the record's own history
-  files, receipts and `spec.json` with one another (D5); a copy released later can be checked
-  against the manifest checksums and the digest;
+- `record.tex` keeps its Protocol history section (times, checksums, protocol digest, D11) and
+  still ships as `paper/deposit/record.tex` (D4, §7 Q10), the protocol digest is still
+  printed, and `verify` still compares the record's own history files, receipts and
+  `spec.json` with one another (D5); a copy released later can be checked against the manifest
+  checksums and the digest;
 - `verify` reports an advisory, not a failure: readers cannot check the protocol or what the
   paper says about it (D5);
 - a sentence in the paper or SI that names a protocol file fails the names check (D5, D9).
@@ -133,7 +136,12 @@ The switch needs no declared data. With it:
 Withholding covers every version and every amendment of the run, never a subset. It stops the
 files only: `record.tex` still prints each claim with its hypothesis's decision rule and never
 the raw proposal (`render_si_latex` in `render/si.py`), and the paper still describes the
-method.
+method. So the record ships whether or not the protocol does (§7 Q10). Measured on the trial
+(every string of 40 characters or more in `spec.json`, searched in `record.tex` by its first
+60 characters): the record holds the two hypothesis statements and their decision-rule
+expressions, and none of the raw proposal's four fields, the method's approaches, the
+hypotheses' discriminating cases, the target claims or the amendment rationale; of the
+protocol files it prints only times and checksums (D11).
 
 ### D2 — Declared data: a render flag, kept in the run directory
 
@@ -313,13 +321,13 @@ The column values are written for a reader of the bundle, not in the declaration
 
 | Column | Content |
 |---|---|
-| `file` | per run, the path relative to `paper/deposit/` (`protocol/protocol-v1.json`, `data/chemicals.csv`); in the package, relative to the package root; empty for a data file that is cited, not shipped (D7: third-party data, and study data with a non-empty `cite`, that lacks `license`, `redistribution` or both), for a protocol file that is withheld (D1), and for a protocol version whose file was not kept |
+| `file` | per run, the path relative to `paper/deposit/` (`protocol/protocol-v1.json`, `data/chemicals.csv`, `record.tex`); in the package, relative to the package root; empty for a data file that is cited, not shipped (D7: third-party data, and study data with a non-empty `cite`, that lacks `license`, `redistribution` or both), for a protocol file that is withheld (D1), and for a protocol version whose file was not kept |
 | `sha256`, `bytes` | of the file's bytes — for a file not shipped or withheld, of the source or record file; empty for a version not kept |
-| `kind` | `protocol` (a protocol version), `amendment`, `study data` (declared `recorded` or `derived`), `third-party data` (declared `external`) |
-| `sha256_also_in` | the other files that state this SHA-256, separated by `;`: for a replaced protocol version, its amendment file (`protocol/amendment-v<N+1>.json`) when that file ships; and `record.tex`, the deposited record, wherever it prints the value — every protocol and amendment file, withheld or not (its Protocol history section, D11), and every `recorded` or `external` file whose Evidence item it prints. Empty when no other file states it: a `derived` file, a version not kept |
+| `kind` | `protocol` (a protocol version), `amendment`, `study data` (declared `recorded` or `derived`), `third-party data` (declared `external`), `record` (per run only: `record.tex`, the copy of the record) |
+| `sha256_also_in` | the other files of the bundle that state this SHA-256, separated by `;`: for a replaced protocol version, its amendment file (`protocol/amendment-v<N+1>.json`) when that file ships; and `record.tex`, the copy of the record shipped beside the manifest, wherever it prints the value — every protocol and amendment file, withheld or not (its Protocol history section, D11), and every `recorded` or `external` file whose Evidence item it prints. Every name resolves in `paper/deposit/` (D5 inventory). Empty when no other file states it: a `derived` file, a version not kept, the `record.tex` row itself |
 | `cite` | bib keys, resolved in the shipped `references.bib` |
-| `license` | the file's terms: its own `license`; "redistribution asserted by the authors"; both, joined by `; `; the top-level `license` it takes; "not redistributed" for a data file that is cited, not shipped; or empty (a withheld or not-kept protocol row, or no terms stated) |
-| `description` | one line, from the declaration; for protocol rows fixed text: "protocol, version N (current)", "protocol, version N, replaced by version N+1", "amendment that produced version N", "protocol, version N; file not kept"; on a withheld row the fixed text is followed by `; withheld: ` and the declaration's `protocol_reason` |
+| `license` | the file's terms: its own `license`; "redistribution asserted by the authors"; both, joined by `; `; the top-level `license` it takes (the shipped protocol files and `record.tex` take it); "not redistributed" for a data file that is cited, not shipped; or empty (a withheld or not-kept protocol row, or no terms stated) |
+| `description` | one line, from the declaration; for protocol rows fixed text: "protocol, version N (current)", "protocol, version N, replaced by version N+1", "amendment that produced version N", "protocol, version N; file not kept"; on a withheld row the fixed text is followed by `; withheld: ` and the declaration's `protocol_reason`; for `record.tex` the fixed text "the deterministic record of the study: every recorded item, its time and checksums" |
 | `run`, `evidence` | package only: the run id, and the Evidence id that holds the checksum |
 
 `sha256_also_in` replaces v0.2's `record` column, whose values ("checksum held by the record",
@@ -332,22 +340,31 @@ writes for the 64-hex token; `verify` recomputes it (D5, plan). The per-run mani
 `protocol_reason` are checked at load, D3), and a test locks that (§6.11); so does the package
 `deposit.csv` without its `run` and `evidence` columns.
 
-Why the split. `record.tex`, the document that resolves Evidence ids, sits outside `paper/`
+Why the split. `record.tex`, the document that resolves Evidence ids, is kept outside `paper/`
 per run (`deposit_record_path` in `loop/compiler.py`) and inside `06_provenance/` in the
-package. An Evidence id in the per-run bundle would point at nothing that bundle holds, and
-would put record identifiers in the folder the author uploads as the submission. The id-bearing
-per-run information is the declaration itself, `runs/<id>/deposit.json` (D2), which `verify`
-reads. A reader of the per-run bundle keys a row to the record by its checksum, which
-`record.tex` prints wherever the record holds it (the trial's `record.tex` carries the full
-`5e6f3568…` six times, `1081e637…` 26 times, `d5f642bd…` six times). In the package the ids sit
-beside `06_provenance/record.tex`, which carries them already.
+package. Every full render also ships a byte copy of it beside the manifest,
+`paper/deposit/record.tex` (§7 Q10), so the files `sha256_also_in` names are files the reader
+holds. The manifest still carries no Evidence id: the copy prints the ids, and a reader of the
+per-run bundle keys a row to the record by its checksum, which `record.tex` prints wherever
+the record holds it (the trial's `record.tex` carries the full `5e6f3568…` six times,
+`1081e637…` 26 times, `d5f642bd…` six times). The id-bearing per-run information is the
+declaration itself, `runs/<id>/deposit.json` (D2), which `verify` reads. In the package the
+ids sit beside `06_provenance/record.tex`, which carries them already.
 
-The protocol copies under `paper/deposit/protocol/` do carry record field names and the Spec
-id. They are copies checked against the record and never read as the record: `verify` reads
-`runs/<id>/`. The exemption of record-side text from the vocabulary check holds by
-construction because the check reads two fixed names at the top of `paper/` (`_PAPER_DOCS`);
-a file under `paper/deposit/` cannot become one of them. The scripts under `paper/code/` have
-the same standing today.
+The record/belief boundary inside the per-run bundle. Before §7 Q10 the boundary was a
+folder boundary: the belief documents in `paper/`, the record in `runs/<id>/`. With the record
+shipping, it is drawn inside `paper/`: the two belief documents are the fixed names
+`paper/draft.tex` and `paper/si.tex` (`_PAPER_DOCS`), and everything under `paper/deposit/` is
+record-side — the protocol copies, the record copy and the manifest. The protocol copies carry
+record field names and the Spec id, and the record copy carries the record's own vocabulary
+(Evidence ids, "verdict", the Spec id). They are copies checked against the record and never
+read as the record: `verify` reads `runs/<id>/`, and checks `paper/deposit/record.tex` against
+`runs/<id>/record.tex` byte for byte (D5). The exemption of record-side text from the
+vocabulary check holds by construction because the check reads two fixed names at the top of
+`paper/`; a file under `paper/deposit/` cannot become one of them. The scripts under
+`paper/code/` have the same standing today. What the copy changes is what an author uploads:
+the record's identifiers and vocabulary are now in the folder the author uploads, inside
+`deposit/`, as a deposited file the paper may name (D9), never as text of the paper.
 
 ### D5 — `verify` checks
 
@@ -369,8 +386,9 @@ says the loop persists after compile. The rule above holds under either order.
 
 | Check | Rule | Severity | What a pass shows |
 |---|---|---|---|
-| inventory | the manifest's first line is the marker (D13); every manifest file exists under `paper/deposit/` with that hash and size; every file under `paper/deposit/` is in the manifest (an unlisted file is named: render did not write it) | fail | the bundle holds exactly the listed bytes |
-| plan | the manifest rows are the rows `runs/<id>/`, the persisted declaration (its data entries and its protocol switch) and `runs/<id>/record.tex` call for (`sha256_also_in` recomputed from the protocol files and `record.tex`) | fail | the render is not stale: no amendment and no new declaration since |
+| inventory | the manifest's first line is the marker (D13); every manifest file exists under `paper/deposit/` with that hash and size; every file under `paper/deposit/` is in the manifest (an unlisted file is named: render did not write it); every name in a `sha256_also_in` cell is a listed file the bundle holds | fail | the bundle holds exactly the listed bytes, and every file a row points to |
+| plan | the manifest rows are the rows `runs/<id>/`, the persisted declaration (its data entries and its protocol switch) and `runs/<id>/record.tex` call for (`sha256_also_in` recomputed from the protocol files and `record.tex`; the `record.tex` row from its bytes) | fail | the render is not stale: no amendment, no new declaration and no new record since |
+| record | `paper/deposit/record.tex` is byte-identical to `runs/<id>/record.tex`; a missing copy, a differing copy, or a run with no `record.tex` to compare against each fail, naming the file | fail | the record the reader holds is the run's record, as the last full render wrote it; a `--record-only` render after new Evidence (D13) leaves the copy stale, and this check says so until the next full render |
 | current protocol | `protocol-v<V>.json` bytes equal `runs/<id>/spec.json`; V equals the Spec's version. With the protocol withheld (D1) there is no copy; the row's `sha256` is checked by `plan` | fail | the protocol shipped is the one the results were judged against; its content is covered by the record digest |
 | earlier protocols | the SHA-256 of `protocol-v<N>.json` equals `prior_spec_sha256` in `amendment-v<N+1>.json` and the SHA-256 of `spec_history/spec.v<N>.json`; version N's `created_at`, as `str(created_at.timestamp())`, equals version N+1's `prior_version_id`; versions 1…V present. With the protocol withheld, the comparisons among the record's own files (history file, receipt, `created_at` link) still run and those against copies are skipped | fail; a version not kept (D1) is advisory | the history files, the receipts and the copies agree with one another — nothing more. They are outside the record digest (D11): a rewrite of an earlier version that keeps its `created_at`, made together with its receipt's `prior_spec_sha256`, passes. The one link inside the digest is the current `spec.json`'s `prior_version_id` (set by `Spec.amend`), and it fixes a time, not content |
 | amendments | `amendment-v<N>.json` bytes equal the checkpoint file; its `rationale` equals version N's `amendment_rationale`. With the protocol withheld, only the `rationale` comparison runs | fail | copy fidelity; for the latest amendment, its rationale matches the digest-covered `spec.json` |
@@ -381,8 +399,8 @@ says the loop persists after compile. The rule above holds under either order.
 | external | the SHA-256 occurs in the named item; every `cite` key resolves in `references.bib`; the file is copied only with both `license` and `redistribution` | fail | the record names these bytes and the paper cites their source |
 | cited, not shipped | every `recorded` or `derived` entry with a non-empty `cite` that lacks `license`, `redistribution` or both, and every `external` entry that states exactly one of the two (one stating neither is the default and is not listed): listed as cited, not shipped, with its checksum and citation, naming the field(s) it lacks | advisory | the bundle leaves the file out on purpose; the manifest names its bytes and its source |
 | citations | every `cite` key of a `recorded` or `derived` entry resolves in `references.bib`, as for `external`, shipped or not | fail | the manifest's `cite` column (D4) points at entries the bundle holds |
-| terms | every shipped file with a non-empty `cite`, listed with its terms (each states both `license` and `redistribution`, D3); with no top-level `license`, one line saying the bundle's own files state no terms | advisory | every redistribution is a visible declaration, and no third-party file or table of third-party values ships without both statements |
-| names | every path in `draft.tex` / `si.tex` outside `\url` and `\href` (bare, in `\texttt` or in `\path`) that, after normalisation, starts with `deposit/` (not preceded by a word character, `/` or `.`) and ends in a file name with an extension is `deposit/` + a manifest `file`; and every bare protocol file name (below) is the name of a file under `paper/deposit/protocol/`. When the name is a withheld protocol file, or the declared `name` of an entry that is not shipped, the message says so | fail | the paper points only at files the bundle holds |
+| terms | every shipped file with a non-empty `cite`, listed with its terms (each states both `license` and `redistribution`, D3); with no top-level `license`, one line saying the bundle's own files (the record, the protocol files, the declared files with no cited source and no license of their own) state no terms; the record ships with every bundle, so the line appears whenever no top-level `license` is declared | advisory | every redistribution is a visible declaration, and no third-party file or table of third-party values ships without both statements |
+| names | every path in `draft.tex` / `si.tex` outside `\url` and `\href` (bare, in `\texttt` or in `\path`) that, after normalisation, starts with `deposit/` (not preceded by a word character, `/` or `.`) and ends in a file name with an extension is `deposit/` + a manifest `file` (`deposit/record.tex` included); and every bare protocol file name (below) is the name of a file under `paper/deposit/protocol/`. When the name is a withheld protocol file, or the declared `name` of an entry that is not shipped, the message says so | fail | the paper points only at files the bundle holds |
 | pointed to | the paper and SI name none of the deposited paths | advisory | — |
 | times | D12 | advisory | — |
 | no deposit | `paper/draft.tex` exists, `paper/deposit/` does not (a paper rendered before this feature) | advisory, recommending a re-render; no verdict changes | — |
@@ -620,8 +638,9 @@ and the terms, and cites with its checksum every data file the bundle does not s
 for the declaration in D3, with an illustrative license (checksums elided here, written in
 full in the paper):
 
-> The protocol in both versions and its amendment (`deposit/protocol/`) and the analysis
-> scripts (`code/`; `reproduce.py` lists them and checks each against its SHA-256) are
+> The protocol in both versions and its amendment (`deposit/protocol/`), the record of every
+> analysis step with its time (`deposit/record.tex`) and the analysis scripts (`code/`;
+> `reproduce.py` lists them and checks each against its SHA-256) are
 > distributed with this paper; `deposit/manifest.csv` lists every file with its SHA-256 and the
 > terms it is distributed under, and gives the SHA-256 of each data file that is not
 > distributed. Files produced in this study are distributed under CC BY 4.0. The table of the
@@ -640,6 +659,22 @@ and `redistribution` (D3, D7), the statement names the file and both statements 
 
 A table that is cited, not shipped, is never named by its bundle path: the names check fails
 `deposit/data/chemicals.csv` when the manifest row has an empty `file` (D5).
+
+**The record.** `deposit/record.tex` ships with every bundle, the protocol withheld or not
+(§7 Q10), so the SI and the availability statement may name it, and the names check accepts
+it (D5). The trial SI (`drafts/SPEC-BCFKOW-001/paper/si.json`) said its analysis times come
+from "an analysis log kept by the authors" that "is not distributed with the paper, so a
+reader cannot check the times given below as 'logged at'". Rewritten:
+
+> Each analysis step was entered, as it was completed, in an analysis log kept by the authors,
+> with the time of the entry; the analysis log is distributed with the paper as
+> `deposit/record.tex`, where a reader can find each time given below as "logged at".
+
+What stands behind it: each time and checksum the SI quotes can be found in the copy, and the
+D5 record check shows the copy is the run's record as the last full render wrote it. What does
+not: the times are still read from local clocks (D12), and the copy shows what the record says
+now, not when it was written (D10, D11). Measured on a copy of the trial: rendered with that
+sentence, `verify` passes the names and vocabulary checks and reports the deposit files OK.
 
 **A withheld protocol.** With the protocol withheld (D1), the SI and the availability
 statement cannot name a protocol file: the names check fails every sentence that does,
@@ -781,7 +816,9 @@ does not show in this line.
 
 - **One root.** Per run, everything this design writes in the bundle is under
   `paper/deposit/`: `protocol/` (unless withheld, D1), `data/` (`recorded`, `derived` that
-  ship, D7), `inputs/` (redistributed `external`) and `manifest.csv`. No generic folder
+  ship, D7), `inputs/` (redistributed `external`), `record.tex` (the byte copy of
+  `runs/<id>/record.tex`, the one file render owns at the root of the folder, §7 Q10) and
+  `manifest.csv`. No generic folder
   (`paper/data/`, `paper/inputs/`) is created: authors keep pgfplots tables or Overleaf data
   there, which a render-owned folder would overwrite and an inventory rule would fail.
 - **Marker.** The first line of `paper/deposit/manifest.csv` is the fixed line
@@ -795,10 +832,16 @@ does not show in this line.
   other existing file stops the render, naming it; render never overwrites it. Render also
   stops when `paper/deposit/`, one of its three folders or a target path is a symlink: it never
   writes through a link. The manifest itself is replaced only when the existing one carries the
-  marker or none exists; a `manifest.csv` without the marker stops the render.
+  marker or none exists; a `manifest.csv` without the marker stops the render. The record
+  is rendered before anything is written, so the copy's bytes are known to these rules
+  like every other target's: a `paper/deposit/record.tex` that no trusted manifest lists
+  and that holds other bytes stops the render; one a trusted manifest lists is replaced
+  (a copy edited by hand is replaced by the next render). The copy is written after
+  `runs/<id>/record.tex`, from that file's bytes.
 - **Which previous manifest is trusted.** One whose first line is the marker and whose every
-  non-empty `file` cell is `protocol/<name>`, `data/<name>` or `inputs/<name>`, with `<name>` a
-  plain file name (D3's pattern): relative, no `..`, no leading `/`, no backslash, and resolving
+  non-empty `file` cell is `record.tex`, or `protocol/<name>`, `data/<name>` or
+  `inputs/<name>`, with `<name>` a plain file name (D3's pattern): relative, no `..`, no
+  leading `/`, no backslash, and resolving
   inside `paper/deposit/` with no symlink on the way. One cell that fails and the whole
   manifest is untrusted: nothing is removed, and render prints the cell. This is the rule the
   code bundle already follows for `paper/code/`: `ResearchCompiler._emit_reproduction_bundle`
@@ -816,7 +859,9 @@ does not show in this line.
 - A file someone else puts under `paper/deposit/` is never touched by render; the inventory
   check fails on it, naming it.
 - `--record-only` writes nothing under `paper/` and leaves `runs/<id>/deposit.json` alone; the
-  `record.tex` it writes carries the Protocol history section (D11), withheld or not.
+  `record.tex` it writes carries the Protocol history section (D11), withheld or not. It
+  does not refresh `paper/deposit/record.tex`: after new Evidence the copy is stale, and
+  `verify` fails it (D5 record) until the next full render.
 
 The package needs none of this: it owns its namespaces whole and rebuilds them (D8).
 
@@ -1092,8 +1137,8 @@ workspace itself.
    and journals limit supplementary files. Whether render warns above a size, and whether large
    declared files ship only in the package.
 
-Questions 5, 6 and 9 are resolved (§7 Resolved, below); the remaining questions keep their
-numbers so that references to them stay valid.
+Questions 5, 6, 9, 10 and 12 are resolved (§7 Resolved, below); the remaining questions keep
+their numbers so that references to them stay valid.
 
 7. **Shared data outside the workspace.** D3 requires a source to resolve inside the
    workspace, so data kept on a symlinked shared drive cannot be declared. Whether to allow a
@@ -1104,6 +1149,19 @@ numbers so that references to them stay valid.
    tool in structured fields, and the manifest show the pair as linked. `verify` could then
    check that both checksums sit in one Evidence item and that the tool is named there; it
    still could not check the transformation without running it (§4).
+11. **The record copy in the package** (raised by Q10). The package ships its own
+    `06_provenance/record.tex` (built by `make_si.py`: the Protocol history and the
+    declared data of every packaged run, no Evidence record) and no per-run record copy;
+    `deposit.csv` has no `record` row, and a merged manuscript that names
+    `deposit/record.tex` fails the package names check ("the package holds no such file").
+    Whether the package should ship each run's record copy (for example under
+    `06_provenance/records/<id>.tex`), list it in `deposit.csv` and map the per-run path to
+    it.
+13. **Withholding the record.** Q10 ships the record with every bundle, and the only switch
+    (D1) withholds the protocol files. A run whose Evidence findings themselves must not be
+    distributed has no way to keep the record copy out of `paper/deposit/`. Whether to add a
+    switch, with the manifest keeping the record's checksum as it does for a withheld
+    protocol file.
 
 ### Resolved
 
@@ -1131,6 +1189,51 @@ numbers so that references to them stay valid.
    exactly one of the two, the case that shipped before; one stating neither is the default
    and gets no advisory. In: D3 (`origin`, Which entries ship), D4 (`file` column), D5
    (external, cited not shipped, terms), D7, §4, §6.7.
+10. **The record ships with the paper** — decided 2026-10-11. Until then the per-run
+    manifest named `record.tex` in `sha256_also_in` for every protocol row and every
+    `recorded` or `external` row, but the per-run `paper/` held no `record.tex` (it is
+    `runs/<id>/record.tex`), so the manifest pointed at a file the reader could not open, and
+    the trial SI had to say that its analysis log was not distributed. Every full render now
+    writes a byte copy, `paper/deposit/record.tex`, after `runs/<id>/record.tex`, under the
+    D13 rules, and lists it in the manifest (kind `record`, the top-level `license`, a fixed
+    description); `sha256_also_in` keeps the name `record.tex`, which now resolves within
+    `paper/deposit/`. `verify` fails a copy that is not byte-identical to
+    `runs/<id>/record.tex` and a `sha256_also_in` name the bundle does not hold.
+    `--record-only` still writes nothing under `paper/`. A run that withholds its protocol
+    still ships the record: of the protocol it prints the hypotheses with their decision
+    rules (as the paper does) and the files' times and checksums, never the raw proposal
+    (D1, measured on the trial). The copy is exempt from the vocabulary check as the record
+    is, by construction (D4). In: D1 (Withholding), D4 (`file`, `kind`,
+    `sha256_also_in`, `license`, `description` columns; Why the split; the record/belief
+    boundary), D5 (inventory, plan, record, terms, names), D9 (The record), D13 (One root,
+    Writing, trusted cells, `--record-only`), §7 Q11-Q13.
+12. **Compiling the record copy** (raised by Q10) — decided 2026-10-11. `record.tex` ended
+    in `\bibliography{references}` whenever the run had a `references.bib`, and
+    `paper/deposit/` holds none: built from a copy of that folder, `pdflatex record.tex` ran
+    cleanly and `bibtex record` exited 2 ("I couldn't open database file references.bib").
+    The record dump is fully escaped, so the only citation it can carry is one written in
+    the SIProse overview or notes; the record renderer (`render_si_latex`) now writes
+    `\bibliographystyle{plainnat}` and `\bibliography{references}` only when a rendered
+    prose slot holds `\cite`, `\citep` or `\citet`. A literal `\cite{..}` in a finding
+    (escaped) or in inlined reproduction code (an `lstlisting`) is not a citation. The copy
+    stays byte-identical, so the D5 record check is unchanged; a record that cites nothing,
+    the usual case, builds with pdflatex alone. A record whose SI prose cites loads
+    `references`, so the bundle then also ships `paper/deposit/references.bib`, a byte copy
+    of `paper/references.bib` listed in the manifest (kind `bibliography`, no license), and
+    `verify` fails a copy that is missing, unlisted or not byte-identical to
+    `paper/references.bib`, as it does for the record copy (2026-10-11,
+    `tests/test_deposit_record_bib.py`). Whether the record names the bibliography is read
+    from its closing lines, the two above followed by `\end{document}`, not from a
+    `\bibliography{references}` line anywhere, which a reproduction listing may hold
+    (2026-10-12). The package's
+    `06_provenance/record.tex` is written by `make_si.py` and never loaded a bibliography.
+    Unchanged: a build run inside `paper/deposit/` itself leaves `record.aux`, `record.log`
+    and `record.pdf` there, which the D5 inventory fails as files render did not write.
+    Measured on a fresh copy of the trial (`/tmp/sciadk-wf/s6/`): the record is 139,298
+    bytes (56 fewer: the two lines and the blank line after them), the copy is byte-identical,
+    `verify` exits 0 with the deposit files OK, and the copy builds in a folder of its own
+    (two pdflatex runs, no error, no `\bibdata` in `record.aux`). No decision above changes;
+    tests in `tests/test_record_bibliography.py` (change log, "The record's bibliography").
 
 ## Change log
 
@@ -1594,6 +1697,74 @@ numbers so that references to them stay valid.
     passed, 2 skipped (no `mcp`; no `pgfplots`), 14 failed (Docker not running; the same 14
     as before), in 140 test files; the README's counts were re-measured to these. No source
     module changed in this entry.
+- **v0.6 — the record ships** (2026-10-11, the user's decision, §7 Q10). Built with tests
+  first (`tests/test_deposit_record_copy.py`, 26 cases).
+  - *Render.* `stage_render` renders the record text before anything is written
+    (`ResearchCompiler._record_text`, the renderer `_write_record` and `--record-only` share),
+    so `_prepare_deposit` passes `record.tex` with its bytes to `prepare_deposit_write`
+    beside the protocol and data targets; `_store_record` writes `runs/<id>/record.tex`, and
+    `_emit_deposit` writes the copy from that file's bytes. Deviation: the reproduction
+    listings are resolved, and the record is rendered, before `paper/` is written rather
+    than after the draft; a record that cannot be rendered now stops the render before any
+    write. The record's bibliography argument is the located `references.bib`, not its
+    `paper/` copy: the renderer uses only its stem, the same for both (as `--record-only`
+    already relied on).
+  - *Manifest.* `record_row`: `file` `record.tex`, kind `record`, the top-level `license`,
+    the description "the deterministic record of the study: every recorded item, its time
+    and checksums". Deviation: the wording asked for said "every evidence item"; "evidence
+    item" is on the vocabulary check's phrase list, and the manifest must pass that check
+    whole (D4, §6.11), so it reads "every recorded item". `deposit_rows` takes the record's
+    bytes instead of its text; with none (no `runs/<id>/record.tex`) there is no record row
+    and no cell names `record.tex`. The row sorts by its path, after `protocol/…`.
+  - *D13.* `record.tex` is a trusted manifest cell (`_cell_problem`); every other root file
+    still makes a manifest untrusted. A lost manifest with the same record bytes counts as
+    written (c).
+  - *Verify.* `deposit_bundle_problems` takes the record's bytes and adds the record check
+    (missing copy, differing copy, no `runs/<id>/record.tex`) and the `sha256_also_in`
+    target check. A bundle rendered before v0.6 fails the plan and record checks until
+    re-rendered, as Phase 1a bundles did after Phase 1b. The names check accepts
+    `deposit/record.tex`. The terms advisory now appears whenever no top-level `license` is
+    declared, since the record ships with every bundle; before, a withheld run with no data
+    got none.
+  - *CLI.* `render` prints `deposit: record shipped -> …/paper/deposit/record.tex`; the
+    no-declaration line says the protocol and the record ship.
+  - *Instructions.* The publish skill's Deposit files section lists `deposit/record.tex`,
+    says `verify` fails a stale copy and that a withheld run still ships it, names it among
+    the bundle paths, and adds it to the availability example; its render tree and the
+    record/paper table say a copy ships. The README's deposit bullet names the copy. The
+    hub, writer, foundation skill, output style and publish command still list only the
+    protocol and data under `paper/deposit/` (true, not complete).
+  - *Tests updated.* Rows and file lists that now include the record
+    (`test_deposit_protocol.py`, `test_deposit_data.py`, `test_deposit_phase1b.py`); the
+    per-run against package row comparisons drop the `record` row
+    (`test_deposit_data_package.py`, `test_deposit_phase1b.py`); the bare render and resolve
+    test lets the record copy follow the record, since resolve records Claims;
+    `test_si_authoring_m4.py`'s end-to-end test renders its availability statement through
+    the SI-prose notes instead of appending it to `record.tex` after the render, which the
+    record check now fails.
+  - *Real trial.* A copy of `~/research/lit-search-trial-2` under `/tmp/sciadk-wf/s2/`:
+    rendered with its prose, SI, figures and declaration, `paper/deposit/` holds
+    `manifest.csv`, `protocol/` and `record.tex` (139,354 bytes, byte-identical to the
+    run's), the manifest's `record.tex` row sits after the protocol rows, `verify` exits 0
+    with the deposit files OK; `--record-only` afterwards writes nothing under `paper/`; an
+    SI copy naming `\path{deposit/record.tex}` renders and verifies the same.
+- **The record's bibliography** (2026-10-11, §7 Q12 resolved). Built with tests first
+  (`tests/test_record_bibliography.py`, 11 cases, one a pdflatex build of the copy).
+  - *Render.* `render_si_latex` collects its rendered SIProse slots and writes the two
+    bibliography lines only when `bib_path` is given and a slot holds `\cite{`, `\citep{` or
+    `\citet{`.
+    `_record_text`, `_write_record` and `--record-only` are unchanged; with no prose the
+    record never loads a bibliography.
+  - *Tests updated.* `test_render_reframe.py` (the SI bibliography test now cites in its
+    prose and checks that an uncited record loads none) and `test_render_record_only.py`
+    (the record-only record carries no `\bibliography`), deliberately.
+  - *Instructions.* The hub, the writer, the foundation skill, the output style and the
+    publish command now list the record copy (`paper/deposit/record.tex`) with the protocol
+    and data under `paper/deposit/`, closing the gap the v0.6 entry noted;
+    `tests/test_deposit_phase3.py` requires `deposit/record.tex` in each list of what render
+    writes and in the publish command's description. The output style's "outside the
+    submission" for `runs/<id>/record.tex` now reads "outside `paper/`", since a copy ships
+    in the bundle.
 
 ## Review of v0.1: where each point is resolved
 

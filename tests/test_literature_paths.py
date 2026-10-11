@@ -12,8 +12,8 @@ from pathlib import Path
 
 from sci_adk.loop.compiler import ResearchCompiler
 
-_BIB = "@article{Smith2001,\n  title = {A},\n  doi = {10.1/a},\n  year = {2001}\n}\n"
-_MANIFEST = "index,doi,status,source,license,filename,origin,bib,error\n1,10.1/a,failed,,,,cli,ok,no OA PDF\n"
+_BIB = "@article{Smith2001,\n  title = {A},\n  doi = {10.1000/a},\n  year = {2001}\n}\n"
+_MANIFEST = "index,doi,status,source,license,filename,origin,bib,error\n1,10.1000/a,failed,,,,cli,ok,no OA PDF\n"
 
 
 def _seed(run_dir: Path, subdir: str) -> None:
@@ -32,14 +32,14 @@ def test_bib_is_found_where_the_acquirer_writes_it(tmp_path):
 
 def test_cited_dois_are_read_from_the_acquirer_manifest(tmp_path):
     _seed(tmp_path, "literature")
-    assert ResearchCompiler._gather_cited_dois([], tmp_path) == ["10.1/a"]
+    assert ResearchCompiler._gather_cited_dois([], tmp_path) == ["10.1000/a"]
 
 
 def test_legacy_artifacts_layout_still_works(tmp_path):
     _seed(tmp_path, "artifacts/literature")
     located = ResearchCompiler._locate_bib_path(tmp_path)
     assert located is not None and Path(located).parent.name == "literature"
-    assert ResearchCompiler._gather_cited_dois([], tmp_path) == ["10.1/a"]
+    assert ResearchCompiler._gather_cited_dois([], tmp_path) == ["10.1000/a"]
 
 
 def test_acquirer_layout_wins_when_both_exist(tmp_path):

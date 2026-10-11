@@ -32,21 +32,30 @@ class PaperProse(BaseModel):
     back to the structural skeleton (no section emitted). Frozen and
     whitespace-stripping, consistent with the core models.
 
-    Each slot is **LaTeX body input**: the paper artifact is ``draft.tex`` (Overleaf
-    default pdflatex), so author the text LaTeX-safe -- e.g. ``$\\geq$``, ``H$_2$O``,
-    ``30\\textdegree{}C`` -- not unicode. The LaTeX renderer injects it (after LaTeX
-    special-char escaping) verbatim into the document. A lightweight unicode safety
-    net folds a stray ``≥`` / ``α`` / accent to a pdflatex-safe form, but it is a
-    fallback, not a license to rely on unicode; the ``.tex`` is the source of truth.
+    Each slot is **text**, escaped into ``draft.tex`` (Overleaf default pdflatex): every
+    LaTeX special and every command outside the list below prints as written, so write a
+    symbol as its Unicode character -- ``≥``, ``H₂O``, ``30 °C``, ``α`` -- or in plain
+    ASCII, not as LaTeX (``$\\geq$``, ``H$_2$O``, ``30\\textdegree{}C`` print as literal
+    text, and render names each command in a warning). The sanitizer maps the common
+    scientific symbols (subscripts and superscripts, relations, Greek, the degree and micro
+    signs) and keeps Latin accents; a character it has no form for prints as ``?``, also
+    named in a warning.
 
     **Reference / citation commands are permitted in prose.** These specific commands
-    pass through verbatim as real LaTeX -- ``\\ref{fig:<id>}``, ``\\eqref{eq:<id>}``,
-    ``\\autoref{<id>}`` to cross-reference, and ``\\cite{<key>}`` / ``\\citep{<key>}`` /
-    ``\\citet{<key>}`` to cite literature -- so an author can point at a figure or cite a
-    paper in the narrative. (Authoring ``\\ref{fig:<id>}`` here is also what drives the
-    body-reference figure numbering.) NO OTHER LaTeX passes: every other special
+    pass through verbatim as real LaTeX -- ``\\ref{fig:<id>}`` and ``\\autoref{<id>}`` to
+    cross-reference, and ``\\cite{<key>}`` / ``\\citep{<key>}`` / ``\\citet{<key>}`` to cite
+    literature, each with one key of ASCII letters, digits, spaces and ``: _ . , ; + / = @
+    -`` (the characters a label or a bib key needs) and no optional argument or blank
+    line -- so
+    an author can point at a figure or cite a paper in the narrative. (Authoring
+    ``\\ref{fig:<id>}`` here is also what drives the body-reference figure numbering.)
+    A run-in heading ``\\paragraph{<text>}`` also
+    passes, for lead-in labels such as ``\\paragraph{Data.}`` in Methods or Results; its
+    brace-free text (no blank line) is escaped like any prose. Not in the abstract or the
+    title: render refuses a heading there. NO OTHER LaTeX passes: every other special
     (``&`` ``%`` ``_`` ``$`` ...) is still escaped, and a non-allowlisted command like
-    ``\\textbf{...}`` is rendered as literal text -- so prose stays LaTeX-safe outside
+    ``\\textbf{...}`` (or ``\\eqref``: prose carries no equation to refer to) is rendered as
+    literal text, and render names it in a warning -- so prose stays LaTeX-safe outside
     the ref/cite allowlist. See :func:`sci_adk.render.paper._latex_sanitize_prose`.
 
     **Record-derived facts use the fidelity macros, not free literals.** Under the
@@ -125,17 +134,18 @@ class SIProse(BaseModel):
     ``--si-prose <json>`` file), never sci-adk-generated -- zero extra cost
     (design/tool-policy.md).
 
-    Each slot is **LaTeX body input**: the SI artifact is ``si.tex`` (Overleaf default
-    pdflatex), so author the text LaTeX-safe -- e.g. ``$\\geq$``, ``H$_2$O``,
-    ``30\\textdegree{}C`` -- not unicode. The renderer injects it (after LaTeX
-    special-char escaping) verbatim. A lightweight unicode safety net folds a stray
-    ``≥`` / ``α`` / accent to a pdflatex-safe form, but it is a fallback, not a license
-    to rely on unicode; the ``.tex`` is the source of truth.
+    Each slot is **text**, escaped into the record like a :class:`PaperProse` slot: write a
+    symbol as its Unicode character (``≥``, ``H₂O``, ``30 °C``, ``α``) or in plain ASCII, not
+    as LaTeX (``$\\geq$``, ``H$_2$O``, ``30\\textdegree{}C`` print as literal text, and
+    render names each command in a warning); the sanitizer maps the common scientific
+    symbols, keeps Latin accents and prints ``?`` (named in a warning) for a character it
+    has no form for.
 
     **Reference / citation commands are permitted in prose** (the same contract as
-    :class:`PaperProse`): ``\\ref`` / ``\\eqref`` / ``\\autoref`` and ``\\cite`` /
-    ``\\citep`` / ``\\citet`` pass through verbatim as real LaTeX so the narrative can
-    cross-reference and cite; every other special is still escaped and a non-allowlisted
+    :class:`PaperProse`): ``\\ref`` / ``\\autoref`` and ``\\cite`` / ``\\citep`` /
+    ``\\citet`` pass through verbatim as real LaTeX so the narrative can
+    cross-reference and cite, and ``\\paragraph{<text>}`` gives a run-in heading (its text
+    escaped like prose); every other special is still escaped and a non-allowlisted
     command renders as literal text. The deterministic record dump that these slots wrap
     stays FULLY escaped (the plain ``_latex_sanitize``) -- only this narrative prose gets
     the ref/cite passthrough. See :func:`sci_adk.render.paper._latex_sanitize_prose`.
@@ -171,12 +181,16 @@ class SISection(BaseModel):
     agent writes whatever the overflow needs (extended discussion, supplementary methods,
     a hand-authored table, ...) and the renderer emits the sections in the AUTHORED order.
 
-    The ``body`` is **LaTeX body input under the SAME prose contract as
-    :class:`PaperProse`**: author LaTeX-safe, and record-derived facts use the fidelity
+    The ``body`` is **verbatim LaTeX** (unlike a :class:`PaperProse` slot it is not
+    escaped, so a table or an equation is written as LaTeX -- the author owns its LaTeX
+    correctness), cleaned only of control characters; record-derived facts use the fidelity
     macros -- a measured value is written ``\\evval{<id>}{<field>}`` and a verdict
     ``\\status{<hyp>}`` (the engine substitutes the TRUE recorded value at render time,
-    FAIL-LOUD; REQ-SA-103). ``\\ref`` / ``\\cite`` / ``\\novelty`` pass through verbatim;
-    every other special is escaped. A HAND-AUTHORED table (REQ-SA-104) is simply a
+    FAIL-LOUD; REQ-SA-103; a recorded string is written as text), and ``\\novelty`` is
+    rendered and gated as in the paper. A symbol is written in LaTeX here (``$\\alpha$``,
+    ``$\\geq$``): pdflatex stops on a Greek letter, a relation sign or CJK written as a
+    character, and render names each in a warning.
+    A HAND-AUTHORED table (REQ-SA-104) is simply a
     ``\\begin{table}...\\evval{..}{..}...\\end{table}`` written in the ``body`` -- each
     cited cell is gated cell-by-cell by the shared pipeline (the dump's ``tabular`` builder
     is NOT reused).
@@ -189,7 +203,7 @@ class SISection(BaseModel):
     model_config = {"frozen": True, "str_strip_whitespace": True}
 
     title: str = Field(..., min_length=1, description="Section heading")
-    body: str = Field(default="", description="Authored section body (LaTeX, prose contract)")
+    body: str = Field(default="", description="Authored section body (verbatim LaTeX)")
 
 
 class AuthoredSI(BaseModel):

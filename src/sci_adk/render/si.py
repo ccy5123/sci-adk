@@ -31,6 +31,7 @@ design/directory-structure.md (render/), design/rigor-shell-architecture.md (F4 
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -52,9 +53,11 @@ from sci_adk.render.figures import (
 from sci_adk.render.paper import (
     HYPERREF_LINE,
     _confidence_display,
+    _clean_text,
     _latex_evidence_validity_label,
     _latex_sanitize,
     _novelty_prose,
+    _one_line,
     _result_summary,
     _status_str,
     text_font_lines,
@@ -65,6 +68,12 @@ from sci_adk.render.reproduction import (
     render_reproduction_section,
     reproduction_uses_listings,
 )
+
+# A citation the record executes: the prose sanitizer lets ``\cite``/``\citep``/``\citet``
+# through verbatim in the SIProse slots only. Everything else in the record is escaped (a
+# literal ``\cite{..}`` in a finding becomes ``\textbackslash{}cite\{..\}``) or inlined
+# reproduction code (an ``lstlisting``, typeset, never run), so the slots are where to look.
+_CITE_RE = re.compile(r"\\cite[pt]?\{")
 
 # The numeric Result scalar fields, in a fixed order, for the quantitative data table.
 # A column is emitted ONLY when at least one item carries a value for it (empty columns
@@ -107,7 +116,7 @@ def _protocol_history_section(protocol: ProtocolPlan) -> str:
         # breaks at one of its hyphens.
         verb, _, when = entry.time_label.partition(" ")
         lines.append(
-            f"  \\item[\\texttt{{{_latex_sanitize(entry.name)}}}] "
+            f"  \\item[\\texttt{{{_latex_sanitize(_one_line(entry.name))}}}] "
             f"{_latex_sanitize(entry.description)}; {_latex_sanitize(verb)} "
             f"{_time_box(when)}; {checksum}"
         )
@@ -321,6 +330,11 @@ def render_si_latex(
             -> a "Protocol history" section before Record integrity. Only the files, their
             times and checksums are used, so the section is the same whether the protocol
             ships or is withheld. ``None`` -> no section (a Spec with no run directory).
+        bib_path: optional path of the run's bibliography (only its stem is used). Wired as
+            ``\\bibliographystyle{plainnat}`` + ``\\bibliography{<stem>}`` ONLY when a prose
+            slot cites (``\\cite``/``\\citep``/``\\citet``): the record dump itself cites
+            nothing, and its copy ``paper/deposit/record.tex`` sits in a folder with no
+            ``.bib`` (design/deposit-files.md §7 Q12). ``None`` -> no bibliography.
 
     Returns:
         A STANDALONE LaTeX document string.
@@ -334,15 +348,21 @@ def render_si_latex(
         ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
     ]
 
+    # The rendered prose slots: whether any cites decides the bibliography lines (below).
+    rendered_prose: List[str] = []
+
     def _si_slot(text: str) -> str:
         # SI prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
         # render \novelty{} markup (plain sentence + record scope / HARD fail) + the sanitizer
-        # (\ref/\cite preserved). Same contract as the paper's prose.
-        return _novelty_prose(
-            substitute_factrefs(text.strip(), evidence, claims),
+        # (\ref/\cite preserved). Same contract as the paper's prose, cleaned first
+        # (_clean_text) so every match sees what the sanitizer sees.
+        rendered = _novelty_prose(
+            substitute_factrefs(_clean_text(text).strip(), evidence, claims),
             spec,
             novelty_decisions,
         )
+        rendered_prose.append(rendered)
+        return rendered
 
     # The Spec's frozen hypotheses, keyed by id, so each Claim's verdict can show the
     # decision rule it was judged against.
@@ -352,7 +372,7 @@ def render_si_latex(
     # The record title is the spec id, not the goal/hypothesis wall (the same short title
     # the paper falls back to; the agent's narrative title lives in the main paper). The
     # identity wording reads as the RECORD (SPEC-SI-AUTHORING-001 REQ-SA-203), not an SI.
-    title = spec.id
+    title = _one_line(spec.id)
 
     # -- Preamble (standalone document; same inputenc/hyperref/url as the paper, so
     #    si.tex compiles on its own). Figure packages are added PER KIND (mirrors the
@@ -401,14 +421,14 @@ def render_si_latex(
         f"\\title{{Record: {_latex_sanitize(title)}}}"
     )
     lines.append(r"\author{sci-adk (deterministic record)}")
-    lines.append(r"\date{\today}")
+    lines.append(r"\date{}")  # no compile date: the record's dates are its own timestamps
     lines.append("")
     lines.append(r"\begin{document}")
     lines.append(r"\maketitle")
     lines.append("")
     lines.append(
         f"\\noindent\\textit{{The complete append-only RECORD behind Spec "
-        f"\\texttt{{{_latex_sanitize(spec.id)}}} (v{spec.version}). This is the "
+        f"\\texttt{{{_latex_sanitize(_one_line(spec.id))}}} (v{spec.version}). This is the "
         f"deterministic dump of every Evidence item, the data tables, all figures, and "
         f"the verdicts; the main paper is the belief narrative.}}"
     )
@@ -445,8 +465,8 @@ def render_si_latex(
             summary = _result_summary(ev)
             times = f" (recorded {len(group)}x)" if len(group) > 1 else ""
             lines.append(
-                f"  \\item[\\texttt{{{_latex_sanitize(ev.id)}}} "
-                f"({_latex_sanitize(_kind_str(ev))})] "
+                f"  \\item[\\texttt{{{_latex_sanitize(_one_line(ev.id))}}} "
+                f"({_latex_sanitize(_one_line(_kind_str(ev)))})] "
                 f"{_latex_sanitize(summary)}{times}"
             )
             lines.append(
@@ -497,7 +517,7 @@ def render_si_latex(
         lines.append(f"{header} \\\\")
         lines.append(r"\hline")
         for ev in quant_items:
-            cells = [f"\\texttt{{{_latex_sanitize(ev.id)}}}"]
+            cells = [f"\\texttt{{{_latex_sanitize(_one_line(ev.id))}}}"]
             for f in active_fields:
                 cells.append(_fmt_cell(getattr(ev.result, f, None)))
             lines.append(" & ".join(cells) + r" \\")
@@ -511,13 +531,16 @@ def render_si_latex(
     if not claims:
         lines.append(r"\emph{No claims recorded.}")
     for claim in claims:
+        # One line, like every free text or id put in a macro argument here (\item[...],
+        # \texttt{}, a table cell): a blank line stops pdflatex ("Paragraph ended before
+        # \@sect was complete"), and a statement may hold one.
         lines.append(
-            f"\\subsection{{{_latex_sanitize(claim.statement)}}}"
+            f"\\subsection{{{_latex_sanitize(_one_line(claim.statement))}}}"
         )
         lines.append(r"\begin{itemize}")
         lines.append(
             f"  \\item Answers hypothesis: "
-            f"\\texttt{{{_latex_sanitize(str(claim.answers))}}}"
+            f"\\texttt{{{_latex_sanitize(_one_line(str(claim.answers)))}}}"
         )
         # Status + confidence. A verdict decided by a fixed pre-registered rule
         # (threshold / interval) carries no degree of belief, so no confidence number is
@@ -626,11 +649,14 @@ def render_si_latex(
         lines.append(_si_slot(prose.notes))
         lines.append("")
 
-    # Bibliography -- the SI cites the SAME references.bib as the paper, so its \citep in
-    # the prose resolves (and the references print) instead of showing [?]. natbib is in
+    # Bibliography -- the record cites the SAME references.bib as the paper, so a \citep in
+    # its prose resolves (and the references print) instead of showing [?]. natbib is in
     # the preamble; an existing .bib is wired with plainnat + \bibliography (the compiler
-    # passes the co-located path; the renderer does no fs access). None -> no bibliography.
-    if bib_path is not None:
+    # passes the bib path; the renderer does no fs access) ONLY when the record cites: its
+    # byte copy paper/deposit/record.tex sits in a folder with no references.bib, so a record
+    # that cites nothing -- the usual case -- loads none and builds with pdflatex alone
+    # (design/deposit-files.md §7 Q12). None -> no bibliography.
+    if bib_path is not None and any(_CITE_RE.search(t) for t in rendered_prose):
         stem = Path(bib_path).stem
         lines.append(r"\bibliographystyle{plainnat}")
         lines.append(f"\\bibliography{{{stem}}}")

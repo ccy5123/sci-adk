@@ -39,7 +39,7 @@ from sci_adk.core.spec import (
     TargetClaim,
 )
 from sci_adk.render.paper import check_paper_tool_vocabulary, render_paper_latex
-from sci_adk.render.prose import PaperProse
+from sci_adk.render.prose import PaperProse, SIProse
 from sci_adk.render.si import render_si_latex
 
 _T0 = datetime(2026, 6, 22, 9, 0, 0, tzinfo=timezone.utc)
@@ -241,15 +241,23 @@ def test_si_quantitative_table_is_captioned_labelled_and_referenced():
 
 # -- 6.2 SI bibliography (natbib) ---------------------------------------------
 
-def test_si_wires_natbib_bibliography_when_bib_present():
+def test_si_wires_natbib_bibliography_when_bib_present_and_the_prose_cites():
+    # design/deposit-files.md §7 Q12: the record loads the bibliography only when it cites
+    # (its prose slots are the only place a citation can be); a record that cites nothing
+    # loads none (tests/test_record_bibliography.py).
     hyp = _hyp()
     spec = _spec(hyp)
     ev = _experiment("evi-c", 0.0, '{"collision_count": 0}')
 
-    si = render_si_latex(spec, [], [ev], bib_path="/x/references.bib")
+    si = render_si_latex(
+        spec, [], [ev], bib_path="/x/references.bib",
+        prose=SIProse(notes=r"As in \citep{Doe2020}."),
+    )
     assert r"\usepackage{natbib}" in si
     assert r"\bibliographystyle{plainnat}" in si
     assert r"\bibliography{references}" in si
+    uncited = render_si_latex(spec, [], [ev], bib_path="/x/references.bib")
+    assert r"\bibliography{" not in uncited
 
 
 def test_si_no_bibliography_when_bib_absent():

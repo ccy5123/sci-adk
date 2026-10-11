@@ -442,6 +442,8 @@ def test_every_list_of_what_render_writes_names_the_deposit_folder_and_flag(name
     for block in lists:
         assert "paper/deposit/" in block, f"{name}: no paper/deposit/ in:\n{block}"
         assert "--deposit" in block, f"{name}: no --deposit in:\n{block}"
+        # The record copy ships in the bundle too (design/deposit-files.md §7 Q10).
+        assert "deposit/record.tex" in block, f"{name}: no deposit/record.tex in:\n{block}"
 
 
 @pytest.mark.parametrize("name", ["foundation-rigor", "orchestrator"])
@@ -461,6 +463,7 @@ def test_the_publish_command_mentions_deposit():
     text = _read(_PUBLISH_COMMAND)
     description = next(line for line in text.splitlines() if line.startswith("description:"))
     assert "--deposit" in description and "paper/deposit/" in description
+    assert "deposit/record.tex" in description
 
 
 # --------------------------------------------------------------------------- #

@@ -100,6 +100,7 @@ from sci_adk.render.deposit import (
     protocol_digest,
     protocol_history_line,
     protocol_record_problems,
+    record_bibliography,
     times_advisory,
     withheld_advisory,
 )
@@ -130,6 +131,9 @@ from sci_adk.render.number_checks import NumberRecord, number_list_checks
 from sci_adk.render.paper import _latex_sanitize, check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
     abstract_max_words_problems,
+    bib_article_number_advisories,
+    bib_command_advisories,
+    bib_command_problems,
     bib_latex_safety_problems,
     bib_month_advisories,
     bib_sort_advisories,
@@ -453,9 +457,10 @@ def check_deposit_files(
 
     The protocol digest is computed for every run. The rest runs only when
     ``paper/draft.tex`` exists: the record-side comparisons among the run's protocol files,
-    then -- when ``paper/deposit/`` exists -- the bundle checks (inventory, plan, copies),
-    every hash recomputed from bytes and the expected manifest rebuilt from ``runs/<id>/``,
-    its persisted ``deposit.json`` and the declared sources; the data checks against the
+    then -- when ``paper/deposit/`` exists -- the bundle checks (inventory, plan, copies, and
+    ``paper/deposit/record.tex`` byte for byte against ``runs/<id>/record.tex``), every hash
+    recomputed from bytes and the expected manifest rebuilt from ``runs/<id>/``, its
+    persisted ``deposit.json``, the declared sources and the record; the data checks against the
     Evidence on disk (``evidence``) and ``paper/references.bib``; and the names check over
     ``draft.tex`` / ``si.tex``. A paper with no ``paper/deposit/`` (rendered before this
     feature) gets one advisory and no failure. The times advisory (D12) is added for every
@@ -494,10 +499,8 @@ def check_deposit_files(
     else:
         paper_dir = run_dir / "paper"
         record_path = deposit_record_path(run_dir)
-        record_text = (
-            record_path.read_text(encoding="utf-8") if record_path.is_file() else None
-        )
-        problems.extend(deposit_bundle_problems(paper_dir, plan, record_text, data))
+        record = record_path.read_bytes() if record_path.is_file() else None
+        problems.extend(deposit_bundle_problems(paper_dir, plan, record, data))
         bib = paper_dir / "references.bib"
         data_fails, data_notes = deposit_data_problems(
             plan, data, evidence,
@@ -509,7 +512,8 @@ def check_deposit_files(
             name: (paper_dir / name).read_text(encoding="utf-8", errors="replace")
             for name in _PAPER_DOCS if (paper_dir / name).is_file()
         }
-        name_fails, name_notes = deposit_name_problems(docs, plan, data)
+        name_fails, name_notes = deposit_name_problems(
+            docs, plan, data, record_bibliography(record))
         problems.extend(name_fails)
         advisories.extend(name_notes)
     if plan.withheld_reason is not None:
@@ -769,6 +773,16 @@ def verify_run(
     paper_requirements_problems, paper_advisory = _check_paper_requirements(
         run_dir, evidence, list(recorded_claims.values()), spec
     )
+    # The bib command gate runs on every bibliography render wrote, with or without a frozen
+    # contract (a dangerous command runs when the reference list is typeset, whatever the
+    # contract says). With a contract the safety check above already wrote the same lines for
+    # paper/references.bib and references_SI.bib: each line is kept once.
+    bib_command_lines, bib_command_notes = _check_bib_commands(run_dir)
+    paper_requirements_problems = [
+        *paper_requirements_problems,
+        *(line for line in bib_command_lines if line not in paper_requirements_problems),
+    ]
+    paper_advisory = [*paper_advisory, *bib_command_notes]
 
     # Prior-work decision gate: a conclusion-bearing run (draft.tex present) must carry a
     # recorded prior-work DECISION -- searched or skipped-with-reason. This enforces the
@@ -1617,6 +1631,30 @@ def _check_paper_tool_vocab(run_dir: Path) -> Dict[str, List[str]]:
     return leaks
 
 
+# The bibliographies render writes for a run, as named in verify's lines: the paper's, the
+# authored SI's and the deposit's copy of the paper's (paper/deposit/references.bib).
+_RUN_BIBS = ("references.bib", "references_SI.bib", "deposit/references.bib")
+
+
+def _check_bib_commands(run_dir: Path) -> tuple[List[str], List[str]]:
+    """The command gate over every bibliography render wrote for ``run_dir`` (:data:`_RUN_BIBS`),
+    whether or not a publishing contract is frozen: ``(problems, advisories)``. A command that
+    can read or write a file, define a macro, change how TeX reads its input or end the
+    document, and ``^^`` notation, FAIL (``pkgreqs_checks.bib_command_problems``); any other
+    command verify does not know is advisory (``bib_command_advisories``). A bibliography that
+    is not there is skipped. READ-ONLY."""
+    problems: List[str] = []
+    notes: List[str] = []
+    for name in _RUN_BIBS:
+        path = run_dir / "paper" / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        problems.extend(bib_command_problems(text, source=name))
+        notes.extend(bib_command_advisories(text, source=name))
+    return problems, notes
+
+
 # -- F1 publishing-requirements gate (design §1.3) ---------------------------
 
 def _check_paper_requirements(
@@ -1749,7 +1787,7 @@ def _check_paper_requirements(
     # (REQ-PG-304, OD-5) routes to the per-run advisory channel (non-gating) -- it was
     # package-scoped before R1 added a per-run advisory channel.
     bib_path = run_dir / "paper" / "references.bib"
-    bib = bib_path.read_text(encoding="utf-8") if bib_path.is_file() else ""
+    bib = _read_bib(bib_path)[0] if bib_path.is_file() else ""
     problems.extend(cite_resolution_problems(draft_tex, bib))
     problems.extend(citation_key_shape_problems(draft_tex, bib))
     problems.extend(citation_disambiguation_problems(draft_tex, bib))
@@ -1763,7 +1801,7 @@ def _check_paper_requirements(
     si_tex_path = run_dir / "paper" / "si.tex"
     if si_tex_path.is_file():
         si_bib_path = run_dir / "paper" / "references_SI.bib"
-        si_bib = si_bib_path.read_text(encoding="utf-8") if si_bib_path.is_file() else ""
+        si_bib = _read_bib(si_bib_path)[0] if si_bib_path.is_file() else ""
         problems.extend(cite_resolution_problems(si_tex_path.read_text(encoding="utf-8"), si_bib))
 
     # SPEC-SI-AUTHORING-001 M6 hardening: BOTH bib files must be brace-balanced (integrity). The
@@ -1778,17 +1816,32 @@ def _check_paper_requirements(
     # that breaks math, a character pdflatex cannot typeset with the preamble render emits)
     # FAILS, naming the file, the entry key and the character. A run rendered before the copy
     # existed fails until it is re-rendered.
-    # A cited entry whose first author BibTeX sorts after Z (a raw Ð Þ Đ Ŋ) is advisory.
+    # A cited entry whose first author BibTeX sorts after Z (a raw Ð Þ Đ Ŋ) is advisory, and
+    # so is a cited article with a journal and a volume but no pages or article number (the
+    # registrar BibTeX has no field for an article-numbered journal's number); both copies are
+    # made from the run's literature store, so that is where the number is added.
     si_tex = si_tex_path.read_text(encoding="utf-8") if si_tex_path.is_file() else ""
+    _store = ResearchCompiler._literature_file(run_dir, "references.bib")
+    _store_name = (
+        _store.relative_to(run_dir).as_posix() if _store is not None else "literature/references.bib"
+    )
+    _store_fix = f"{_store_name} (the literature store the paper copy is made from), then re-render"
     for _bib_name, _citing_tex in (("references.bib", draft_tex), ("references_SI.bib", si_tex)):
         _bib_file = run_dir / "paper" / _bib_name
         if not _bib_file.is_file():
             continue
-        _bib_text = _bib_file.read_text(encoding="utf-8")
+        _bib_text, _utf8 = _read_bib(_bib_file)
+        if not _utf8:
+            problems.append(_not_utf8_line(_bib_name, f"save {_store_fix}"))
         if not _braces_balanced(_bib_text):
             problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
         problems.extend(bib_latex_safety_problems(_bib_text, source=_bib_name))
         warnings.extend(bib_sort_advisories(_citing_tex, _bib_text, source=_bib_name))
+        warnings.extend(
+            bib_article_number_advisories(
+                _citing_tex, _bib_text, source=_bib_name, fix_in=_store_fix
+            )
+        )
 
     if pubreqs.reproduction_bundle:
         problems.extend(_reproduction_bundle_problems(run_dir, evidence))
@@ -2227,7 +2280,7 @@ def _check_package_requirements(
     bib = ""
     bib_path = manuscript_dir / "references.bib"
     if bib_path.is_file():
-        bib = bib_path.read_text(encoding="utf-8")
+        bib = _read_bib(bib_path)[0]
 
     # SPEC-PAPER-GATE-001 P1 (OD-1 strict + OD-8 immediate): a package/ that exists at all is a
     # conclusion-bearing artifact. An absent frozen pkgreqs.json is NOT a silent clean pass --
@@ -2296,7 +2349,7 @@ def _check_package_requirements(
         si_bib = ""
         si_bib_path = manuscript_dir / _REFERENCES_SI_BIB
         if si_bib_path.is_file():
-            si_bib = si_bib_path.read_text(encoding="utf-8")
+            si_bib = _read_bib(si_bib_path)[0]
         problems.extend(cite_resolution_problems(si_tex, si_bib))
 
     # SPEC-SI-AUTHORING-001 M6 hardening: BOTH package bib files must be brace-balanced. Symmetric
@@ -2309,17 +2362,23 @@ def _check_package_requirements(
     # there unchanged and re-rendering a run never touches them.
     # A bare month name BibTeX does not define (month = June) is advisory: BibTeX only warns,
     # but the reference list loses the month (render's per-run copy writes the macro itself).
-    # So is a cited entry whose first author BibTeX sorts after Z (a raw non-ASCII letter).
+    # So is a cited entry whose first author BibTeX sorts after Z (a raw non-ASCII letter), and
+    # a cited article with a journal and a volume but no pages or article number.
     for _bib_name, _citing_tex in (("references.bib", main_tex), (_REFERENCES_SI_BIB, si_tex)):
         _bib_file = manuscript_dir / _bib_name
         if not _bib_file.is_file():
             continue
-        _bib_text = _bib_file.read_text(encoding="utf-8")
+        _bib_text, _utf8 = _read_bib(_bib_file)
         _bib_source = _package_bib_source(workspace_dir, _bib_name)
+        if not _utf8:
+            problems.append(_not_utf8_line(_bib_name, f"save {_bib_source} as UTF-8"))
         if not _braces_balanced(_bib_text):
             problems.append(f"bib integrity: {_bib_name} has unbalanced braces")
         problems.extend(
             bib_latex_safety_problems(_bib_text, source=_bib_name, package_source=_bib_source)
+        )
+        warnings.extend(
+            bib_command_advisories(_bib_text, source=_bib_name, package_source=_bib_source)
         )
         warnings.extend(
             bib_month_advisories(_bib_text, source=_bib_name, package_source=_bib_source)
@@ -2327,6 +2386,11 @@ def _check_package_requirements(
         warnings.extend(
             bib_sort_advisories(
                 _citing_tex or "", _bib_text, source=_bib_name, package_source=_bib_source
+            )
+        )
+        warnings.extend(
+            bib_article_number_advisories(
+                _citing_tex or "", _bib_text, source=_bib_name, fix_in=_bib_source
             )
         )
 
@@ -2340,7 +2404,7 @@ def _check_package_requirements(
                 problems.extend(
                     font_encoding_problems(
                         _tex,
-                        _bib_file.read_text(encoding="utf-8"),
+                        _read_bib(_bib_file)[0],
                         tex_name=_tex_name,
                         bib_name=_bib_file.name,
                         fix_in=_package_tex_source(workspace_dir, _tex_name),
@@ -2453,6 +2517,24 @@ def _check_package_requirements(
     warnings.extend(deposit_notes)
 
     return problems, warnings, runs, runs_reproduced
+
+
+def _read_bib(path: Path) -> Tuple[str, bool]:
+    """A bibliography's text (bytes that are not UTF-8 read as U+FFFD) and whether it is UTF-8:
+    render copies a literature store that is not UTF-8 byte for byte, and a package bib is the
+    author's file. READ-ONLY."""
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8"), True
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", errors="replace"), False
+
+
+def _not_utf8_line(name: str, fix: str) -> str:
+    return (
+        f"bib integrity: {name} is not UTF-8 -- pdflatex reads a bibliography as UTF-8 and "
+        f"stops on its other bytes; {fix}"
+    )
 
 
 def _braces_balanced(tex: str) -> bool:

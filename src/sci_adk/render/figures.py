@@ -36,7 +36,7 @@ import re
 from pathlib import Path
 from typing import Annotated, List, Literal, Sequence, Tuple, Union
 
-from pydantic import BaseModel, Discriminator, Field, Tag
+from pydantic import BaseModel, Discriminator, Field, Tag, field_validator
 
 from sci_adk.core.evidence import EvidenceItem
 
@@ -52,6 +52,39 @@ YField = Literal[
 # backslashes, and not starting with ``_`` or ``-`` (so the label reads cleanly).
 _FIG_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
+# What an image figure's ``width`` may be, since it goes into ``\includegraphics[width=...]``
+# as written: a TeX length (a non-negative decimal and one of the units below), or an
+# optional decimal factor of the line, text or column width. Anything else could end the
+# option list and run a command (``1pt]{x}\input{x}...`` made pdflatex read a file).
+_WIDTH_NUMBER = r"(?:[0-9]{1,6}(?:\.[0-9]{0,6})?|\.[0-9]{1,6})"
+_WIDTH_RE = re.compile(
+    r"^(?:(?P<length>" + _WIDTH_NUMBER + r") *(?P<unit>pt|cm|mm|in|em|ex|bp|pc)"
+    r"|(?:(?P<factor>" + _WIDTH_NUMBER + r") *)?\\(?:linewidth|textwidth|columnwidth))$"
+)
+# The largest width accepted, so pdflatex can scale the graphic: TeX's largest dimension is
+# about 16383pt (16383pt and 50\textwidth stopped it with "Dimension too large"; 16000pt and
+# 40\textwidth compiled, measured). A length is converted to points (an em taken as 12pt and
+# an ex as 6pt, their size in a 12pt font); a factor of a text width is at most 10.
+_MAX_WIDTH_PT = 1000.0
+_MAX_WIDTH_FACTOR = 10.0
+_UNIT_PT = {
+    "pt": 1.0, "bp": 72.27 / 72, "mm": 72.27 / 25.4, "cm": 72.27 / 2.54, "in": 72.27,
+    "pc": 12.0, "em": 12.0, "ex": 6.0,
+}
+_WIDTH_RULE = (
+    r"a width is a number and a unit (pt, cm, mm, in, em, ex, bp, pc) of at most 1000pt, "
+    r"e.g. 8cm, or a factor of at most 10 of \linewidth, \textwidth or \columnwidth, "
+    r"e.g. 0.8\textwidth (empty: \linewidth); at most 6 digits before and after the point"
+)
+# The file extensions an image source may have, since ``\includegraphics{figures/fig<N><ext>}``
+# names one: the graphics pdfLaTeX loads (EPS through epstopdf, which needs Ghostscript), in
+# any case; the extension is written in lower case. pdflatex stops on any other ("Unknown
+# graphics extension: .svg"; also .gif, .tiff, .webp).
+LOADED_IMAGE_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".eps")
+# The longest axis label: pgfplots sets a label on one line, so it cannot break, and one wider
+# than TeX's largest dimension stops pdflatex (a 3000-character label did).
+MAX_AXIS_LABEL = 200
+
 
 class PlotPoint(BaseModel):
     """One ``(x, y)`` coordinate: the agent supplies ``x`` + which Evidence item to
@@ -66,6 +99,15 @@ class PlotPoint(BaseModel):
 
     evidence_id: str = Field(..., min_length=1, description="EvidenceItem id supplying y")
     x: float = Field(..., description="Abscissa (agent-authored)")
+
+    @field_validator("x")
+    @classmethod
+    def _finite_x(cls, v: float) -> float:
+        # '%g' writes NaN / infinity as 'nan' / 'inf' into the pgfplots coordinates: the same
+        # rule as a recorded y (_y_value), checked when the spec is read.
+        if not math.isfinite(v):
+            raise ValueError(f"figure point x is {v}: a coordinate must be a finite number")
+        return v
 
 
 class PlotSeries(BaseModel):
@@ -97,18 +139,63 @@ class NativePlot(BaseModel):
     Attributes:
         type: pgfplots mapping -- ``line`` (plain ``\\addplot``), ``scatter``
             (``\\addplot[only marks]``), ``bar`` (``\\addplot[ybar]``).
-        xlabel / ylabel: axis labels (rendered LaTeX-safe via the paper sanitizer).
+        xlabel / ylabel: axis labels (rendered LaTeX-safe via the paper sanitizer), at most
+            :data:`MAX_AXIS_LABEL` characters each (pgfplots cannot break a label).
         series: at least one ``PlotSeries``.
     """
 
     model_config = {"frozen": True, "str_strip_whitespace": True}
 
     type: Literal["line", "scatter", "bar"] = Field(..., description="Plot kind")
-    xlabel: str = Field(default="", description="x-axis label")
-    ylabel: str = Field(default="", description="y-axis label")
+    xlabel: str = Field(
+        default="", max_length=MAX_AXIS_LABEL, description="x-axis label (one line)"
+    )
+    ylabel: str = Field(
+        default="", max_length=MAX_AXIS_LABEL, description="y-axis label (one line)"
+    )
     series: List[PlotSeries] = Field(
         ..., min_length=1, description="Plotted series (>=1)"
     )
+
+
+def _validate_width(v: str) -> str:
+    """An image figure's ``width`` as written, or ``ValueError`` when it is not a TeX length of at
+    most :data:`_MAX_WIDTH_PT` points or a factor of at most :data:`_MAX_WIDTH_FACTOR` of the
+    line, text or column width (:data:`_WIDTH_RE`). Empty is the default."""
+    v = v.strip()
+    if not v:
+        return v
+    m = _WIDTH_RE.match(v)
+    too_large = m is not None and (
+        float(m.group("length")) * _UNIT_PT[m.group("unit")] > _MAX_WIDTH_PT
+        if m.group("length") is not None
+        else float(m.group("factor") or 1) > _MAX_WIDTH_FACTOR
+    )
+    if m is None or too_large:
+        raise ValueError(f"image figure width {v!r} is not accepted: {_WIDTH_RULE}")
+    return v
+
+
+def _image_extension(fig_id: str, image: str, *, required: bool) -> str:
+    """The file extension of an image source in lower case, or ``ValueError`` when it is not one
+    pdfLaTeX loads (:data:`LOADED_IMAGE_EXTENSIONS`, any case), or when there is none and
+    ``required``."""
+    ext = Path(image).suffix
+    if not ext:
+        if required:
+            raise ValueError(
+                f"figure '{fig_id}': image source {image!r} has no file extension -- "
+                r"\includegraphics needs a resolvable file (e.g. diagram.pdf / .png)"
+            )
+        return ext
+    if ext.lower() not in LOADED_IMAGE_EXTENSIONS:
+        raise ValueError(
+            f"figure '{fig_id}': image source {image!r} has the file extension {ext!r}, which "
+            "pdfLaTeX cannot load: an image figure is one of "
+            + ", ".join(LOADED_IMAGE_EXTENSIONS)
+            + " (any case; .eps needs Ghostscript) -- convert it, e.g. an SVG to PDF"
+        )
+    return ext.lower()
 
 
 def _validate_fig_id(v: str) -> str:
@@ -192,9 +279,14 @@ class ImageFigureSpec(BaseModel):
         caption: the figure caption (rendered LaTeX-safe).
         image: the SOURCE path/ref of an existing image file (relative or absolute).
             Only its SUFFIX is used here (to build ``figures/fig<N><ext>``); the compiler
-            resolves + copies the actual bytes.
-        width: an optional LaTeX width spec for ``\\includegraphics[width=...]`` (e.g.
-            ``0.8\\textwidth``). Empty (the default) -> ``\\linewidth``.
+            resolves + copies the actual bytes. The suffix must be one pdfLaTeX loads
+            (:data:`LOADED_IMAGE_EXTENSIONS`, any case; written in lower case), else
+            ``ValueError`` when read.
+        width: an optional LaTeX width spec for ``\\includegraphics[width=...]``: a TeX
+            length of at most 1000pt (``8cm``, ``100pt``) or an optional factor of at most 10 of
+            ``\\linewidth``, ``\\textwidth`` or ``\\columnwidth`` (``0.8\\textwidth``);
+            anything else is a ``ValueError`` when read (:data:`_WIDTH_RE`). Empty (the
+            default) -> ``\\linewidth``.
     """
 
     model_config = {"frozen": True, "str_strip_whitespace": True}
@@ -213,6 +305,19 @@ class ImageFigureSpec(BaseModel):
         if "id" in data and isinstance(data["id"], str):
             data["id"] = _validate_fig_id(data["id"])
         super().__init__(**data)
+
+    @field_validator("width")
+    @classmethod
+    def _tex_width(cls, v: str) -> str:
+        return _validate_width(v)
+
+    @field_validator("image")
+    @classmethod
+    def _plain_extension(cls, v: str) -> str:
+        # An extensionless source is refused at render (it names no graphic file); one whose
+        # extension TeX would read as more than a file ending is refused here.
+        _image_extension("", v, required=False)
+        return v
 
 
 def _figure_kind(value: object) -> str:
@@ -277,17 +382,21 @@ class FigureConsistencyReport(BaseModel):
 
 
 def _sanitize(s: str) -> str:
-    """LaTeX-safe escaping for interpolated figure text (caption / axis labels).
+    """LaTeX-safe escaping for interpolated figure text (caption / axis labels), on one line.
 
     Reuses the paper renderer's :func:`sci_adk.render.paper._latex_sanitize` (the same
     escaper + unicode safety net the rest of the document uses, so a figure caption is
     sanitized identically to a section body). Imported lazily INSIDE the function to
     avoid a ``paper <-> figures`` import cycle: ``paper.py`` imports the figure renderer
     at module load, so ``figures.py`` must not import ``paper`` at module load.
-    """
-    from sci_adk.render.paper import _latex_sanitize
 
-    return _latex_sanitize(s)
+    Each text is one macro argument (``\\caption{}``, ``xlabel={}``), so whitespace runs --
+    blank lines included -- collapse to one space first (``paper._one_line``): a blank line in
+    a caption stops pdflatex.
+    """
+    from sci_adk.render.paper import _latex_sanitize, _one_line
+
+    return _latex_sanitize(_one_line(s))
 
 
 def _format_float(v: float) -> str:
@@ -431,16 +540,14 @@ def render_image_figure(spec: ImageFigureSpec, number: int) -> str:
     Raises:
         ValueError: if ``spec.image`` has no extension. ``\\includegraphics`` needs a
             resolvable file ending; an extensionless source cannot name a graphic, so
-            this fails loud (record fidelity -- never emit an uncompilable include).
+            this fails loud (record fidelity -- never emit an uncompilable include). Also
+            when the extension or the width is not one :class:`ImageFigureSpec` accepts --
+            checked again here, so a spec built without validation cannot put more than a
+            file ending or a length into the command.
     """
-    ext = Path(spec.image).suffix
-    if not ext:
-        raise ValueError(
-            f"figure '{spec.id}': image source {spec.image!r} has no file extension -- "
-            r"\includegraphics needs a resolvable file (e.g. diagram.pdf / .png)"
-        )
+    ext = _image_extension(spec.id, spec.image, required=True)
     # An empty width spec -> \linewidth (the figure spans the text column by default).
-    width = spec.width or r"\linewidth"
+    width = _validate_width(spec.width) or r"\linewidth"
 
     lines: List[str] = []
     lines.append(r"\begin{figure}[htbp]")
@@ -462,14 +569,10 @@ def image_figure_filename(spec: ImageFigureSpec, number: int) -> str:
     suffix (a string op); the same extensionless-source guard as the renderer.
 
     Raises:
-        ValueError: if ``spec.image`` has no extension (mirrors :func:`render_image_figure`).
+        ValueError: if ``spec.image`` has no extension, or one pdfLaTeX does not load
+            (:data:`LOADED_IMAGE_EXTENSIONS`; mirrors :func:`render_image_figure`).
     """
-    ext = Path(spec.image).suffix
-    if not ext:
-        raise ValueError(
-            f"figure '{spec.id}': image source {spec.image!r} has no file extension -- "
-            r"\includegraphics needs a resolvable file (e.g. diagram.pdf / .png)"
-        )
+    ext = _image_extension(spec.id, spec.image, required=True)
     return f"fig{number}{ext}"
 
 

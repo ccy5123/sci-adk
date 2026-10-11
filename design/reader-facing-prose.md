@@ -16,6 +16,11 @@
 > §14 extends the author protocol from words to claims: verbs follow the recorded design,
 > one claim takes one position, and each section earns its length from the results.
 >
+> §15 (v1.2) fixes how the publish session wires its two advisory readers: the paper
+> audit's readers and refuters weigh the author's instruction files, and a finding that
+> conflicts with one goes to the orchestrator, not into the paper; the blind conclusions
+> reviewer runs after the final audit-driven revision, with one writer pass on its notes.
+>
 > v0.2 supersedes v0.1's framing. v0.1 diagnosed "the protocol specifies no reader" and
 > proposed readability remedies. That was one level too shallow: the missing reader is a
 > symptom. The root is a **genre error** (§2), and correcting it re-ranks every direction
@@ -780,8 +785,66 @@ phrase list would flag "effect" in a randomized trial and pass "was responsible 
 observational one. Same argument as §12.1. The advisory reviewer and the human remain the
 check, and §13.1 is the evidence that check is needed.
 
+## 15. The paper session's order: the author's instructions, then the reviewer (2026-10-11)
+
+The publish session has two advisory readers after `verify` passes: the multi-lens paper
+audit (`evaluator-paper`, readers plus refuters, survivors written to
+`drafts/<spec-id>/paper/audit-<date>.md` for the writer) and the blind conclusions
+reviewer of §11.4 (`evaluator-conclusions`). The revised trial paper (lit-search-trial-2,
+run SPEC-BCFKOW-001, audits of 2026-10-10 and 2026-10-11) showed two defects in how they
+were wired. Both are workspace-template changes; no engine module reads either reader.
+
+**15.1 The readers could not see the author's instructions.** The orchestrator had told
+the readers and refuters to keep out of `drafts/`, to keep them independent of earlier
+audits. That also hid the instruction files the orchestrator had written there for the
+writer (`stage1-check-2026-10-10.md`: print the lower bound of a bootstrap interval as
+`0.00`, not `0.0001`, because the recorded bound, 0.000118, fell below zero under other
+seeds in a check that was not recorded). The audits of 2026-10-11 (`-3`, then `-4`) asked
+for `0.0001`, bound to the same recorded field; the writer applied it, and the paper now
+prints, in four places, the digits the author's note had ruled out.
+
+Fix, in the publish skill, the `/sci` hub, `evaluator-paper` and `expert-writer`:
+
+- *Author instructions* are the files the orchestrator or the user wrote for the writer
+  in `drafts/<spec-id>/paper/`. The orchestrator lists each one by path in every reader's
+  and refuter's prompt and gives the writer the same files. The audit files are excluded
+  (they are other readers' findings, and a reader must not see those), and so is the
+  paper's source. No reader is told to keep out of `drafts/`.
+- Readers and refuters weigh an instruction as an instruction, not as text to audit. Its
+  reason can refute a finding. A finding reported despite one carries `conflicts_with`
+  (the file and the instruction quoted); a refuter that upholds such a finding names the
+  instruction in its reason.
+- The writer never applies a finding that asks for what an instruction forbids, whether
+  or not a reader marked it; it returns the finding as a conflict. The orchestrator keeps
+  the instruction or asks the user (`AskUserQuestion`, which a worker cannot call),
+  records the outcome against the finding in the audit file, and, when the user chooses
+  the finding, notes that choice in the instruction file so a later reader weighs the
+  instruction as it now stands.
+
+Why not leave the conflict to the refuters: a refuter can only judge whether the finding
+is true of the text. Whether a deliberate author decision should yield to it is the
+author's question, so the decision goes to the person who made it.
+
+**15.2 The reviewer read the last text with no turn left.** The hub ran
+`evaluator-conclusions` right after the first render and re-ran it after a revision that
+changed a declared sentence or the opening. On the trial the last reading came after the
+last revision, so its `opening_notes` were printed by `verify` and never addressed.
+
+Fix: the reviewer runs after the final audit-driven revision (once the audit has ended,
+or after the first `verify` pass when the audit upheld nothing). If `verify` prints a
+reading that disagrees with a declaration (cannot-tell included), or the review holds
+`opening_notes` or `notes`, the writer gets one more pass on those notes only, then the
+reviewer runs once more. What the second reading still reports stays a `verify`
+advisory and is reported to the user; it does not go back to the writer, so the loop
+ends. The identifier `notes` are included with the two kinds the trial showed, because
+they would otherwise have the same missing turn. The reviewer stays blind: the writer
+sees the disagreements, the reviewer still never sees `declarations.json`.
+
+The persona's guard note and the reviewer's own description state the same order.
+`tests/test_publish_review_order.py` pins both fixes.
+
 ---
 
-Version: 1.1 (§14 extends the author protocol from words to claims)
+Version: 1.2 (§15: author instructions reach the audit; the reviewer runs last with one turn)
 Source: author reading report + framing correction + the submission-boundary objection +
 the definition-over-enumeration correction, 2026-08-31.

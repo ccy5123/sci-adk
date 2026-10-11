@@ -114,7 +114,7 @@ verb, which enforces typing, provenance, and append-only-ness.
 | `sci-adk execute` | experiment | Runs the frozen MethodPlan, capturing provenance |
 | `sci-adk append-evidence` | experiment | Appends ONE typed, immutable Evidence entry with `bears_on[]` |
 | `sci-adk derive-claim` | experiment | Applies the DecisionRule; records Claim status + confidence + basis |
-| `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]` | publish | Renders `paper/draft.tex`, `figures/` and `references.bib` from the record, `paper/si.tex` only from an authored `--si si.json`, and `paper/deposit/` (the run's protocol files, plus the data files declared with `--deposit`); deposits the record dump at `runs/<id>/record.tex`, outside `paper/` |
+| `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]` | publish | Renders `paper/draft.tex`, `figures/` and `references.bib` from the record, `paper/si.tex` only from an authored `--si si.json`, and `paper/deposit/` (the run's protocol files, the data files declared with `--deposit`, and a byte copy of the record dump as `paper/deposit/record.tex`); deposits the record dump at `runs/<id>/record.tex`, outside `paper/` |
 | `sci-adk verify` | verify | Read-only audit; exits 0 iff every recorded claim reproduces (the verdict) |
 | `sci-adk resolve` | experiment | Resolves the checkpoints the engine surfaced (verdict loop) |
 | `sci-adk status` | any | Read-only snapshot: open checkpoints, unresolved/contested claims (no LLM) |

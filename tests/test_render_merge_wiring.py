@@ -105,7 +105,7 @@ def test_compile_emits_tex_only_not_md(tmp_path):
 
 
 def test_compile_gathers_cited_dois_from_literature_evidence(tmp_path):
-    result = ResearchCompiler(workspace_dir=tmp_path).compile(
+    ResearchCompiler(workspace_dir=tmp_path).compile(
         PROPOSAL, spec_id="t-tex-lit", experiment=_literature_experiment)
 
     tex = (tmp_path / "runs" / "t-tex-lit" / "paper" / "draft.tex").read_text(
@@ -208,7 +208,7 @@ def test_compile_missing_references_bib_emits_no_bibliography(tmp_path):
     lit_dir.mkdir(parents=True, exist_ok=True)
     (lit_dir / "manifest.csv").write_text(
         "index,doi,status,source,license,filename,origin,error\n"
-        "1,10.1/x,success,arxiv,,X.pdf,cli,\n",
+        "1,10.1000/x,success,arxiv,,X.pdf,cli,\n",
         encoding="utf-8",
     )
     # Deliberately NO references.bib written.
@@ -218,7 +218,7 @@ def test_compile_missing_references_bib_emits_no_bibliography(tmp_path):
 
     tex = (run_dir / "paper" / "draft.tex").read_text(encoding="utf-8")
     # The DOI is still cited ...
-    assert r"\url{https://doi.org/10.1/x}" in tex
+    assert r"\url{https://doi.org/10.1000/x}" in tex
     # ... but with no references.bib on disk, no bibliography is wired.
     assert r"\bibliography{" not in tex
     assert r"\nocite{*}" not in tex

@@ -43,7 +43,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Sequence
+from typing import Callable, Optional, Sequence
 
 from sci_adk.core.claim import Claim
 from sci_adk.core.evidence import EvidenceItem
@@ -72,14 +72,22 @@ _RESULT_SCALARS: tuple[str, ...] = (
 )
 
 
-def _format_value(value: object, evidence_id: str, field: str) -> str:
+def _format_value(
+    value: object,
+    evidence_id: str,
+    field: str,
+    escape: Optional[Callable[[str], str]] = None,
+) -> str:
     """Deterministic, compile-safe rendering of one recorded scalar fact.
 
     A bool renders its text (``True``/``False``); an int/float via ``%g`` (drops trailing
     zeros, byte-stable -- ``100.0 -> 100``, ``0 -> 0``, ``0.61 -> 0.61``); a string is
-    returned verbatim (it is sanitized downstream by the prose escaper, so a stray ``_``
-    survives as text). A non-finite float (NaN/inf) is NOT a citable fact -- fail loud,
-    the same record-fidelity rule as ``figures._y_value`` (a paper cannot state ``nan``).
+    returned verbatim, or through ``escape`` when one is given. A paper prose slot gives none:
+    the slot is sanitized after substitution, so a stray ``_`` survives as text. The authored
+    SI body is LaTeX written as is, so its caller passes the sanitizer as ``escape``: a recorded
+    ``Fe & Ni`` or ``x}\\input{f}`` is text there, never LaTeX. A non-finite float (NaN/inf) is
+    NOT a citable fact -- fail loud, the same record-fidelity rule as ``figures._y_value`` (a
+    paper cannot state ``nan``).
     """
     if isinstance(value, bool):
         return str(value)
@@ -90,11 +98,14 @@ def _format_value(value: object, evidence_id: str, field: str) -> str:
                 f"-- not a citable fact (record fidelity)"
             )
         return f"{value:g}"
-    return str(value)
+    return escape(str(value)) if escape is not None else str(value)
 
 
 def _resolve_evval(
-    evidence_id: str, field: str, by_id: dict[str, EvidenceItem]
+    evidence_id: str,
+    field: str,
+    by_id: dict[str, EvidenceItem],
+    escape: Optional[Callable[[str], str]] = None,
 ) -> str:
     """Resolve one ``\\evval{<id>}{<field>}`` to its recorded value (fail-loud).
 
@@ -128,7 +139,7 @@ def _resolve_evval(
         if isinstance(data, dict) and field in data:
             value = data[field]
             if isinstance(value, (bool, int, float, str)):
-                return _format_value(value, evidence_id, field)
+                return _format_value(value, evidence_id, field, escape)
             raise ValueError(
                 f"\\evval{{{evidence_id}}}{{{field}}}: finding value is non-scalar "
                 f"({type(value).__name__}) -- not a citable fact"
@@ -161,6 +172,7 @@ def substitute_factrefs(
     text: str,
     evidence: Sequence[EvidenceItem],
     claims: Sequence[Claim],
+    escape: Optional[Callable[[str], str]] = None,
 ) -> str:
     """Substitute every ``\\evval``/``\\status`` macro in ``text`` with its recorded value.
 
@@ -175,6 +187,10 @@ def substitute_factrefs(
         evidence: the run's Evidence record (each ``\\evval`` id is resolved here).
         claims: the run's Claims (each ``\\status`` hyp id resolves to its experiment
             Claim; novelty claims are excluded so ``\\status`` is the headline verdict).
+        escape: applied to a recorded STRING value before it is substituted (numbers, bools
+            and verdicts are written as they are). ``None`` for a prose slot, which is
+            sanitized after substitution; the sanitizer for LaTeX written as is (the authored
+            SI body), where nothing escapes the value afterwards.
 
     Returns:
         ``text`` with every factref macro replaced by its recorded value.
@@ -191,7 +207,7 @@ def substitute_factrefs(
     }
 
     def _ev(match: re.Match) -> str:
-        return _resolve_evval(match.group(1).strip(), match.group(2).strip(), by_id)
+        return _resolve_evval(match.group(1).strip(), match.group(2).strip(), by_id, escape)
 
     def _st(match: re.Match) -> str:
         return _resolve_status(match.group(1).strip(), claim_by_hyp)

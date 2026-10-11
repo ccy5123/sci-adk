@@ -43,12 +43,21 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from sci_adk.render.paper import _latex_sanitize
+from sci_adk.render.paper import _latex_sanitize, _one_line
 
 # The LaTeX listings environment cannot verbatim-hold a body that itself contains the
 # closing delimiter. Such a script is still SHIPPED under paper/code/ (byte for byte); the
 # record names it without typesetting its body, so the record is never a broken document.
 _LSTLISTING_END = r"\end{lstlisting}"
+# What listings typesets as it stands with the record's preamble: printable ASCII, tabs and
+# line feeds. Any other character stops pdflatex inside an lstlisting (a UTF-8 letter, symbol,
+# emoji or byte-order mark: "Invalid UTF-8 byte sequence"; NUL: "invalid character"; another
+# control character: "Unicode character ^^[ not set up"), so such a body is named, not typeset.
+_LISTING_CHARS_RE = re.compile(r"[\t\n\x20-\x7e]*")
+# The longest line typeset, in columns (a tab counts to the next multiple of 8): listings builds
+# a line before it breaks it, and one of 3000 columns in the record's small typewriter face is
+# wider than TeX's largest dimension ("Dimension too large"; 2500 compiled, measured).
+_LISTING_MAX_COLUMNS = 2000
 
 # The reproduce.py layout version, written into its machine section. A re-render reads the
 # previous reproduce.py to learn which paper/code/ files the previous render wrote: in this
@@ -228,9 +237,16 @@ def listing_inlinable(text: str) -> bool:
     """Whether a script body can be SAFELY inlined as an ``lstlisting``.
 
     ``listings`` typesets its body verbatim, but cannot hold a body that itself contains
-    the closing ``\\end{lstlisting}`` delimiter. Pure + deterministic.
+    the closing ``\\end{lstlisting}`` delimiter, a character other than printable ASCII, tab
+    and line feed (:data:`_LISTING_CHARS_RE`), or a line longer than
+    :data:`_LISTING_MAX_COLUMNS` columns -- pdflatex stops on each. Any other body is shipped
+    and named, not typeset. Pure + deterministic.
     """
-    return _LSTLISTING_END not in text
+    return (
+        _LSTLISTING_END not in text
+        and _LISTING_CHARS_RE.fullmatch(text) is not None
+        and all(len(line.expandtabs(8)) <= _LISTING_MAX_COLUMNS for line in text.split("\n"))
+    )
 
 
 def _typeset(script: ReproScript) -> bool:
@@ -566,8 +582,10 @@ def render_reproduction_section(
       - each shipped script is emitted ONCE, at its first appearance: its body verbatim in
         an ``lstlisting`` (NOT LaTeX-escaped -- ``listings`` handles raw code) under a
         sanitized caption naming ``paper/code/<file>``, its sha256 and the record ids of
-        every entry that names it; a script whose body cannot be typeset (not text, or it
-        contains ``\\end{lstlisting}``) is named in one line instead;
+        every entry that names it; a script whose body cannot be typeset (not UTF-8 text, or
+        :func:`listing_inlinable` is false: ``\\end{lstlisting}``, a character other than
+        printable ASCII, tab and line feed, or a line over 2000 columns) is named in one line
+        instead;
       - a ``pointer`` entry emits one honest POINTER line recording the ``code_ref``.
 
     An empty or ``None`` list returns ``""`` so the record emits NO section (the F3
@@ -604,16 +622,19 @@ def render_reproduction_section(
                 if script.filename in emitted:
                     continue
                 emitted.add(script.filename)
-                caption = _latex_sanitize(
+                # One line: the caption is a macro argument (an option of lstlisting), and a
+                # record id is free text; a blank line in it stops pdflatex.
+                caption = _latex_sanitize(_one_line(
                     f"paper/code/{script.filename} -- sha256 {script.sha256} -- named by "
                     + ", ".join(named_by[script.filename])
-                )
+                ))
                 if _typeset(script):
                     lines.append(r"\begin{lstlisting}[basicstyle=\ttfamily\small,"
                                  f"caption={{{caption}}},breaklines=true]")
                     # Body is verbatim -- listings handles raw code; NEVER _latex_sanitize
                     # here (that would corrupt the source). _typeset guarantees the body
-                    # has no \\end{lstlisting}, so this cannot break.
+                    # has no \\end{lstlisting}, only printable ASCII, tabs and line feeds, and
+                    # no line over 2000 columns, so this cannot break.
                     lines.append(script.text or "")
                     lines.append(r"\end{lstlisting}")
                 else:
@@ -623,11 +644,13 @@ def render_reproduction_section(
                     )
                 lines.append("")
         else:
+            # The id and the code reference (free text in the record) are \texttt arguments:
+            # one line each.
             lines.append(
                 r"\noindent\textbf{Pointer:} \texttt{"
-                f"{_latex_sanitize(item.evidence_id)}"
+                f"{_latex_sanitize(_one_line(item.evidence_id))}"
                 r"} -- code\_ref \texttt{"
-                f"{_latex_sanitize(item.code_ref)}"
+                f"{_latex_sanitize(_one_line(item.code_ref))}"
                 r"} (a recorded reference; no co-located script body is held). "
                 r"\\"
             )

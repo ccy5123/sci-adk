@@ -210,9 +210,10 @@ record — that is the failure this split exists to prevent.
   `runs/<id>/numbers.json` (every number the paper states, bound to its recorded
   source), runs `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]`,
   records the conclusions in `declarations.json`, and runs `sci-adk verify`. Once that passes, Session B — the
-  session driving `/sci publish` — runs the audit itself (step 5 below): it spawns the
+  session driving `/sci publish` — runs the audit itself (step 4 below): it spawns the
   readers and refuters and writes the audit file, and the writer revises from that
-  file. A number with no recorded home comes back to the experiment stage — the paper
+  file. After the final audit-driven revision it runs the blind conclusions reviewer
+  (step 5). A number with no recorded home comes back to the experiment stage — the paper
   session never adds a value to the record. Session B gives the writer the run id, the
   path to `record.tex`, and the `venue` from the frozen `pubreqs.json` — the paper is
   judged against THAT venue's readers, and a term that is standard in one is opaque in
@@ -243,7 +244,8 @@ the engine can catch it.
    SI is written like the paper; the record dump is re-deposited at
    `runs/<id>/record.tex`, outside `paper/`)
    + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`) + `paper/deposit/`
-   (the run's protocol files, and the data files the writer declares, with their terms, in
+   (the run's protocol files, a byte copy of the record dump as `paper/deposit/record.tex`,
+   and the data files the writer declares, with their terms, in
    `drafts/<spec-id>/paper/deposit.json`, passed to render with `--deposit`; the
    declaration, the terms and the switch that withholds the protocol are in
    `science-workflow-publish`). Pass the frozen `pubreqs.json` path in the spawn prompt. The writer ALSO records the paper's
@@ -254,17 +256,7 @@ the engine can catch it.
    so the binding lives beside the paper, not inside it. If the writer returns numbers with
    no recorded home, route them back to `/sci experiment` to be recorded as named values.
    Optionally `Agent(subagent_type: "evaluator-rigor")` for the paper-consistency pre-check.
-3. Optionally `Agent(subagent_type: "evaluator-conclusions")` → a BLIND reading of each
-   declared conclusion (which status does the sentence assert?), written to
-   `runs/<id>/review.json`, plus a cold read of the opening against the frozen `venue`
-   for terms that venue's readers would not know, written to the `opening_notes` list of
-   the same `review.json`. Do NOT pass it the declared statuses or the path to
-   `declarations.json` — its independence is the whole value. DO pass it the identifier
-   entries of `numbers.json` (text, document, context): it notes, in the `notes` list,
-   any that reads, in its sentence, as a reported quantity. `verify` computes the
-   disagreement and surfaces it and both lists of notes as NON-GATING advisories, so a
-   faithful paper is silent and a model can never fail a run.
-4. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
+3. `sci-adk verify` now ALSO runs the `paper_requirements_clean` umbrella gate (the
    declared sections, F2 font/DPI policy, reference style, max-words, F3 reproduction
    bundle), the `declarations_clean` gate (each declared status still matches the
    record, each declared sentence is still in the manuscript, every decided hypothesis is
@@ -272,7 +264,7 @@ the engine can catch it.
    and each entry's source prints as the number) as HARD gates; `advisory` items,
    `max_pages`, stale number entries, the identifier listing and the conclusion-review
    disagreements are surfaced, never gated.
-5. **The paper audit, after `sci-adk verify` passes** (Session B). The session driving
+4. **The paper audit, after `sci-adk verify` passes** (Session B). The session driving
    `/sci publish` (the orchestrator) spawns the readers and refuters and writes the
    audit file — a worker cannot spawn agents; the writer only revises from the audit
    file. `verify` checks digits and declared statuses, not what a sentence means;
@@ -281,6 +273,21 @@ the engine can catch it.
      refuters the manuscript path in the tree they read — the workspace, after the
      writer's output is merged back — and give the writer the audit file's content or
      its absolute path, to read and never edit.
+   - Author instructions: the author instructions are the files the orchestrator or the
+     user wrote for the writer in `drafts/<spec-id>/paper/` — how a number is printed and
+     why, a term to keep, a claim not to make; not the audit files, which are other
+     readers' findings, and not the paper's source (`prose.json`, `si.json`). List each
+     one by path in every reader's and every refuter's prompt, and give the writer the
+     same files, as content or absolute paths: readers and refuters weigh them as
+     instructions and do not audit them. Never tell a reader or refuter to keep out of
+     `drafts/` — a reader who cannot see an instruction recommends the change it forbids.
+   - A finding that conflicts with an author instruction is not applied by the writer: a
+     reader names the instruction it conflicts with, and the writer returns, unapplied,
+     any finding that asks for what an instruction forbids. For each, the orchestrator
+     keeps the instruction or asks the user with `AskUserQuestion` (the finding, the
+     instruction and its reason), and records the outcome against the finding in the
+     audit file. A finding the user chooses goes to the writer to apply, and the choice is
+     noted in the instruction file.
    - Spawn `Agent(subagent_type: "evaluator-paper")` once per lens, in parallel:
      `number-sources`, `claims-vs-design`, `position-and-proportion`,
      `reader-vocabulary`, `result-fidelity`, `structure-and-methods`. Each prompt names
@@ -307,9 +314,6 @@ the engine can catch it.
      (`/sci experiment`) first, never into `numbers.json`. When the writer returns, mark
      each upheld finding it did not fix as open, with its reason: upheld-but-unfixed
      findings stay listed in the audit file as open, never deleted.
-   - After the revision passes `verify`, if any declared sentence or the opening changed,
-     re-run `evaluator-conclusions` (step 3) on the revised paper, then `sci-adk verify`
-     to surface its readings — the earlier reading was of the old text.
    - The full audit runs once per publish session. After the revision passes `verify`
      again, re-run only the lenses whose findings were fixed, through the same read,
      refute and write steps, to check the fixes; the other lenses are not read again.
@@ -318,6 +322,28 @@ the engine can catch it.
      once, and then the audit ends; what that revision does not fix stays listed as open.
    - The audit is advisory: nothing in it reaches `sci-adk verify`, whose exit code
      remains the verdict.
+5. **The blind conclusions reviewer, after the final audit-driven revision** (Session B)
+   — once the audit has ended, or once the first `verify` pass when the audit upheld
+   nothing, so that it reads the final text and its notes still get a turn.
+   `Agent(subagent_type: "evaluator-conclusions")` → a BLIND reading of each declared
+   conclusion (which status does the sentence assert?), written to
+   `runs/<id>/review.json`, plus a cold read of the opening against the frozen `venue`
+   for terms that venue's readers would not know, written to the `opening_notes` list of
+   the same `review.json`. Never pass it the declared statuses or the path to
+   `declarations.json` — its independence is the whole value. DO pass it the identifier
+   entries of `numbers.json` (text, document, context): it notes, in the `notes` list,
+   any that reads, in its sentence, as a reported quantity. `verify` computes the
+   disagreement and surfaces it and both lists of notes as NON-GATING advisories, so a
+   faithful paper is silent and a model can never fail a run.
+   - If `verify` prints readings that disagree with a declaration (cannot-tell
+     included), or the review holds `opening_notes` or `notes`, give the writer
+     (`Agent(subagent_type: "expert-writer")`) one more pass on those notes only — as
+     `verify` prints them and as `review.json` holds them — then re-render and
+     re-verify. A note that conflicts with an author instruction is handled like an
+     audit finding that does (step 4).
+   - Re-run the reviewer once on the revised paper, then `sci-adk verify`. What that
+     second reading still reports does not go back to the writer: `verify` keeps
+     printing it as a non-gating advisory, and you report it to the user.
 
 ### package — Assemble the workspace submission
 

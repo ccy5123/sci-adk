@@ -53,7 +53,7 @@ externally and you reference it.
 | Verb | When | What it does |
 |---|---|---|
 | `sci-adk numbers draft` | After authoring `prose.json`, before render | Proposes `runs/<id>/numbers.draft.json`: for each number in the prose, the recorded field(s) it equals at its printed precision |
-| `sci-adk render` | After authoring the hooks | Renders `paper/draft.tex`, `figures/` and `references.bib` deterministically from the record, `paper/si.tex` only from an authored `--si si.json`, and `paper/deposit/` (the protocol files, plus the data declared with `--deposit`), and re-deposits the record dump `runs/<id>/record.tex` outside `paper/` |
+| `sci-adk render` | After authoring the hooks | Renders `paper/draft.tex`, `figures/` and `references.bib` deterministically from the record, `paper/si.tex` only from an authored `--si si.json`, and `paper/deposit/` (the protocol files, the data declared with `--deposit`, and a byte copy of the record dump as `paper/deposit/record.tex`), and re-deposits the record dump `runs/<id>/record.tex` outside `paper/` |
 | `sci-adk verify` | As a read-only consistency self-check | Runs the paper-consistency gate (`\ref`↔`\label`, novelty sentences, figure sources) AND — when `runs/<id>/pubreqs.json` is frozen — the `paper_requirements_clean` gate (declared sections, font/DPI policy, reference style, max-words, reproduction bundle) over the rendered `.tex` |
 
 `sci-adk render` is the only way to produce the paper artifacts; do not hand-write
@@ -69,6 +69,14 @@ exit non-zero even if the Claims reproduce.
 - Cross-document SI references (main paper → SI figure) must be PLAIN TEXT (e.g.
   "Figure S1"), not `\ref{fig:SI-...}` — the within-document verify gate flags a
   cross-doc `\ref` as dangling.
+- Methods/Results lead-in labels may be written as `\paragraph{Label.}` with brace-free
+  text, not in the abstract.
+- In the `--prose` / `--si-prose` JSON write a symbol as its character (`≥`, `H₂O`,
+  `30 °C`, `α`) or plain ASCII, not as LaTeX (`$\geq$`, `H$_2$O`): those slots are escaped as
+  text, so LaTeX prints literally and render warns. The authored SI body in `si.json` is
+  verbatim LaTeX: there write a symbol in LaTeX (`$\alpha$`, `$\geq$`, `H$_2$O`), since
+  pdflatex stops on a Greek letter, a relation sign or CJK written as a character (render
+  names each in a warning); accented Latin letters (`é`, `ü`) and dashes are fine.
 - A `\novelty{result|method}{hyp}{text}` marker (in `prose.json` / `si.json` only) is
   HARD-gated: it may only be used for a kind whose novelty flag is supported on the
   record (a `found_nothing` search exists). Do not assert novelty the record does not
@@ -111,7 +119,8 @@ its precision. The manuscript itself stays plain LaTeX.
 
 ## Deposit Files — Declared Beside the Paper
 
-Every render ships the run's protocol files under `paper/deposit/`. When the paper also
+Every render ships the run's protocol files and a byte copy of the record dump
+(`deposit/record.tex`) under `paper/deposit/`. When the paper also
 ships data files, or must withhold its protocol, write the declaration
 `drafts/<spec-id>/paper/deposit.json` and pass it with `--deposit`; render keeps a copy at
 `runs/<id>/deposit.json` for later renders. The schema, the terms each file ships under
@@ -201,6 +210,21 @@ do not fabricate a number or pad a section to make the gate pass.
   It is read-only to you — the orchestrator writes it. Revise each passage it lists as
   upheld, then run `sci-adk numbers draft`, `sci-adk render`, update the declarations and
   run `sci-adk verify` again.
+- The author instructions, when the orchestrator passes them: the files it or the user
+  wrote for you in `drafts/<spec-id>/paper/` — how a number is printed and why, a term to
+  keep, a claim not to make — as content or absolute paths. They bind you. When the audit
+  file or the reviewer's notes ask for a change an author instruction forbids, do not
+  apply it: return it as a conflict, naming the instruction file and quoting the
+  instruction. The orchestrator keeps the instruction or asks the user; a change it hands
+  back to you as decided is applied.
+- After the blind conclusions reviewer, when the orchestrator passes them: the readings
+  that disagree with your declarations (as `verify` prints them), the `opening_notes`
+  and the `notes` of `runs/<id>/review.json`, as content or an absolute path. This is one
+  more pass on those notes only: rewrite each named passage at the strength the record
+  supports, never by adding a hedge, and touch nothing else; then run
+  `sci-adk numbers draft`, `sci-adk render`, update the declarations and run
+  `sci-adk verify` again. The reviewer then reads the paper once more; nothing it still
+  notes comes back to you.
 
 ## Return Contract (to the orchestrator)
 
@@ -211,8 +235,11 @@ do not fabricate a number or pad a section to make the gate pass.
   figure, unsupported novelty) so it can be resolved.
 - A note that `paper/` is ready for single-folder Overleaf upload, only once the
   consistency gate passes.
-- After an audit revision: for each finding id in the audit file, fixed or not fixed, and
-  for each one not fixed, why — so the orchestrator can list it in the file as open.
+- After an audit revision: for each finding id in the audit file, fixed, not fixed, or a
+  conflict; for each one not fixed, why — so the orchestrator can list it in the file as
+  open — and for each conflict, the author instruction it conflicts with.
+- After the pass on the reviewer's notes: for each note, fixed, not fixed (and why), or a
+  conflict with the instruction named.
 
 ## Blocker Protocol
 

@@ -82,15 +82,25 @@ from sci_adk.render.bib_latex import (
     HTML_ENTITY_RE,
     T1_ONLY_CHARS,
     VERBATIM_FIELDS,
+    accented_letters_in_math,
     bare_specials,
+    bib_commands,
+    caret_notation,
+    dangerous_commands,
     field_value_spans,
+    field_values,
     html_tags,
+    math_commands_in_text,
     printed_field,
     raw_sort_letter,
     sort_letter_command,
+    string_macros_used_as_urls,
     stray_math_dollar,
     undefined_month_tokens,
+    unknown_commands,
     untypesettable_chars,
+    url_arguments,
+    url_problems,
 )
 from sci_adk.render.pubreqs_checks import word_count
 
@@ -367,8 +377,10 @@ def unpublished_citation_warnings(tex: str, bib: str) -> List[str]:
 # (<i>, <span class="...">) from XML-rooted registrar metadata (Crossref/DataCite), bare
 # specials, math a '$' breaks, non-standard spaces, characters pdflatex cannot typeset. The
 # patterns and the character policy are the ones render's LaTeX-safe bib copy (bib_latex.py)
-# applies, so the check and the copy agree. url/doi values are typeset verbatim: only their
-# spaces and characters are checked (an escape there would print; ?b&c;d is not an entity).
+# applies, so the check and the copy agree. url/doi values print a special as itself: only
+# their spaces and characters are checked here (an escape there would print; ?b&c;d is not an
+# entity), and what hyperref would run in them by bib_command_problems. The .bib is read as
+# BibTeX reads it (_bib_units): @string values and @preamble text are printed too.
 # Spaces and zero-width characters have their own problem line (_nonstandard_space_codepoints).
 _ZERO_WIDTH = (0x200B, 0x200C, 0x200D, 0xFEFF)
 # The fix for a bare special: an escape, or (for ^) the command that prints a caret.
@@ -439,6 +451,161 @@ def _character_problems(
     return lines
 
 
+# The label a unit read from a .bib carries in a problem line, for a @preamble.
+_PREAMBLE = "@preamble"
+
+
+def _bib_units(bib: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
+    """``(what, [(field name, value), ...])`` for each piece of ``bib`` BibTeX prints, read as
+    BibTeX reads it (``bib_latex.bib_commands``: a parenthesised entry, white space after the
+    ``@``, an ``@`` inside a value and ``%`` are taken as BibTeX takes them):
+
+    - each ``@preamble`` (``"@preamble"``): its strings, which BibTeX writes into the reference
+      list as they are;
+    - each ``@string`` (``"@string 'name'"``): its value, printed wherever a field names the
+      macro, whatever the macro is called (``title = abstract``); named ``url`` when a url or
+      doi field names the macro, so it is read as a URL, else ``string``;
+    - each entry (``"entry 'KEY'"``): the values of its printed fields
+      (``bib_latex.printed_field``), braced or quoted, ``#``-joined parts each their own value.
+    PURE."""
+    commands = bib_commands(bib)
+    url_macros = string_macros_used_as_urls(bib, commands)
+    units: List[Tuple[str, List[Tuple[str, str]]]] = []
+    for command in commands:
+        if command.command == "preamble":
+            values = [
+                ("preamble", bib[start:end])
+                for field in command.fields
+                for start, end, delimited in field.parts
+                if delimited
+            ]
+            units.append((_PREAMBLE, values))
+        elif command.command == "string":
+            for field in command.fields:
+                kind = "url" if field.name in url_macros else "string"
+                values = [(kind, bib[s:e]) for s, e, delimited in field.parts if delimited]
+                units.append((f"@string '{field.name}'", values))
+        else:
+            values = [
+                (field.name, bib[start:end])
+                for field in command.fields
+                if printed_field(field.name)
+                for start, end, delimited in field.parts
+                if delimited
+            ]
+            units.append((f"entry '{command.key}'", values))
+    return units
+
+
+def _unit_command_problems(
+    where: str, printed: List[Tuple[str, str]], package_source: Optional[str], *, preamble: bool
+) -> List[str]:
+    """The FAIL lines for one unit of :func:`_bib_units`: a @preamble; a command on
+    ``bib_latex.DANGEROUS_COMMANDS``; ``^^`` notation; and a URL (a url or doi value, a macro
+    one names, or the URL argument of ``\\url``/``\\href`` in a value) holding a backslash,
+    ``^^``, a brace or a scheme that launches a program or opens a file
+    (``bib_latex.url_problems``). Shared by :func:`bib_latex_safety_problems` and
+    :func:`bib_command_problems`, so both write the same line for the same unit."""
+    fix = package_source or _PER_RUN_STORE
+    values = [v for name, v in printed if name not in VERBATIM_FIELDS]
+    urls = [v for name, v in printed if name in VERBATIM_FIELDS]
+    urls += [arg for v in values for arg in url_arguments(v)]
+    lines: List[str] = []
+    if preamble:
+        lines.append(
+            f"{where} -- BibTeX writes a @preamble's text into the reference list as LaTeX, "
+            "which pdflatex runs (a definition, a file read); a reference needs none: remove "
+            f"it from {fix}"
+        )
+    commands = list(dict.fromkeys(c for v in values for c in dangerous_commands(v)))
+    if commands:
+        lines.append(
+            f"{where} contains the command(s) {', '.join(commands)} -- a command that can "
+            "read or write a file, define a macro, change how TeX reads its input or end the "
+            f"document, which pdflatex would run from the reference list; remove it from {fix}"
+        )
+    if any(caret_notation(v) for v in values):
+        lines.append(
+            f"{where} has '^^' -- TeX reads '^^' and the characters after it as another "
+            f"character ('^^5c' is a backslash), so it can spell a command; remove it from {fix}"
+        )
+    reasons = list(dict.fromkeys(r for url in urls for r in url_problems(url)))
+    if reasons:
+        lines.append(
+            f"{where} has {', '.join(reasons)} in a URL or DOI -- hyperref reads a URL as TeX "
+            "to make the link, so a backslash command in it runs ('^^5c' spells a backslash), "
+            "and a run: or file: link launches a program or opens a file; no URL or DOI needs "
+            f"one: remove it from {fix}"
+        )
+    return lines
+
+
+# @MX:NOTE: [AUTO] verify runs this on every bibliography render writes (paper/, its SI and
+#   deposit copies) whether or not a publishing contract is frozen; render prints the same lines.
+def bib_command_problems(
+    bib: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> List[str]:
+    """Every ``.bib`` entry whose printed field values carry a command that can read or write a
+    file, define a macro, change how TeX reads its input or end the document
+    (``bib_latex.DANGEROUS_COMMANDS``: ``\\input``, ``\\def``, ``\\catcode``, ``\\end`` ...),
+    or TeX's ``^^`` notation. PURE.
+
+    Read as BibTeX reads the file (:func:`_bib_units`): every entry, every ``@string`` macro
+    (whatever its name) and every ``@preamble``, which fails as such (BibTeX writes its text into
+    the reference list as LaTeX). A url or doi value, a macro one names and the URL argument of
+    ``\\url``/``\\href`` in a value fail on a backslash, ``^^``, a brace or a ``run:``/``file:``
+    scheme (hyperref reads a URL as TeX).
+
+    The same lines :func:`bib_latex_safety_problems` writes for them, so a caller running both
+    can drop the repeats. ``source`` / ``package_source`` as there. Returns sorted lines (empty =
+    clean)."""
+    problems: List[str] = []
+    for what, printed in _bib_units(bib):
+        problems.extend(
+            _unit_command_problems(
+                f"bib LaTeX-safety: {source} {what}", printed, package_source,
+                preamble=what == _PREAMBLE,
+            )
+        )
+    return sorted(problems)
+
+
+def bib_command_advisories(
+    bib: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> List[str]:
+    """One advisory per ``.bib`` entry or ``@string`` macro (:func:`_bib_units`) whose printed
+    values carry a command verify does not know (``bib_latex.unknown_commands``: neither one a
+    reference needs, ``bib_latex.SAFE_COMMANDS``, nor a dangerous one): publisher metadata holds
+    harmless ones (``\\texttimes``, ``\\MakeUppercase``), but pdflatex stops on a command the
+    preamble does not define, or on an argument it cannot use (``\\hspace{20000pt}``). And one
+    per entry or macro that uses a math command in running text
+    (``bib_latex.math_commands_in_text``: ``Decay of \\alpha particles``), where pdflatex stops
+    with "Missing $ inserted". NON-BLOCKING. PURE."""
+    fix = package_source or _PER_RUN_STORE
+    notes: List[str] = []
+    for what, printed in _bib_units(bib):
+        if what == _PREAMBLE:
+            continue  # it fails as a whole (bib_command_problems)
+        values = [v for name, v in printed if name not in VERBATIM_FIELDS]
+        commands = list(dict.fromkeys(c for v in values for c in unknown_commands(v)))
+        if commands:
+            notes.append(
+                f"bib commands: {source} {what} contains {', '.join(commands)}, which verify "
+                "does not know: not a command that can read or write a file, define a macro or "
+                "end the document, but pdflatex stops on a command the preamble does not define "
+                "or on an argument it cannot use (a length over 16383pt) -- check that the "
+                f"reference list compiles, or replace it in {fix}"
+            )
+        in_text = list(dict.fromkeys(c for v in values for c in math_commands_in_text(v)))
+        if in_text:
+            notes.append(
+                f"bib commands: {source} {what} uses the math command(s) {', '.join(in_text)} "
+                "in running text, where pdflatex stops on it (\"Missing $ inserted\") -- put it "
+                f"in math, $...$, in {fix}"
+            )
+    return sorted(notes)
+
+
 def bib_latex_safety_problems(
     bib: str, source: str = "references.bib", package_source: Optional[str] = None
 ) -> List[str]:
@@ -455,7 +622,11 @@ def bib_latex_safety_problems(
     naming what was found: HTML entities (``&amp;`` ...), markup tags (``<i>``,
     ``<span class="...">``; read in running text only, so ``$x<y$`` is not a tag), a bare ``&``
     (the LaTeX column separator), ``%`` or ``#``, a bare ``_`` or ``^`` outside math, a ``$``
-    nested inside math or left open, non-standard Unicode spaces (U+2005 four-per-em etc.), and
+    nested inside math or left open, a command that can read or write a file, define a macro,
+    change how TeX reads its input or end the document (``\\input``, ``\\def``, ``\\end``:
+    ``bib_latex.DANGEROUS_COMMANDS``; any other unknown command is advisory,
+    :func:`bib_command_advisories`), ``^^`` notation, non-standard Unicode spaces (U+2005
+    four-per-em etc.), and
     characters pdflatex cannot typeset with the preamble sci-adk emits (U+2212 MINUS SIGN ...;
     see ``bib_latex.typesettable``) -- with the LaTeX form the copy writes for each, or, where
     there is none, the instruction to replace the character at its source. Does NOT flag the
@@ -473,14 +644,10 @@ def bib_latex_safety_problems(
     """
     tail = f"; fix it in {package_source}" if package_source else ""
     problems: List[str] = []
-    for m in _BIB_ENTRY_BODY_RE.finditer(bib):
-        key, body = m.group(1).strip(), m.group(2)
-        where = f"bib LaTeX-safety: {source} entry '{key}'"
-        printed = [
-            (name, body[start:end])
-            for name, start, end in field_value_spans(body)
-            if printed_field(name)
-        ]
+    for what, printed in _bib_units(bib):
+        if what == _PREAMBLE:
+            continue  # it fails as a whole (bib_command_problems, below)
+        where = f"bib LaTeX-safety: {source} {what}"
         values = [v for name, v in printed if name not in VERBATIM_FIELDS]
         entities = sorted({e for v in values for e in HTML_ENTITY_RE.findall(v)})
         if entities:
@@ -507,6 +674,15 @@ def bib_latex_safety_problems(
                     "references.bib) if it holds the '$', else render the run again"
                 )
             )
+        in_math = list(dict.fromkeys(c for v in values for c in accented_letters_in_math(v)))
+        if in_math:
+            problems.append(
+                f"{where} has the accented letter(s) {', '.join(_codepoint(c) for c in in_math)} "
+                "inside math -- inputenc writes it as a text accent, which pdflatex sets wrongly "
+                "in math or stops on (\"Please use \\mathaccent\"); write it outside the math, "
+                "or as accent commands in an \\mbox (the copy render writes does)"
+                + (tail or "; render the run again")
+            )
         bad = set().union(*(_nonstandard_space_codepoints(v) for _, v in printed))
         if bad:
             cps = ", ".join("U+%04X" % c for c in sorted(bad))
@@ -515,6 +691,7 @@ def bib_latex_safety_problems(
                 f"ASCII space{tail}"
             )
         problems.extend(_character_problems(where, printed, package_source))
+    problems.extend(bib_command_problems(bib, source=source, package_source=package_source))
     return sorted(problems)
 
 
@@ -641,6 +818,49 @@ def bib_sort_advisories(
             f"bib sort: {source} entry '{key}': the first name starts with {letter}, which "
             f"BibTeX sorts after every ASCII letter, so the reference list prints the entry "
             f"after the names that start with Z{fix}"
+        )
+    return sorted(lines)
+
+
+# An entry header ``@type{KEY,`` -- the type is kept (only articles are checked below).
+_BIB_TYPED_HEAD_RE = re.compile(r"@(\w+)\s*\{\s*([^,\s{}]+)\s*,")
+# The fields plainnat prints after an article's volume and issue: the page range, or the article
+# number as ``eid``. ACM's ``articleno`` is not printed (measured with bibtex), so it does not count.
+_ARTICLE_LOCATION_FIELDS = ("pages", "eid")
+
+
+def bib_article_number_advisories(
+    tex: str,
+    bib: str,
+    source: str = "references.bib",
+    fix_in: str = "the literature store",
+) -> List[str]:
+    """Advisory lines (never a failure) for each ``@article`` entry ``tex`` cites that has a
+    ``journal`` and a ``volume`` but neither ``pages`` nor ``eid``: the reference list then gives
+    the journal and volume without where in the volume the article is. The usual cause is a
+    journal that numbers articles instead of pages (J Cheminform (2018) 10:10): the registrar
+    BibTeX the store is acquired from has no field for that number, and sci-adk's acquisition
+    never sees the metadata that holds it, so it is added by hand as ``pages = {<n>}`` in
+    ``fix_in``. Entries are split brace-depth aware (a one-line entry and a field name inside
+    another value are both read correctly); an empty field counts as absent. PURE."""
+    cited = set(cited_keys(tex))
+    lines: List[str] = []
+    pos = 0
+    while (m := _BIB_TYPED_HEAD_RE.search(bib, pos)) is not None:
+        end = _entry_close_index(bib, bib.index("{", m.start()))
+        pos = end
+        kind, key = m.group(1).lower(), m.group(2)
+        if kind != "article" or key not in cited:
+            continue
+        values = {name: v.strip() for name, v in field_values(bib[m.end() : end - 1]).items()}
+        journal, volume = values.get("journal", ""), values.get("volume", "")
+        if not (journal and volume) or any(values.get(f) for f in _ARTICLE_LOCATION_FIELDS):
+            continue
+        lines.append(
+            f"bib article number: {source} entry '{key}' ({journal}, volume {volume}) has "
+            f"neither pages nor eid, so the reference list does not say where in the volume "
+            f"the article is -- add its article number as pages = {{<n>}} to the entry in "
+            f"{fix_in}"
         )
     return sorted(lines)
 
@@ -950,9 +1170,11 @@ def _has_deposit_trace(package_dir: Path) -> bool:
 
 
 def _record_tex_escape(text: str) -> str:
-    """The escaping the shipped ``make_si.py`` applies to a run id (its ``esc``)."""
-    return (text.replace("\\", "\\textbackslash{}").replace("_", "\\_").replace("%", "\\%")
-            .replace("&", "\\&").replace("#", "\\#"))
+    """The escaping the shipped ``make_si.py`` applies to a run id (its ``tex``: a copy of the
+    renderer's one-line sanitizer, compared with it by the test suite)."""
+    from sci_adk.render.paper import _latex_sanitize, _one_line
+
+    return _latex_sanitize(_one_line(text))
 
 
 def _record_digest(record: str, rid: str) -> Optional[str]:
@@ -1277,6 +1499,9 @@ __all__ = [
     "layout_problems",
     "cited_keys",
     "bib_keys",
+    "bib_article_number_advisories",
+    "bib_command_advisories",
+    "bib_command_problems",
     "bib_latex_safety_problems",
     "bib_month_advisories",
     "bib_sort_advisories",

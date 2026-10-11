@@ -132,8 +132,9 @@ Two-pass, sequential (novelty search needs exact hypothesis text):
 `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]` →
 `paper/draft.tex`, `figures/`, `references.bib`, `paper/si.tex` only from an authored
 `--si si.json` (the SI is written like the paper; the record dump is deposited at
-`runs/<id>/record.tex`, outside the submission), and `paper/deposit/` (the run's protocol
-files, plus the data files declared with `--deposit`). Figures
+`runs/<id>/record.tex`, outside `paper/`), and `paper/deposit/` (the run's protocol
+files, the data files declared with `--deposit`, and a byte copy of the record dump as
+`paper/deposit/record.tex`). Figures
 pull their `y` values **from Evidence by `evidence_id`** (record fidelity — the
 agent authors WHAT to render; the engine renders deterministically FROM the record).
 
@@ -197,10 +198,10 @@ better, but they cannot grant a pass the CLI gate would refuse.
 | `evaluator-paper` | the paper read for meaning, one lens per reader, each finding put to refuters; the survivors go to a file for the writer | No (advisory) |
 
 `evaluator-conclusions` and `evaluator-paper` run in the paper session rather than at
-Stage 5. The session driving `/sci publish` spawns `evaluator-conclusions` once the
-writer has rendered the paper and declared its conclusions, and again after a revision
-that changes a declared sentence or the opening; it spawns `evaluator-paper` once
-`sci-adk verify` passes (see the publish skill).
+Stage 5. The session driving `/sci publish` spawns `evaluator-paper` once
+`sci-adk verify` passes, and `evaluator-conclusions` after the final audit-driven
+revision, then once more after the writer's one pass on its readings and notes (see the
+publish skill).
 
 ---
 

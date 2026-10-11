@@ -7,16 +7,15 @@ pending agent judgments -- as a structured draft, with NO LLM prose (so it runs
 at zero cost, design/tool-policy.md). Prose polishing, when wanted, is a separate
 in-session agent step over this draft (never an autonomous claude -p call).
 
-LaTeX-authoring convention (the ``.tex`` is the source of truth): the Spec proposal
-panes, the hypothesis statements, and ``PaperProse`` (abstract/introduction/
-discussion) should be authored in **LaTeX-safe form** -- e.g. ``$\\geq$``,
-``H$_2$O``, ``30\\textdegree{}C`` -- NOT unicode, because the emitted document is
-what the author uploads to Overleaf (default pdflatex). A lightweight unicode
-sanitizer (:func:`_latex_sanitize`) is a *safety net*, not a license to rely on
-unicode: a stray ``≥`` or ``α`` is mapped to a pdflatex-safe LaTeX command, common
-European accents (Gödel, Erdős) pass through unchanged under ``utf8`` inputenc, and
-any other non-ASCII codepoint (CJK, emoji) is folded/placeheld so it cannot break
-compilation. Author LaTeX-safe; the net only guards against accidents.
+Authoring convention: the Spec proposal panes, the hypothesis statements and the
+``PaperProse`` slots are TEXT, escaped into the ``.tex`` the author uploads to Overleaf
+(default pdflatex) -- a LaTeX command written there prints as literal text (a prose slot
+passes only the ``\\ref``/``\\cite`` family and ``\\paragraph``; render warns about any other).
+Write a symbol as its Unicode character (``≥``, ``H₂O``, ``30 °C``) or in plain ASCII: the
+sanitizer (:func:`_latex_sanitize`) maps the common scientific symbols to pdflatex-safe LaTeX
+(``≥`` -> ``$\\geq$``, ``α`` -> ``$\\alpha$``), passes common European accents (Gödel, Erdős)
+under ``utf8`` inputenc, and folds or placeholds any other non-ASCII codepoint (CJK, emoji:
+``?``, named in a render warning) so it cannot break compilation.
 
 Reference: design/directory-structure.md (render/), design/abstractions.md.
 """
@@ -32,7 +31,7 @@ from typing import Any, Optional, Sequence
 from sci_adk.core.claim import RULE_CONFIDENCE_KINDS, Claim, ClaimStatus, ConfidenceType
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.spec import DecisionRule, Hypothesis, Spec
-from sci_adk.render.factref import substitute_factrefs
+from sci_adk.render.factref import _EVVAL_RE, _STATUS_RE, substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
     order_figures_by_reference,
@@ -44,7 +43,7 @@ from sci_adk.render.novelty import (
     novelty_scope_suffix,
     require_novelty_text,
 )
-from sci_adk.render.prose import PaperProse
+from sci_adk.render.prose import PaperProse, SIProse
 
 # LaTeX special characters and their escaped forms. Several replacements (the
 # backslash and the tilde/caret commands) themselves contain ``{}`` -- so a naive
@@ -106,9 +105,9 @@ def _latex_escape(s: str) -> str:
     return s
 
 
-# Curated unicode -> pdflatex-safe LaTeX. The primary strategy is "author LaTeX-safe"
-# (the .tex is the source of truth); this map is the SAFETY NET so a stray scientific
-# unicode char does not break Overleaf's default pdflatex. Math symbols use
+# Curated unicode -> pdflatex-safe LaTeX: how a scientific symbol written as its Unicode
+# character (the authoring convention, module docstring) reaches Overleaf's default pdflatex
+# as LaTeX. Math symbols use
 # ``$...$`` (base LaTeX -- no amssymb needed for any entry here). Applied AFTER
 # :func:`_latex_escape`, so the values here are final LaTeX and the ASCII keys are
 # disjoint from the LaTeX specials the escaper handles.
@@ -167,12 +166,20 @@ _UNICODE_MAP: dict[str, str] = {
 # Overleaf) only defines codepoints up to ~U+017E -- the end of Latin Extended-A --
 # so this window covers Latin-1 Supplement (U+00C0..U+00FF) + Latin Extended-A
 # (U+0100..U+017E). These pass through unchanged under pdflatex, so common European
-# accents stay correct (Gödel, Erdős, ł U+0142, ø). Latin Extended-B and above
+# accents stay correct (Gödel, Erdős, ł U+0142, ø) -- all but the eight letters of
+# :data:`_UNDEFINED_LATIN_A`. Latin Extended-B and above
 # (U+0180..U+024F: Romanian Ș U+0218 / Ț U+021A, ƒ U+0192, etc.) are NOT defined by
 # inputenc and would abort pdflatex if passed raw, so they fall through to the
 # NFKD-fold/placeholder path instead (Ș->S, Ț->T; ƒ and Ʒ have no ASCII fold -> ?).
 _ACCENT_LO = 0x00C0
 _ACCENT_HI = 0x017E
+# The letters of that window LaTeX defines no glyph for (H and T with stroke, kra, L with
+# middle dot, n preceded by apostrophe): pdflatex stops on each with "Unicode character ...
+# not set up for use with LaTeX" under both render preambles (T1 with Latin Modern or Times;
+# measured by compiling the whole window, TeX Live 2026). Maltese, Sami, Catalan and
+# Afrikaans text holds them. They take the fold/placeholder path (Ħ -> ?, Ŀ -> L?,
+# ŉ -> ?n). The bib copy's character policy (``bib_latex.typesettable``) uses this set.
+_UNDEFINED_LATIN_A = frozenset("ĦħĸĿŀŉŦŧ")
 
 # The font encoding every preamble sci-adk emits loads, right after inputenc (right after
 # \documentclass where there is no inputenc line), followed by the text typeface. With
@@ -223,76 +230,159 @@ def run_font_policy(
 # document still compiles. ``?`` is ASCII and not a LaTeX special.
 _UNICODE_PLACEHOLDER = "?"
 
+# The C0 control characters other than tab and line feed, and DEL: pdflatex stops on each of
+# them in any slot (an invalid character; a form feed is an \outer \par that ends the
+# argument it sits in). A carriage return is a line end: :func:`_clean_text` turns it into a
+# line feed before this set is removed.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def _clean_text(s: str) -> str:
+    """``s`` with its line ends normalized (CRLF and a lone CR -> LF) and every C0 control
+    character other than tab and LF, and DEL, removed (:data:`_CONTROL_RE`).
+
+    The first step of both sanitizers and of every decision taken on prose before it is
+    sanitized (the heading refusal, the fact-macro and novelty matches, the literal-command
+    warnings), so each decision sees the text the sanitizer sees: a control character can
+    neither hide a command from a check nor end up in a key or a heading. C1 controls
+    (U+0080..U+009F) are left to the unicode fold, which makes each the placeholder.
+    Idempotent. PURE."""
+    return _CONTROL_RE.sub("", s.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _one_line(s: str) -> str:
+    """``s`` cleaned (:func:`_clean_text`) with every whitespace run -- line breaks and blank
+    lines included -- collapsed to one space and none at either end: for a title, the author
+    and a section title, each one macro argument to pdflatex (a blank line in ``\\author{}``
+    stops it with "Paragraph ended before \\author was complete"). PURE."""
+    return " ".join(_clean_text(s).split())
+
 
 def _latex_sanitize(s: str) -> str:
     """Escape LaTeX specials AND fold unicode to pdflatex-safe LaTeX (the safety net).
 
-    Two-phase, order-critical:
+    Order-critical:
 
-    1. :func:`_latex_escape` first -- neutralizes the ASCII specials
-       ``& % $ # _ { } ~ ^ \\`` while ``s`` is still raw (no LaTeX commands of ours
-       present yet, so nothing we emit later gets double-escaped).
-    2. Then, per remaining character: a curated scientific symbol maps to its LaTeX
-       form via :data:`_UNICODE_MAP` (e.g. ``≥`` -> ``$\\geq$``, ``₂`` -> ``$_2$``,
+    1. :func:`_clean_text` -- line ends normalized; C0 controls other than tab and LF, and
+       DEL, removed (pdflatex stops on them).
+    2. :func:`_latex_escape` -- neutralizes the ASCII specials ``& % $ # _ { } ~ ^ \\``
+       while the text is still raw (no LaTeX commands of ours present yet, so nothing we
+       emit later gets double-escaped).
+    3. Then, per remaining non-ASCII character: a curated scientific symbol maps to its
+       LaTeX form via :data:`_UNICODE_MAP` (e.g. ``≥`` -> ``$\\geq$``, ``₂`` -> ``$_2$``,
        ``α`` -> ``$\\alpha$``); an inputenc-safe accent (U+00C0..U+017E, e.g. ``ö``)
-       passes through unchanged; any other non-ASCII codepoint -- including Latin
-       Extended-B (U+0180+, e.g. Romanian ``Ș``/``Ț``) which inputenc does NOT define
-       -- is NFKD-normalized with combining marks stripped, and if STILL non-ASCII
-       (CJK, emoji) is replaced with :data:`_UNICODE_PLACEHOLDER`. ASCII passes
-       through (it survived phase 1 as-is).
+       passes through unchanged, except the eight letters LaTeX has no glyph for
+       (:data:`_UNDEFINED_LATIN_A`, e.g. Maltese ``Ħ``); any other codepoint -- including Latin Extended-B (U+0180+,
+       e.g. Romanian ``Ș``/``Ț``) which inputenc does NOT define -- is NFKD-normalized with
+       combining marks stripped, and every ASCII character the fold yields is escaped like
+       any other text (:func:`_latex_escape`). That matters: a fullwidth or small-form
+       special (U+FF3C fullwidth backslash, U+FF06 ``&``, U+FE5F ``#``, ...) folds to its
+       ASCII special, so the fullwidth backslash prints as ``\\textbackslash{}`` and never
+       acts as one. A fold that is STILL non-ASCII (CJK, emoji, C1 controls) is replaced with
+       :data:`_UNICODE_PLACEHOLDER`.
 
-    Result: every codepoint is ASCII or an inputenc-safe accent, so the emitted .tex
-    compiles under Overleaf's default pdflatex. This is a fallback -- author LaTeX-safe
-    (the module docstring's convention); do not rely on the net for correctness.
+    The fold is per character and comes after the curated map: normalizing the whole input
+    up front would turn ``₂`` into ``2`` and ``…`` into ``...`` before the map could give
+    ``$_2$`` and ``\\ldots{}``.
+
+    Result: every codepoint is printable ASCII, a tab, a line feed or an inputenc-safe
+    accent, and every special is escaped, so the emitted .tex compiles under Overleaf's
+    default pdflatex and prints the text as written (a character with no form prints as
+    ``?``; :func:`placeholder_warnings` names it).
 
     Replaces :func:`_latex_escape` at EVERY interpolation point in the LaTeX renderer.
     Like ``_latex_escape`` it is NOT idempotent -- call exactly once per string.
     """
-    escaped = _latex_escape(s)
+    escaped = _latex_escape(_clean_text(s))
+    return "".join(ch if ord(ch) < 0x80 else _fold_non_ascii(ch)[0] for ch in escaped)
+
+
+def _fold_non_ascii(ch: str) -> tuple[str, bool]:
+    """What :func:`_latex_sanitize` writes for one non-ASCII character ``ch``, and whether any
+    part of it is :data:`_UNICODE_PLACEHOLDER` (the character, or part of it, has no form
+    pdflatex typesets -- what :func:`placeholder_warnings` names). PURE."""
+    mapped = _UNICODE_MAP.get(ch)
+    if mapped is not None:
+        return mapped, False
+    if _ACCENT_LO <= ord(ch) <= _ACCENT_HI and ch not in _UNDEFINED_LATIN_A:
+        # Common European accent: inputenc renders it under pdflatex. Keep it.
+        return ch, False
+    # Fold via NFKD (drops combining marks); keep the ASCII fallout, escaped (an astral-plane
+    # math letter folds to its base Latin letter, a fullwidth special to the special itself),
+    # placehold the rest.
     out: list[str] = []
-    for ch in escaped:
-        cp = ord(ch)
-        if cp < 0x80:
-            out.append(ch)
-            continue
-        mapped = _UNICODE_MAP.get(ch)
-        if mapped is not None:
-            out.append(mapped)
-            continue
-        if _ACCENT_LO <= cp <= _ACCENT_HI:
-            # Common European accent: inputenc renders it under pdflatex. Keep it.
-            out.append(ch)
-            continue
-        # Fold via NFKD (drops combining marks); keep ASCII fallout (e.g. an
-        # astral-plane math letter folds to its base Latin letter), placehold the rest.
-        folded = unicodedata.normalize("NFKD", ch)
-        for f in folded:
-            if ord(f) < 0x80:
-                out.append(f)
-            elif unicodedata.combining(f):
-                continue  # drop combining marks
-            else:
-                out.append(_UNICODE_PLACEHOLDER)
-    return "".join(out)
+    placeheld = False
+    for f in unicodedata.normalize("NFKD", ch):
+        if ord(f) < 0x80:
+            out.append(_latex_escape(f))
+        elif unicodedata.combining(f):
+            continue  # drop combining marks
+        else:
+            out.append(_UNICODE_PLACEHOLDER)
+            placeheld = True
+    return "".join(out), placeheld
 
 
 # The EXACT allowlist of LaTeX cross-reference / citation commands that
 # :func:`_latex_sanitize_prose` lets through verbatim. Each is of the form
-# ``\cmd{...}`` where ``{...}`` is a SINGLE label/key argument with NO nested braces
-# (``fig:water``, ``Smith2020``, ``a,b``) -- exactly what an author writes to reference
-# a figure or cite a paper. The allowlist is closed and deliberately tiny: it is the
-# ONLY LaTeX that survives a prose slot. A non-allowlisted command (``\textbf{...}``,
-# ``\input{...}``) and every stray special (``&`` ``%`` ``_`` ``$``) stay escaped, so
-# prose can never inject arbitrary LaTeX or break compilation outside this set.
+# ``\cmd{<key>}`` with ONE key of label characters (:data:`_KEY`: ``fig:water``,
+# ``Smith2020a``, ``a, b``) -- exactly what an author writes to reference a figure or cite a
+# paper. With the ``\paragraph`` heading below, it is the ONLY LaTeX that survives a prose
+# slot. A non-allowlisted command (``\textbf{...}``, ``\input{...}``), every stray special
+# (``&`` ``%`` ``_`` ``$``) and an allowlisted command whose key holds anything else stay
+# escaped, so nothing in a prose slot reaches TeX as a command, a special or a raw
+# non-ASCII character except these spans. ``\eqref`` is not on the list: prose cannot carry
+# an equation and a figure-less draft loads no amsmath, so an ``\eqref`` in prose could
+# never resolve. (A key may still name a label or a bib entry that does not exist: pdflatex
+# warns and prints ``??``.)
 #
-# The regex matches the command name then a brace group with no inner ``{`` / ``}``
-# (``[^{}]*`` -- a key never contains braces; an empty arg ``\ref{}`` is matched too so
-# it is preserved rather than half-escaped). ``\b``-free by construction: the command
-# names are immediately followed by ``{`` so ``\reference{}`` is NOT matched (the name
-# alternation requires the literal ``{`` next).
+# The key is whitelisted, not merely brace-free: TeX reads it inside ``\csname``, so a
+# backslash in it runs a command (the ``\input`` in ``\ref{\input <file> }`` was run),
+# ``%`` ``#`` ``$`` ``&`` ``^`` ``~`` stop pdflatex, and so does a non-ASCII letter (inputenc
+# makes it a command: Cyrillic, Greek, ``Ș``, a fullwidth form). The empty key ``\ref{}``
+# is matched too, so it is preserved rather than half-escaped. A key may hold a single line
+# break but not a blank line: ``\citep{a,<blank line>b}`` stops pdflatex with "Paragraph
+# ended before \@citex was complete". A key outside the set does not match and stays
+# literal text, which :func:`literal_command_warnings` names. ``\b``-free by
+# construction: the command names are immediately followed by ``{`` so ``\reference{}`` is
+# NOT matched (the name alternation requires the literal ``{`` next), nor is a cite with an
+# optional argument (``\citep[e.g.][]{k}``).
+#
+# The second alternative is the one STRUCTURAL command prose may carry: a run-in paragraph
+# heading ``\paragraph{<text>}`` (a Methods/Results lead-in label such as ``Data.`` or
+# ``Slope.``). Unlike a reference key its argument is reader-facing TEXT, so it is captured
+# (group 1) and sanitized like any other prose -- only the command and its braces pass
+# verbatim. Brace-free text only: a heading carrying another command (``\textbf{...}``) does
+# not match and stays literal text, so the heading cannot smuggle LaTeX past the allowlist.
+# Not matched: ``\paragraph*``, ``\subparagraph`` (no backslash right before ``paragraph``),
+# ``\paragraphs``. The authored SI body is verbatim LaTeX and carries ``\paragraph`` as is,
+# so a lead-in renders the same in draft.tex and si.tex.
+#
+# The heading text, like a key, may hold single line breaks but never a paragraph break,
+# so ``\paragraph{a<blank line>b}`` -- which stops pdflatex with "Paragraph ended before
+# \@sect was complete" -- is not a heading and stays literal text. A heading that passes is
+# written on one line (its whitespace runs collapsed), so a line holding only Unicode spaces
+# or combining marks, which folds to a blank line, never reaches TeX inside the argument.
+# A heading is valid only
+# inside a section: :func:`render_paper_latex` refuses one in the abstract and in the title
+# (:data:`_HEADINGLESS_SLOTS`). Whatever does not pass prints as literal text, and render
+# names the command (:func:`literal_command_warnings`).
+#
+# Brace-free text on one paragraph: a newline passes only when the next line is not blank
+# (TeX ends a paragraph at a line holding only spaces or tabs too).
+_ONE_PARAGRAPH = r"(?:[^{}\n]|\n(?![ \t\r]*\n))*"
+# A reference or citation key: ASCII letters, digits, ``: _ . , ; + / = @ -``, spaces and
+# tabs, and single line breaks.
+_KEY = r"(?:[A-Za-z0-9:_.,;+/=@ \t-]|\n(?![ \t\r]*\n))*"
+_PARAGRAPH_HEADING_RE = re.compile(r"\\paragraph\{(" + _ONE_PARAGRAPH + r")\}")
 _PROSE_PASSTHROUGH_RE = re.compile(
-    r"\\(?:ref|eqref|autoref|cite|citep|citet)\{[^{}]*\}"
+    r"\\(?:ref|autoref|cite|citep|citet)\{" + _KEY + r"\}"
+    r"|" + _PARAGRAPH_HEADING_RE.pattern
 )
+# The slots a run-in heading cannot stand in: the abstract (a list environment in the article
+# class -- ``\begin{abstract}\paragraph{..}`` stops pdflatex with "Something's wrong--perhaps
+# a missing \item") and the title (not a prose slot: the command would print as literal text).
+_HEADINGLESS_SLOTS = ("title", "abstract")
 
 
 def _latex_sanitize_prose(s: str) -> str:
@@ -305,9 +395,14 @@ def _latex_sanitize_prose(s: str) -> str:
     escape those to literal text (``\\ref{fig:x}`` -> ``\\textbackslash{}ref\\{fig:x\\}``),
     which is why the body-order figure numbering (:func:`figures.order_figures_by_reference`,
     which scans the body for ``\\ref{fig:<id>}``) silently fell back to supply order --
-    it never saw a real ref. This function closes that gap by letting EXACTLY the six
-    allowlisted commands (:data:`_PROSE_PASSTHROUGH_RE`) through unchanged while still
-    fully sanitizing everything else.
+    it never saw a real ref. This function closes that gap by letting EXACTLY the five
+    allowlisted commands (:data:`_PROSE_PASSTHROUGH_RE`: ``\\ref``, ``\\autoref``,
+    ``\\cite``, ``\\citep``, ``\\citet``, each with one key of label characters,
+    :data:`_KEY`) through unchanged while still fully sanitizing everything else. One
+    structural command
+    is allowed besides them: a run-in heading ``\\paragraph{<text>}`` (a Methods/Results
+    lead-in label), whose command and braces pass while its brace-free ``<text>`` is
+    sanitized like the rest of the prose.
 
     Implementation: a SPLIT-and-stitch (collision-proof BY CONSTRUCTION -- no placeholder
     that could collide with content, and nothing of ours is routed back through the
@@ -328,11 +423,21 @@ def _latex_sanitize_prose(s: str) -> str:
     Safety boundary: ONLY the allowlist passes. A non-allowlisted command stays escaped
     (``\\textbf{x}`` -> literal ``\\textbackslash{}textbf\\{x\\}``) and a stray ``&`` / ``%``
     outside a preserved span is still escaped -- so prose cannot smuggle arbitrary LaTeX
-    or unbalanced specials past the renderer.
+    or unbalanced specials past the renderer. The ``\\paragraph`` heading text is escaped
+    too (``\\paragraph{95% kept.}`` -> ``\\paragraph{95\\% kept.}``), and a heading holding
+    braces (another command) or a blank line is not a heading at all, and neither is a key
+    spanning a blank line or holding anything but label characters (``\\cite{a#b}``,
+    ``\\ref{\\input x }``, ``\\cite{Ж}``): the whole construct stays literal (render
+    names the command,
+    :func:`literal_command_warnings`). This function does not know its slot: the abstract and
+    the title, which take no heading, are refused by :func:`render_paper_latex` before they
+    get here. The text is cleaned first (:func:`_clean_text`), before the allowlist is
+    matched, so no key and no heading text carries a control character.
 
     PURE + deterministic. Like ``_latex_sanitize`` it is NOT idempotent -- a second pass
     would re-escape the (now bare) preserved commands. Call exactly once, on prose only.
     """
+    s = _clean_text(s)
     out: list[str] = []
     pos = 0
     # Walk every allowlisted span in order; sanitize the gap BEFORE it, then append the
@@ -341,10 +446,226 @@ def _latex_sanitize_prose(s: str) -> str:
     # _latex_sanitize, i.e. identical to the non-prose path.
     for match in _PROSE_PASSTHROUGH_RE.finditer(s):
         out.append(_latex_sanitize(s[pos : match.start()]))  # gap -> fully sanitized
-        out.append(match.group(0))                            # \cmd{key} -> verbatim
+        heading = match.group(1)
+        if heading is None:
+            out.append(match.group(0))                        # \cmd{key} -> verbatim
+        else:                                                 # \paragraph{text}: text is prose
+            # On one line (_one_line): a line that holds only Unicode spaces or combining
+            # marks passes the blank-line rule as written but folds to a blank line, which
+            # stops pdflatex inside the macro argument.
+            out.append(r"\paragraph{" + _latex_sanitize(_one_line(heading)) + "}")
         pos = match.end()
     out.append(_latex_sanitize(s[pos:]))  # trailing gap (or the whole string if no spans)
     return "".join(out)
+
+
+def _shown(text: str, limit: int = 40) -> str:
+    """``text`` cut to ``limit`` characters, whitespace runs collapsed: a span quoted in a
+    message on one line."""
+    cut = text[:limit]
+    return " ".join(cut.split()) + ("..." if len(text) > limit else "")
+
+
+def _refuse_heading(text: str, slot: str) -> None:
+    """Raise ``ValueError`` when ``text`` holds a run-in heading and ``slot`` takes none.
+
+    ``slot`` is one of :data:`_HEADINGLESS_SLOTS`. ``text`` is what the sanitizer would see
+    (for the abstract, after ``\\evval``/``\\status`` substitution, so a heading whose text
+    becomes brace-free only then is caught too), cleaned as the sanitizer cleans it
+    (:func:`_clean_text`). A ``\\paragraph`` in another form is not a heading -- it prints as
+    literal text and :func:`literal_command_warnings` names it.
+    """
+    match = _PARAGRAPH_HEADING_RE.search(_clean_text(text))
+    if match is None:
+        return
+    why = (
+        "the abstract is a list environment, so pdflatex stops on a heading there"
+        if slot == "abstract"
+        else "the title is not prose, so the command would print as literal text"
+    )
+    raise ValueError(
+        f"prose slot '{slot}' holds the run-in heading {_shown(match.group(0))}: a heading "
+        f"cannot stand in the {slot} ({why}). Write the label as plain text, or move the "
+        "lead-in to Methods or Results."
+    )
+
+
+# What a prose slot passes (:data:`_PROSE_PASSTHROUGH_RE`), as the warnings state it once per
+# render (:func:`prose_warnings`), after the short per-command lines.
+_PASSING_COMMANDS = (
+    "a prose slot passes only \\ref, \\autoref, \\cite, \\citep and \\citet with one "
+    "key of ASCII letters, digits, spaces and : _ . , ; + / = @ - (no optional argument, no "
+    "blank line), and \\paragraph{<brace-free text>} in a section slot; any other command "
+    "prints as literal text -- write a symbol as its Unicode character or in plain ASCII"
+)
+# The same for the two plain-text slots.
+_PLAIN_RULE = "the title and the author are plain text: no command passes there"
+_PLAIN_SLOTS = ("title", "author")
+# And for a character replaced by the placeholder (:func:`placeholder_warnings`).
+_PLACEHOLDER_RULE = (
+    "a character pdflatex cannot typeset with the preamble render emits prints as "
+    f"'{_UNICODE_PLACEHOLDER}' (CJK, emoji, a few Latin letters such as the H and T with "
+    "stroke): write it in plain ASCII or leave it out"
+)
+# A backslash the sanitizer printed as literal text (``\textbackslash{}``), then the rest of
+# the command as it printed it: a name of letters (a control word), an escaped special
+# (``\%`` ... ``\textbackslash{}``) or a punctuation mark (``\,`` ``\(`` ``\"``). A
+# backslash before a space, a digit or the end of the text is not a command.
+_LITERAL_COMMAND_RE = re.compile(
+    r"\\textbackslash\{\}(?:"
+    r"(?P<word>[A-Za-z]+)"
+    r"|\\(?P<special>[&%$#_{}])"
+    r"|\\text(?P<named>backslash|asciitilde|asciicircum)\{\}"
+    r"|(?P<symbol>[!\"'()*+,\-./:;<=>?@\[\]`|])"
+    r")"
+)
+_NAMED_SPECIALS = {"backslash": "\\", "asciitilde": "~", "asciicircum": "^"}
+
+
+def _literal_commands(tex: str) -> list[str]:
+    """The commands sanitized ``tex`` prints as literal text (:data:`_LITERAL_COMMAND_RE`),
+    each once, in order of first appearance, spelled as written (``\\textbf``, ``\\%``).
+    PURE."""
+    found: list[str] = []
+    for match in _LITERAL_COMMAND_RE.finditer(tex):
+        if match.group("named"):
+            name = _NAMED_SPECIALS[match.group("named")]
+        else:
+            name = match.group("word") or match.group("special") or match.group("symbol")
+        command = "\\" + name
+        if command not in found:
+            found.append(command)
+    return found
+
+
+def _prose_as_sanitized(text: str) -> str:
+    """What a prose slot's ``text`` sanitizes to, as render sanitizes it but without the
+    record: each ``\\evval``/``\\status`` macro stands for a brace-free value (as substitution
+    leaves one) and each ``\\novelty`` span for its sentence text (the scope added after it is
+    record-derived plain text). The same steps, in the same order, as
+    :func:`render_paper_latex` and ``si.render_si_latex``. PURE."""
+    return "".join(_latex_sanitize_prose(piece) for piece in _prose_pieces(text))
+
+
+def _prose_pieces(text: str) -> list[str]:
+    """A prose slot's ``text`` as render hands it to the prose sanitizer, without the record:
+    cleaned (:func:`_clean_text`), each ``\\evval``/``\\status`` macro replaced by a brace-free
+    value (``0``, as substitution leaves one), each ``\\novelty`` span by its sentence text.
+    The pieces the prose sanitizer sees, in order. PURE."""
+    body = _STATUS_RE.sub("0", _EVVAL_RE.sub("0", _clean_text(text).strip()))
+    pieces: list[str] = []
+    pos = 0
+    for match in NOVELTY_RENDER_RE.finditer(body):
+        pieces.append(body[pos : match.start()])
+        pieces.append(match.group(3))
+        pos = match.end()
+    pieces.append(body[pos:])
+    return pieces
+
+
+def _warning_slots(
+    prose: Optional[PaperProse], si_prose: Optional[SIProse]
+) -> list[tuple[str, str, str, bool]]:
+    """``(label, slot, text, plain)`` for each written slot the warnings read, in order: the
+    paper's title, author (plain text), abstract, introduction, methods, results, discussion,
+    conclusion, then the record's overview and notes."""
+    slots: list[tuple[str, str, Optional[str], bool]] = []
+    if prose is not None:
+        slots += [("prose slot", name, getattr(prose, name), True) for name in _PLAIN_SLOTS]
+        slots += [
+            ("prose slot", name, getattr(prose, name), False)
+            for name in (
+                "abstract", "introduction", "methods", "results", "discussion", "conclusion",
+            )
+        ]
+    if si_prose is not None:
+        slots += [
+            ("SI prose slot", name, getattr(si_prose, name), False)
+            for name in ("overview", "notes")
+        ]
+    return [(label, name, text, plain) for label, name, text, plain in slots if text]
+
+
+def literal_command_warnings(
+    prose: Optional[PaperProse], si_prose: Optional[SIProse] = None
+) -> list[str]:
+    """One short line per prose slot and command the sanitizer prints as literal text
+    (``prose slot 'methods': \\textbf prints as literal text``); what passes is stated once
+    per render by :func:`prose_warnings`.
+
+    Derived from the sanitizer itself, not from a list of known mistakes: each slot is
+    sanitized as render sanitizes it -- the title and the author whole, as one line
+    (:func:`_one_line`, :func:`_latex_sanitize`), every other slot through the prose pipeline
+    (:func:`_prose_as_sanitized`) -- and every backslash that came out as
+    ``\\textbackslash{}`` before a command names that command (:func:`_literal_commands`).
+    That covers a command off the list (``\\textbf``, ``\\subparagraph``, ``\\eqref``), a
+    listed one in a form that does not pass (``\\citep[e.g.][]{k}``, a key or a heading text
+    spanning a blank line, ``\\paragraph*``), a control symbol (``\\%``) and a fullwidth
+    backslash, which prints as a backslash. Fact macros and novelty markup are substituted
+    before sanitizing and never warn. Slots in the order of :func:`_warning_slots`. PURE.
+    """
+    lines: list[str] = []
+    for label, name, text, plain in _warning_slots(prose, si_prose):
+        tex = _latex_sanitize(_one_line(text)) if plain else _prose_as_sanitized(text)
+        lines.extend(
+            f"{label} '{name}': {command} prints as literal text"
+            for command in _literal_commands(tex)
+        )
+    return lines
+
+
+def _codepoint_name(ch: str) -> str:
+    return "U+%04X (%s)" % (ord(ch), unicodedata.name(ch, "unnamed"))
+
+
+# The replaced characters a placeholder warning names before it counts the rest.
+_PLACEHOLDER_SHOWN = 8
+
+
+def placeholder_warnings(
+    prose: Optional[PaperProse], si_prose: Optional[SIProse] = None
+) -> list[str]:
+    """One line per prose slot (the title and the author included) naming, by codepoint, each
+    character the sanitizer replaces -- wholly or in part -- with the placeholder ``?``
+    (:func:`_fold_non_ascii`): CJK, emoji, the Latin-A letters without a glyph
+    (:data:`_UNDEFINED_LATIN_A`). The text read is the text the sanitizer reads (the title and
+    the author on one line, each other slot as :func:`_prose_pieces` gives it). The first
+    :data:`_PLACEHOLDER_SHOWN` distinct characters are named, the rest counted. PURE."""
+    lines: list[str] = []
+    for label, name, text, plain in _warning_slots(prose, si_prose):
+        read = _one_line(text) if plain else "".join(_prose_pieces(text))
+        chars = list(dict.fromkeys(
+            ch for ch in read if ord(ch) >= 0x80 and _fold_non_ascii(ch)[1]
+        ))
+        if not chars:
+            continue
+        shown = ", ".join(_codepoint_name(c) for c in chars[:_PLACEHOLDER_SHOWN])
+        more = len(chars) - _PLACEHOLDER_SHOWN
+        rest = f", and {more} more" if more > 0 else ""
+        lines.append(f"{label} '{name}': {shown}{rest} print(s) as '{_UNICODE_PLACEHOLDER}'")
+    return lines
+
+
+# @MX:NOTE: [AUTO] The writer's only signal that a command printed as literal text or a character
+#   was replaced: render and run print each line as a warning (compiler.prose_warnings) and
+#   still exit 0.
+def prose_warnings(
+    prose: Optional[PaperProse], si_prose: Optional[SIProse] = None
+) -> list[str]:
+    """Every warning about what the sanitizer did to the written prose, ready to print: the
+    short per-slot command lines (:func:`literal_command_warnings`), then each rule they need
+    once (what a prose slot passes, :data:`_PASSING_COMMANDS`; that the title and the author
+    pass nothing, :data:`_PLAIN_RULE`), then the per-slot placeholder lines
+    (:func:`placeholder_warnings`) and their rule once (:data:`_PLACEHOLDER_RULE`). PURE."""
+    commands = literal_command_warnings(prose, si_prose)
+    named = {line.split("'")[1] for line in commands}
+    rules: list[str] = []
+    if named - set(_PLAIN_SLOTS):
+        rules.append(_PASSING_COMMANDS)
+    if named & set(_PLAIN_SLOTS):
+        rules.append(_PLAIN_RULE)
+    replaced = placeholder_warnings(prose, si_prose)
+    return commands + rules + replaced + ([_PLACEHOLDER_RULE] if replaced else [])
 
 
 def _novelty_prose(
@@ -659,6 +980,22 @@ def render_paper(
     return "\n".join(lines)
 
 
+# A DOI the no-bibliography References list cites as ``\url{https://doi.org/<doi>}``: the
+# directory indicator ``10.``, a registrant code of 4 to 9 digits (with optional dotted
+# subdivisions), ``/`` and a suffix of printable ASCII other than ``{ } \ % # ^``. The DOI goes
+# into ``\url`` as written, so a brace closed it (``10.1/x}\input{<file>}%`` made pdflatex
+# read the file), and ``%`` ``#`` ``^`` and a backslash are TeX's comment, parameter,
+# character-code and escape characters; a space or non-ASCII character is not part of a DOI.
+_DOI_RE = re.compile(r"10\.[0-9]{4,9}(?:\.[0-9]+)*/(?:(?![{}\\%#^])[!-~])+")
+
+
+def is_doi(text: str) -> bool:
+    """True iff ``text`` (stripped) has the DOI form the References list cites
+    (:data:`_DOI_RE`). The compiler gathers the cited DOIs with it and names any other in a
+    render warning; :func:`render_paper_latex` applies it again. PURE."""
+    return _DOI_RE.fullmatch(text.strip()) is not None
+
+
 def _latex_evidence_validity_label(
     hyp: Hypothesis,
     claim: Optional[Claim],
@@ -722,10 +1059,13 @@ def render_paper_latex(
             IMRaD section, after ``\\evval``/``\\status`` substitution + the prose
             sanitizer (``\\ref``/``\\cite`` preserved). ``title`` is the paper title; absent
             -> ``spec.id`` (NEVER the goal/hypothesis wall). ``None`` -> a near-empty paper
-            (an unwritten narrative -- the record still lives in the SI).
+            (an unwritten narrative -- the record still lives in the SI). A run-in heading
+            ``\\paragraph{<text>}`` in the abstract or the title raises ``ValueError``
+            naming the slot (a heading stands only inside a section).
         cited_dois: used ONLY as the no-bibtex fallback -- when ``bib_path`` is ``None`` and
-            these are present, a ``\\url`` DOI list is emitted as the References. Ignored
-            when ``bib_path`` is given (BibTeX is the single source then).
+            these are present, a ``\\url`` DOI list is emitted as the References: each entry
+            of the DOI form (:func:`is_doi`); any other is left out. Ignored when
+            ``bib_path`` is given (BibTeX is the single source then).
         bib_path: path to an EXISTING ``.bib`` (the compiler checks existence; the renderer
             does no fs access). Present -> ``\\usepackage{natbib}`` is wired with
             ``\\bibliographystyle{plainnat}`` + ``\\bibliography{<stem>}`` (author-year, so
@@ -760,22 +1100,31 @@ def render_paper_latex(
         ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION
     ]
 
-    def _slot(text: str) -> str:
+    def _slot(text: str, slot: str) -> str:
         # Agent prose -> substitute record-fidelity facts (\evval/\status, fail-loud), THEN
         # render \novelty{} markup (plain sentence + record scope / HARD fail) + the prose
         # sanitizer (specials escaped; \ref/\cite preserved). Substitute factrefs before, so
         # a substituted string value is escaped as ordinary text; _novelty_prose owns the
-        # prose sanitize and collects the novelty bindings.
+        # prose sanitize and collects the novelty bindings. A slot that takes no run-in
+        # heading (the abstract) refuses one, checked on the substituted text the sanitizer
+        # sees. The text is cleaned first (_clean_text: line ends, control characters), so the
+        # fact-macro, novelty and heading matches all see what the sanitizer sees.
+        body = substitute_factrefs(_clean_text(text).strip(), evidence, claims)
+        if slot in _HEADINGLESS_SLOTS:
+            _refuse_heading(body, slot)
         return _novelty_prose(
-            substitute_factrefs(text.strip(), evidence, claims),
+            body,
             spec,
             novelty_decisions,
             found=novelty_sentences,
             document="draft.tex",
         )
 
-    # Title: the agent's short title, else spec.id -- NEVER the goal/hypothesis wall.
-    title = (prose.title.strip() if prose is not None and prose.title else "") or spec.id
+    # Title: the agent's short title, else spec.id -- NEVER the goal/hypothesis wall. It is
+    # escaped whole (not prose), so a run-in heading there is refused rather than printed. One
+    # line: a blank line inside \title{} stops pdflatex.
+    title = _one_line(prose.title if prose is not None and prose.title else "") or spec.id
+    _refuse_heading(title, "title")
 
     lines: list[str] = []
     # Preamble. natbib (author-year \citep/\citet); figure packages PER KIND.
@@ -809,9 +1158,13 @@ def render_paper_latex(
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     # Author is agent-supplied; absent -> empty \author{} (the paper is tool-agnostic and
     # never names the rendering toolchain -- design feedback §10, tool-vocabulary leakage).
-    author = (prose.author.strip() if prose is not None and prose.author else "")
+    # One line: a blank line inside \author{} stops pdflatex ("Paragraph ended before \author
+    # was complete").
+    author = _one_line(prose.author) if prose is not None and prose.author else ""
     lines.append(f"\\author{{{_latex_sanitize(author)}}}")
-    lines.append(r"\date{\today}")
+    # No date: \today printed the day of each compile, so the same source gave a different
+    # first page every day. The submission date is the venue's, not the render's.
+    lines.append(r"\date{}")
     lines.append("")
     lines.append(r"\begin{document}")
     lines.append(r"\maketitle")
@@ -825,7 +1178,7 @@ def render_paper_latex(
     # Abstract.
     if prose is not None and prose.abstract:
         lines.append(r"\begin{abstract}")
-        lines.append(_slot(prose.abstract))
+        lines.append(_slot(prose.abstract, "abstract"))
         lines.append(r"\end{abstract}")
         lines.append("")
 
@@ -833,11 +1186,11 @@ def render_paper_latex(
     # slot is present. The engine adds no stage-dump section of its own.
     if prose is not None and prose.introduction:
         lines.append(r"\section{Introduction}")
-        lines.append(_slot(prose.introduction))
+        lines.append(_slot(prose.introduction, "introduction"))
         lines.append("")
     if prose is not None and prose.methods:
         lines.append(r"\section{Methods}")
-        lines.append(_slot(prose.methods))
+        lines.append(_slot(prose.methods, "methods"))
         lines.append("")
 
     # Results: the agent's findings prose + the MAIN figures as floats (the only place
@@ -848,11 +1201,14 @@ def render_paper_latex(
     if (prose is not None and prose.results) or figures:
         lines.append(r"\section{Results}")
         if prose is not None and prose.results:
-            lines.append(_slot(prose.results))
+            lines.append(_slot(prose.results, "results"))
             lines.append("")
         if figures:
+            # Cleaned as the slots are (_clean_text), so a key holding a control character
+            # numbers the figures as the rendered draft does -- the compiler re-derives the
+            # numbers from that draft to name the copied image files.
             ref_body = "\n".join(
-                s.strip()
+                _clean_text(s).strip()
                 for s in (
                     (prose.abstract if prose else None),
                     (prose.introduction if prose else None),
@@ -868,7 +1224,7 @@ def render_paper_latex(
 
     if prose is not None and prose.discussion:
         lines.append(r"\section{Discussion}")
-        lines.append(_slot(prose.discussion))
+        lines.append(_slot(prose.discussion, "discussion"))
         lines.append("")
 
     # Conclusion. The DEFAULT publishing contract requires this section
@@ -879,7 +1235,7 @@ def render_paper_latex(
     # does not declare Conclusion is byte-identical to before.
     if prose is not None and prose.conclusion:
         lines.append(r"\section{Conclusion}")
-        lines.append(_slot(prose.conclusion))
+        lines.append(_slot(prose.conclusion, "conclusion"))
         lines.append("")
 
     # Pending agent judgments -- only when present (an unresolved proof/qualitative
@@ -892,7 +1248,7 @@ def render_paper_latex(
         )
         lines.append(r"\begin{itemize}")
         for p in pending:
-            hyp_id = _latex_sanitize(str(p.get("hypothesis_id")))
+            hyp_id = _latex_sanitize(_one_line(str(p.get("hypothesis_id"))))  # in \texttt{}
             kind = _latex_sanitize(str(p.get("kind")))
             expr = _latex_sanitize(str(p.get("expression")))
             lines.append(f"  \\item \\texttt{{{hyp_id}}} ({kind}): {expr}")
@@ -910,7 +1266,9 @@ def render_paper_latex(
         lines.append(r"\bibliographystyle{plainnat}")
         lines.append(f"\\bibliography{{{stem}}}")
     else:
-        dois = [d for d in (cited_dois or []) if d and d.strip()]
+        # Only a DOI of the DOI form (is_doi): it goes into \url{} as written, so anything
+        # else could close the \url and run what follows. The compiler names each one left out.
+        dois = [d.strip() for d in (cited_dois or []) if d and is_doi(d)]
         if dois:
             lines.append(r"\section{References}")
             lines.append(r"\begin{itemize}")

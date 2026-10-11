@@ -14,6 +14,12 @@ render writes, under ``paper/deposit/``:
   - ``data/<name>`` and ``inputs/<name>`` -- the declared data files that ship: study files
     (``recorded`` / ``derived``) and redistributed third-party files (``external``), copied
     from the sources the persisted declaration ``runs/<id>/deposit.json`` names (D3, D7);
+  - ``record.tex`` -- a byte copy of the run's record ``runs/<id>/record.tex``, written after
+    the record (with the bibliography below, the files render owns at the root of the
+    folder, D13);
+  - ``references.bib`` -- only when the record names ``\\bibliography{references}`` (its SI
+    prose cites): a byte copy of the paper's ``paper/references.bib``, so the folder builds
+    alone with bibtex (§7 Q12);
   - ``manifest.csv`` -- one row per file with its SHA-256, size, kind, the other files that
     state the same SHA-256, its citation, its terms and a description; a declared file that
     is cited, not shipped, is a row with no file; record identifiers never appear in it
@@ -21,6 +27,8 @@ render writes, under ``paper/deposit/``:
 
 A run whose persisted declaration withholds its protocol ships no protocol file; the
 manifest still lists each one, with the SHA-256 of the record's file and the reason (D1).
+The record ships either way: it prints the protocol files' times and checksums, the
+hypotheses with their decision rules, and never the raw proposal.
 
 The D5 checks are pure functions here: the bundle (:func:`deposit_bundle_problems`), the
 declared data against the Evidence (:func:`deposit_data_problems`) and the paths the paper
@@ -28,7 +36,8 @@ names (:func:`deposit_name_problems`, :func:`package_name_problems`).
 
 ``record.tex`` carries a Protocol history section built from :func:`protocol_history` (each
 file, its time, its SHA-256, and the protocol digest, D11), so the manifest's
-``sha256_also_in`` names ``record.tex`` for every protocol row.
+``sha256_also_in`` names ``record.tex`` for every protocol row -- the copy in the bundle, which
+``verify`` checks byte for byte against ``runs/<id>/record.tex``.
 
 The package (D8) ships the protocol files under ``06_provenance/protocol/<id>/``, built from
 ``runs/<id>/`` directly, and the shipped data files under ``02_data/<id>/`` and
@@ -76,7 +85,9 @@ from sci_adk.core.deposit import (
     load_deposit_declaration,
 )
 
-#: The bundle folder (under ``paper/``) and the three folders render owns inside it (D13).
+#: The bundle folder (under ``paper/``) and the three folders render owns inside it (D13);
+#: the files it owns at the folder's root are :data:`RECORD_NAME` and
+#: :data:`RECORD_BIB_NAME`.
 DEPOSIT_DIR = "deposit"
 PROTOCOL_DIR = "protocol"
 DATA_DIR = DATA_FOLDER
@@ -93,8 +104,34 @@ MANIFEST_COLUMNS: Tuple[str, ...] = (
 #: the Evidence id that holds the checksum, beside the record that resolves it (D4).
 PACKAGE_MANIFEST_COLUMNS: Tuple[str, ...] = ("run", *MANIFEST_COLUMNS, "evidence")
 
-#: The deposited record, as named in ``sha256_also_in``.
+#: The deposited record: ``paper/deposit/record.tex``, a byte copy of ``runs/<id>/record.tex``
+#: written by every full render (the one file render owns at the root of ``paper/deposit/``,
+#: D13), as named in the ``file`` and ``sha256_also_in`` columns, with its manifest kind and
+#: fixed description (D4).
 RECORD_NAME = "record.tex"
+KIND_RECORD = "record"
+RECORD_DESCRIPTION = (
+    "the deterministic record of the study: every recorded item, its time and checksums"
+)
+
+#: The record's bibliography: a record whose SI prose cites ends with
+#: ``\bibliography{references}`` (design/deposit-files.md §7 Q12), and the bundle then ships
+#: ``paper/deposit/references.bib``, a byte copy of the paper's ``paper/references.bib``, so
+#: ``paper/deposit/`` builds alone with bibtex; its manifest kind and fixed description (D4).
+RECORD_BIB_NAME = "references.bib"
+KIND_BIBLIOGRAPHY = "bibliography"
+RECORD_BIB_DESCRIPTION = (
+    "the references the record cites: a copy of the paper's bibliography"
+)
+# The record's closing lines when it names its bibliography, as ``si.render_si_latex`` writes
+# them: the style line and the bibliography line, then ``\end{document}``, at the end of the
+# file (trailing blank lines allowed; LF or CRLF). Matched at the end and not anywhere: a
+# reproduction listing in the record may hold the same lines as code.
+_RECORD_BIB_TAIL_RE = re.compile(
+    rb"(?:\A|\n)\\bibliographystyle\{plainnat\}[ \t]*\r?\n"
+    rb"\\bibliography\{references\}[ \t]*\r?\n"
+    rb"(?:[ \t]*\r?\n)*\\end\{document\}\s*\Z"
+)
 
 #: The package's protocol folder (one ``<id>/`` per packaged run), its manifest and its
 #: record, as paths relative to the package root (D8).
@@ -687,15 +724,70 @@ def data_rows(
     return rows
 
 
+def record_row(record: bytes, license: Optional[str]) -> ManifestRow:
+    """The manifest row of the shipped record ``record.tex`` (D4): its SHA-256 and size, kind
+    ``record``, the top-level ``license`` (a file the study produced), the fixed description.
+    No other shipped file states its SHA-256, so ``sha256_also_in`` is empty."""
+    return ManifestRow(
+        file=RECORD_NAME,
+        sha256=hashlib.sha256(record).hexdigest(),
+        size=str(len(record)),
+        kind=KIND_RECORD,
+        license=license or "",
+        description=RECORD_DESCRIPTION,
+        key=RECORD_NAME,
+    )
+
+
+def record_bibliography(record: Optional[bytes]) -> Optional[str]:
+    """The bibliography file the record names, as it ships beside the record copy
+    (:data:`RECORD_BIB_NAME`), or ``None``: ``record`` (the bytes of
+    ``runs/<id>/record.tex``) ends with ``\\bibliographystyle{plainnat}``,
+    ``\\bibliography{references}`` and ``\\end{document}`` only when its SI prose cites
+    (§7 Q12; :data:`_RECORD_BIB_TAIL_RE`). Those lines elsewhere -- in a reproduction listing
+    -- do not count. PURE."""
+    if record is None or _RECORD_BIB_TAIL_RE.search(record) is None:
+        return None
+    return RECORD_BIB_NAME
+
+
+def record_bib_row(bib: bytes) -> ManifestRow:
+    """The manifest row of the shipped record bibliography ``references.bib`` (D4): its
+    SHA-256 and size, kind ``bibliography``, the fixed description. The file lists
+    published references, not a file the study produced, so it takes no top-level
+    ``license``; no other shipped file states its SHA-256."""
+    return ManifestRow(
+        file=RECORD_BIB_NAME,
+        sha256=hashlib.sha256(bib).hexdigest(),
+        size=str(len(bib)),
+        kind=KIND_BIBLIOGRAPHY,
+        description=RECORD_BIB_DESCRIPTION,
+        key=RECORD_BIB_NAME,
+    )
+
+
 # @MX:ANCHOR: [AUTO] the per-run manifest rows -- render writes them, verify's plan check and
 #   the CLI's summary read them; package_rows is their package twin.
 # @MX:REASON: [AUTO] D4: render and verify must compute the same rows from runs/<id>/ and the
 #   persisted declaration, in one total order, or every re-render reads as stale.
 def deposit_rows(
-    plan: ProtocolPlan, data: Optional[DataPlan], record_text: Optional[str]
+    plan: ProtocolPlan,
+    data: Optional[DataPlan],
+    record: Optional[bytes],
+    record_bib: Optional[bytes] = None,
 ) -> List[ManifestRow]:
     """Every row of the per-run ``paper/deposit/manifest.csv`` in D4 order: the protocol
-    history (:func:`protocol_rows`) and the declared data (:func:`data_rows`)."""
+    history (:func:`protocol_rows`), the declared data (:func:`data_rows`), the record and,
+    when it ships, the record's bibliography (``record_bib``, the bytes of
+    ``paper/references.bib``; :func:`record_bib_row`).
+
+    ``record`` is the bytes of ``runs/<id>/record.tex``, which ships as
+    ``paper/deposit/record.tex``: it gets its row (:func:`record_row`) and is searched for
+    ``sha256_also_in``, so the column names ``record.tex`` only when the bundle holds it.
+    ``None`` (no ``runs/<id>/record.tex``): no record row, and no cell names it.
+    """
+    # latin-1 maps every byte to one character, so a 64-hex token is found as it is in bytes
+    record_text = record.decode("latin-1") if record is not None else None
     rows = list(protocol_rows(plan, record_text))
     if data is not None:
         rows.extend(data_rows(
@@ -704,6 +796,10 @@ def deposit_rows(
             also_texts=_shipped_protocol_texts(plan, PROTOCOL_DIR),
             record_text=record_text,
         ))
+    if record is not None:
+        rows.append(record_row(record, plan.license))
+    if record_bib is not None:
+        rows.append(record_bib_row(record_bib))
     return sorted(rows, key=_row_order)
 
 
@@ -868,11 +964,14 @@ def unlisted_paths(deposit_dir: Path, listed: Any) -> List[str]:
 
 def _cell_problem(deposit_dir: Path, cell: str) -> Optional[str]:
     """Why a manifest ``file`` cell is not one render could have written, or ``None`` (D13):
-    ``protocol/``, ``data/`` or ``inputs/`` followed by a plain file name, resolving inside
-    ``paper/deposit/`` with no symbolic link on the way."""
+    ``record.tex``, ``references.bib``, or ``protocol/``, ``data/`` or ``inputs/`` followed by
+    a plain file name, resolving inside ``paper/deposit/`` with no symbolic link on the way."""
+    if cell in (RECORD_NAME, RECORD_BIB_NAME):
+        return "it is a symbolic link" if (deposit_dir / cell).is_symlink() else None
     parts = cell.split("/")
     if len(parts) != 2 or parts[0] not in OWNED_DIRS or not _PLAIN_NAME_RE.fullmatch(parts[1]):
-        return "not protocol/, data/ or inputs/ followed by a plain file name"
+        return ("not record.tex, references.bib, or protocol/, data/ or inputs/ followed by "
+                "a plain file name")
     folder = deposit_dir / parts[0]
     if folder.is_symlink():
         return f"its folder paper/deposit/{parts[0]} is a symbolic link"
@@ -962,7 +1061,9 @@ def prepare_deposit_write(paper_dir: Path, targets: Mapping[str, bytes]) -> Depo
     holds other bytes and no trusted previous manifest lists it; and when a
     ``manifest.csv`` exists without the marker. A lost, unreadable-past-the-marker or
     untrusted manifest never blocks: nothing it lists is removed, and a target that already
-    holds the bytes counts as written.
+    holds the bytes counts as written. A target is a file in one of the three folders, or
+    ``record.tex`` (the record's copy) or ``references.bib`` (its bibliography's copy) at the
+    root, the cells a trusted manifest may hold.
     """
     deposit_dir = Path(paper_dir) / DEPOSIT_DIR
     _refuse_link(deposit_dir, "paper/deposit")
@@ -1240,22 +1341,34 @@ def _plan_differences(actual: str, expected: str, run_name: str) -> List[str]:
 def deposit_bundle_problems(
     paper_dir: Path,
     plan: ProtocolPlan,
-    record_text: Optional[str],
+    record_bytes: Optional[bytes],
     data: Optional[DataPlan] = None,
 ) -> List[str]:
     """The D5 checks on the per-run bundle ``paper/deposit/`` (every one a failure).
 
       - inventory: the manifest starts with the marker; every listed file exists under
-        ``paper/deposit/`` with that SHA-256 and size; every file there is listed;
+        ``paper/deposit/`` with that SHA-256 and size; every file there is listed; every
+        ``sha256_also_in`` target is a listed file the bundle holds;
       - plan: the manifest is the one ``runs/<id>/`` (its protocol files, its persisted
-        declaration and the declared sources, ``data``) and ``runs/<id>/record.tex`` call
-        for -- the render is not stale;
+        declaration and the declared sources, ``data``) and ``runs/<id>/record.tex``
+        (``record_bytes``, its bytes; ``None`` when absent) call for -- the render is not stale;
       - current protocol / earlier protocols / amendments (copies): each shipped file's
-        bytes equal the record's file; each shipped data file's bytes equal its source.
+        bytes equal the record's file; each shipped data file's bytes equal its source;
+      - record: ``paper/deposit/record.tex`` is byte-identical to ``runs/<id>/record.tex``;
+      - record bibliography: when the record names ``\\bibliography{references}``,
+        ``paper/deposit/references.bib`` is byte-identical to ``paper/references.bib`` (and
+        listed, through the plan check).
 
     Every hash is recomputed from bytes; the manifest's ``sha256`` column is never trusted.
     """
     deposit_dir = Path(paper_dir) / DEPOSIT_DIR
+    bib_name = record_bibliography(record_bytes)
+    bib_source = Path(paper_dir) / bib_name if bib_name is not None else None
+    record_bib = (
+        bib_source.read_bytes()
+        if bib_source is not None and bib_source.is_file() and not bib_source.is_symlink()
+        else None
+    )
     run_name = plan.spec_id
     problems: List[str] = []
 
@@ -1311,11 +1424,52 @@ def deposit_bundle_problems(
         f"paper/deposit/{rel} is not in the manifest (left from an earlier render, or added "
         "by hand)" for rel in unlisted_paths(deposit_dir, listed)
     )
+    for row in records:
+        for target in (t for t in row["sha256_also_in"].split(";") if t):
+            if target not in listed or not (deposit_dir / target).is_file():
+                problems.append(
+                    f"paper/deposit/{MANIFEST_NAME} row "
+                    f"{_row_label(tuple(row[c] for c in MANIFEST_COLUMNS))}: "
+                    f"sha256_also_in points to {target}, which the bundle does not hold"
+                )
 
     if text is not None:
-        expected = manifest_text(deposit_rows(plan, data, record_text))
+        expected = manifest_text(deposit_rows(plan, data, record_bytes, record_bib))
         if text != expected:
             problems.extend(_plan_differences(text, expected, run_name))
+
+    copy = deposit_dir / RECORD_NAME
+    if record_bytes is None:
+        problems.append(
+            f"runs/{run_name}/{RECORD_NAME} is missing, so paper/deposit/{RECORD_NAME} cannot "
+            "be checked against it -- re-render"
+        )
+    elif copy.is_symlink() or not copy.is_file():
+        problems.append(
+            f"paper/deposit/{RECORD_NAME} is missing (the record of the study; the run keeps "
+            f"it as runs/{run_name}/{RECORD_NAME}) -- re-render"
+        )
+    elif copy.read_bytes() != record_bytes:
+        problems.append(
+            f"paper/deposit/{RECORD_NAME} differs from runs/{run_name}/{RECORD_NAME} -- "
+            "re-render"
+        )
+    if bib_name is not None:
+        bib_copy = deposit_dir / bib_name
+        if record_bib is None:
+            problems.append(
+                f"paper/{bib_name} is missing, so paper/deposit/{bib_name} (the bibliography "
+                f"{RECORD_NAME} names) cannot be checked against it -- re-render"
+            )
+        elif bib_copy.is_symlink() or not bib_copy.is_file():
+            problems.append(
+                f"paper/deposit/{bib_name} is missing (the bibliography {RECORD_NAME} names; "
+                f"the paper keeps it as paper/{bib_name}) -- re-render"
+            )
+        elif bib_copy.read_bytes() != record_bib:
+            problems.append(
+                f"paper/deposit/{bib_name} differs from paper/{bib_name} -- re-render"
+            )
 
     for f in plan.shipped:
         copy = deposit_dir / f.path
@@ -1391,7 +1545,8 @@ def deposit_data_problems(
         ``license``, ``redistribution`` or both, and third-party data that states one of
         the two (§7 Q9: it ships only with both), with its checksum and citation;
       - terms (advisory): every shipped file with a cited source, with its terms; and, with
-        no top-level ``license``, one line saying the bundle's own files state no terms.
+        no top-level ``license``, one line saying the bundle's own files state no terms (the
+        record ships with every bundle, so there is always one).
 
     ``evidence`` is the Evidence list to check against: render passes the list it rendered,
     ``verify`` the log on disk. ``folder_of`` maps ``data`` / ``inputs`` to the path prefix
@@ -1454,16 +1609,14 @@ def deposit_data_problems(
                 f"terms: {prefix[entry.folder]}/{entry.name} (cites {', '.join(entry.cite)}): "
                 f"{entry.terms(data.license)}"
             )
-    takes_top_level = bool(plan.shipped) or any(
-        not df.entry.cite and not df.entry.external and df.entry.license is None
-        for df in data.shipped
-    )
-    if plan.license is None and data.license is None and takes_top_level:
+    # The record (record.tex) ships with every bundle and takes the top-level license, so the
+    # bundle always holds a file that takes it.
+    if plan.license is None and data.license is None:
         notes.append(
             f"terms: no top-level license is declared (runs/{plan.spec_id}/deposit.json), so "
-            "the files this study produced that ship with the paper -- the protocol files and "
-            "every declared file with no cited source and no license of its own -- state no "
-            "terms"
+            "the files this study produced that ship with the paper -- the record, the "
+            "protocol files and every declared file with no cited source and no license of "
+            "its own -- state no terms"
         )
     return fails, notes
 
@@ -1507,23 +1660,29 @@ def _names_a_file(path: str) -> bool:
 
 
 def deposit_name_problems(
-    docs: Mapping[str, str], plan: ProtocolPlan, data: Optional[DataPlan] = None
+    docs: Mapping[str, str],
+    plan: ProtocolPlan,
+    data: Optional[DataPlan] = None,
+    bibliography: Optional[str] = None,
 ) -> Tuple[List[str], List[str]]:
     """The names and pointed-to checks of the per-run paper (D5), PURE.
 
     ``docs`` maps a document name (``draft.tex``, ``si.tex``) to its text. Every path that,
     after normalisation (URLs masked, ``\\_`` as ``_``, trailing ``.``, ``,``, ``;``, ``:``,
     ``)`` dropped), starts with ``deposit/`` and ends in a file name with an extension must be
-    ``deposit/`` + a manifest ``file`` (or ``deposit/manifest.csv``); every bare
-    ``protocol-v<N>.json`` / ``amendment-v<N>.json`` must be exactly the name of a shipped
-    protocol file. A withheld protocol file or a declared file that is not shipped fails with
-    a message saying so. Matching is exact: file names are case-sensitive.
+    ``deposit/`` + a manifest ``file`` (or ``deposit/manifest.csv``; ``deposit/record.tex``,
+    the record, ships with every bundle; ``deposit/references.bib`` when ``bibliography``
+    names it, :func:`record_bibliography`); every bare ``protocol-v<N>.json`` /
+    ``amendment-v<N>.json`` must be exactly the name of a shipped protocol file. A withheld
+    protocol file or a declared file that is not shipped fails with a message saying so.
+    Matching is exact: file names are case-sensitive.
 
     Returns ``(fails, advisories)``; the advisory (pointed to) when neither document names a
     deposited file.
     """
     data = data if data is not None else DataPlan()
-    held = {f.path for f in plan.shipped} | {df.path for df in data.shipped} | {MANIFEST_NAME}
+    held = ({f.path for f in plan.shipped} | {df.path for df in data.shipped}
+            | {MANIFEST_NAME, RECORD_NAME} | ({bibliography} if bibliography else set()))
     withheld = {f.path for f in plan.files} if plan.withheld else set()
     unshipped = {df.would_be_path: df.entry for df in data.files
                  if not df.entry.ships and df.would_be_path}
@@ -1924,7 +2083,9 @@ __all__ = [
     "DEPOSIT_DIR",
     "INPUTS_DIR",
     "KIND_AMENDMENT",
+    "KIND_BIBLIOGRAPHY",
     "KIND_PROTOCOL",
+    "KIND_RECORD",
     "MANIFEST_COLUMNS",
     "MANIFEST_MARKER",
     "MANIFEST_NAME",
@@ -1936,6 +2097,9 @@ __all__ = [
     "PACKAGE_PROTOCOL_DIR",
     "PACKAGE_RECORD",
     "PROTOCOL_DIR",
+    "RECORD_BIB_DESCRIPTION",
+    "RECORD_BIB_NAME",
+    "RECORD_DESCRIPTION",
     "RECORD_NAME",
     "VERSION_MARGIN",
     "DataFile",
@@ -1974,6 +2138,9 @@ __all__ = [
     "protocol_record_problems",
     "protocol_rows",
     "receipt_record_name",
+    "record_bib_row",
+    "record_bibliography",
+    "record_row",
     "time_label",
     "times_advisory",
     "unlisted_paths",

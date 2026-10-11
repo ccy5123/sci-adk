@@ -375,7 +375,7 @@ def test_end_to_end_verify_exits_zero_on_complete_deposit(tmp_path):
     """The DoD exit: a full compile (① authored, ② authored, ③ record deposit) + a complete
     deposit (availability statement present) -> sci-adk verify exits 0 (report.passed True
     AND deposit_complete True)."""
-    from sci_adk.render.prose import AuthoredSI, SISection
+    from sci_adk.render.prose import AuthoredSI, SIProse, SISection
 
     spec = _numeric_spec("m4-verify0", value=0.9)
     workspace = tmp_path
@@ -395,13 +395,16 @@ def test_end_to_end_verify_exits_zero_on_complete_deposit(tmp_path):
             )
         ],
     )
+    # The deposit availability statement (M2) is rendered into record.tex (the SI-prose notes
+    # slot), not appended afterwards: the render ships a byte copy of record.tex as
+    # paper/deposit/record.tex, and verify fails a record edited after the render
+    # (design/deposit-files.md D5).
     compiler = ResearchCompiler(workspace_dir=workspace)
-    compiler.stage_render(spec, si=si)
+    compiler.stage_render(spec, si=si, si_prose=SIProse(
+        notes="Data and code availability: the full record is deposited with the paper."))
 
-    # The publishing contract (P1) + the deposit availability statement (M2) complete the
-    # deposit so verify's combined gate passes.
+    # The publishing contract (P1) completes the deposit so verify's combined gate passes.
     _freeze_minimal_pubreqs(run_dir)
-    _append_availability(run_dir)
 
     report = verify_run(run_dir)
     # ① + ② both present and consistent; ③ + availability statement present.

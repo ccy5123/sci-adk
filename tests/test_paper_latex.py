@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
-
 from sci_adk.core.claim import (
     Claim,
     ClaimStatus,
@@ -431,11 +429,11 @@ class TestLatexCitations:
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
         bib = tmp_path / "references.bib"
-        bib.write_text("@article{x2020, doi={10.1/x}}\n", encoding="utf-8")
+        bib.write_text("@article{x2020, doi={10.1000/x}}\n", encoding="utf-8")
 
         tex = render_paper_latex(
             spec, [claim], [ev],
-            cited_dois=["10.1/x"], bib_path=str(bib),
+            cited_dois=["10.1000/x"], bib_path=str(bib),
         )
 
         # ONE reference source: natbib + plainnat + \bibliography. No \nocite{*}, and no
@@ -444,7 +442,7 @@ class TestLatexCitations:
         assert r"\bibliographystyle{plainnat}" in tex
         assert r"\bibliography{references}" in tex  # stem of references.bib
         assert r"\nocite{*}" not in tex
-        assert r"\url{https://doi.org/10.1/x}" not in tex
+        assert r"\url{https://doi.org/10.1000/x}" not in tex
 
     def test_bib_path_none_emits_no_bibliography(self):
         hyp = _basic_hyp()
@@ -452,7 +450,7 @@ class TestLatexCitations:
         claim = _claim(hyp, ClaimStatus.SUPPORTED)
         ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
 
-        tex = render_paper_latex(spec, [claim], [ev], cited_dois=["10.1/x"])
+        tex = render_paper_latex(spec, [claim], [ev], cited_dois=["10.1000/x"])
         assert r"\bibliography{" not in tex
         assert r"\nocite{*}" not in tex
 
@@ -476,8 +474,8 @@ def test_latex_render_is_deterministic():
     spec = _spec(hyp)
     claim = _claim(hyp, ClaimStatus.SUPPORTED)
     ev = _evidence("ev-1", "hyp-t1", "generated", BearingDirection.SUPPORTS)
-    a = render_paper_latex(spec, [claim], [ev], cited_dois=["10.1/x"])
-    b = render_paper_latex(spec, [claim], [ev], cited_dois=["10.1/x"])
+    a = render_paper_latex(spec, [claim], [ev], cited_dois=["10.1000/x"])
+    b = render_paper_latex(spec, [claim], [ev], cited_dois=["10.1000/x"])
     assert a == b
 
 
@@ -504,7 +502,7 @@ def test_latex_render_does_no_filesystem_access(monkeypatch):
     # only takes its .stem -- no .exists(), no open().
     tex = render_paper_latex(
         spec, [claim], [ev],
-        cited_dois=["10.1/x"], bib_path="/any/path/references.bib",
+        cited_dois=["10.1000/x"], bib_path="/any/path/references.bib",
     )
     assert r"\bibliography{references}" in tex
     assert r"\bibliographystyle{plainnat}" in tex
@@ -584,7 +582,7 @@ class TestLatexFigures:
 
         # No bib -> cited_dois render a \section{References}; figures sit in Results before it.
         tex = render_paper_latex(
-            spec, [claim], [ev], figures=[_fig_spec("growth")], cited_dois=["10.1/x"]
+            spec, [claim], [ev], figures=[_fig_spec("growth")], cited_dois=["10.1000/x"]
         )
         assert tex.index(r"\begin{figure}") < tex.index(r"\section{References}")
 

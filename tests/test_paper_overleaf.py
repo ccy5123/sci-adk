@@ -64,9 +64,11 @@ _THRESHOLD = DecisionRule(
 # Extended-A (U+0100..U+017E). ``utf8`` inputenc on TeX Live / Overleaf defines this
 # range, so author names like Gödel / Erdős (and ł U+0142, ø) pass through unchanged.
 # Latin Extended-B (U+0180+) is NOT defined by inputenc -- it must NOT be in this
-# window, or the proxy would wrongly bless a char that aborts pdflatex.
+# window, or the proxy would wrongly bless a char that aborts pdflatex. Nor are the eight
+# letters of the window LaTeX has no glyph for (Maltese H with stroke ...).
 _ACCENT_LO = 0x00C0
 _ACCENT_HI = 0x017E
+_NO_GLYPH = frozenset("\u0126\u0127\u0138\u013f\u0140\u0149\u0166\u0167")
 
 
 def assert_pdflatex_safe(tex: str) -> None:
@@ -78,7 +80,8 @@ def assert_pdflatex_safe(tex: str) -> None:
     bad = [
         ch
         for ch in tex
-        if ord(ch) >= 0x80 and not (_ACCENT_LO <= ord(ch) <= _ACCENT_HI)
+        if ord(ch) >= 0x80
+        and (not (_ACCENT_LO <= ord(ch) <= _ACCENT_HI) or ch in _NO_GLYPH)
     ]
     assert not bad, (
         "pdflatex-unsafe codepoints leaked into the .tex: "

@@ -186,29 +186,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--prose", default=None, metavar="PATH",
-        help="optional JSON file mapping {abstract, introduction, discussion} -> text; "
-             "agent-authored narrative injected verbatim into the LaTeX draft as "
-             "LaTeX body input (author it LaTeX-safe, e.g. $\\geq$ / H$_2$O; a unicode "
-             "safety net is a fallback, not a license to rely on unicode). Never "
-             "LLM-generated. Omit -> structural skeleton only",
+        help="optional JSON file mapping {title, author, abstract, introduction, methods, "
+             "results, discussion, conclusion} -> text; agent-authored narrative, escaped "
+             "into the LaTeX draft as text: only \\ref, \\autoref, \\cite, \\citep, \\citet "
+             "and \\paragraph{...} pass as LaTeX, any other command prints as literal text "
+             "and render warns. Write a symbol as its Unicode character (render maps it) or "
+             "in plain ASCII, not as LaTeX. Never LLM-generated. Omit -> structural "
+             "skeleton only",
     )
     run.add_argument(
         "--si-prose", default=None, metavar="PATH",
         help="optional JSON file mapping {overview, notes} -> text; agent-authored "
              "narrative WRAPPING the Supporting Information record dump (overview before "
-             "the Evidence record, notes after Record integrity) as LaTeX body input "
-             "(author it LaTeX-safe, e.g. $\\geq$ / H$_2$O; a unicode safety net is a "
-             "fallback, not a license to rely on unicode). The no-authoring record dump "
-             "is the spine. Never LLM-generated. Omit -> record dump only",
+             "the Evidence record, notes after Record integrity), escaped as text like "
+             "--prose (write a symbol as its Unicode character or in plain ASCII, not as "
+             "LaTeX). The no-authoring record dump is the spine. Never LLM-generated. "
+             "Omit -> record dump only",
     )
     run.add_argument(
         "--si", default=None, metavar="PATH",
         help="optional JSON file: an AuthoredSI object {title?, sections:[{title, body}], "
              "figures?} -- the AUTHORED Supporting Information ②, the overflow of the main "
              "paper (SPEC-SI-AUTHORING-001). Rendered to paper/si.tex through the prose "
-             "pipeline (NOT the record dump, which lands in the deposit record.tex): author "
-             "each section body LaTeX-safe, a measured value as \\evval{<id>}{<field>} and a "
-             "verdict as \\status{<hyp>} (FAIL-LOUD on an unbacked macro). Never LLM-"
+             "pipeline (NOT the record dump, which lands in the deposit record.tex): each "
+             "section body is verbatim LaTeX (tables, math), a measured value written as "
+             "\\evval{<id>}{<field>} and a verdict as \\status{<hyp>} (FAIL-LOUD on an "
+             "unbacked macro). Never LLM-"
              "generated. Omit -> no paper/si.tex (a thin/absent SI is permitted)",
     )
     run.add_argument(
@@ -1191,6 +1194,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         # convention (exit 0). The run dir + spec are already laid down for the decision.
         print(f"halt (human input needed): {e.feedback()}", file=sys.stderr)
         return 0
+    except ValueError as e:
+        # The render stage refused the paper (a heading in the abstract, a fact the record
+        # cannot back, an unsupported novelty sentence, a missing figure source): the
+        # same message and exit code as `render`, never a raw traceback.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
 
     print(f"compiled Spec '{result.spec.id}' -> {result.run_dir}")
     print(f"  evidence: {len(result.evidence)} | claims: {len(result.claims)}")
@@ -1205,6 +1214,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"  paper draft: {result.paper_path}")
     _print_deposit_files(compiler)
     _print_code_ref_warnings(compiler)
+    _print_render_warnings(compiler)
     if result.science_findings:
         # Spec-gate science audit (design/science-guards.md): ALWAYS surfaced (never silent),
         # never a halt. The verdict-gate HALTS (strict by default) enforce the same concerns
@@ -1503,17 +1513,21 @@ def _cmd_pkgreqs_freeze(args: argparse.Namespace) -> int:
 
     runs: object = list(args.runs) if args.runs else ALL_RUNS
 
-    pkgreqs = PackageReqs(
-        venue=args.venue,
-        required_sections=sections,
-        figure_font_policy=args.figure_font_policy,
-        image_min_dpi=image_min_dpi,
-        reference_style=args.reference_style,
-        abstract_max_words=args.abstract_max_words,
-        body_word_range=body_word_range,
-        runs=runs,
-        advisory=list(args.advisory) if args.advisory else [],
-    )
+    try:
+        pkgreqs = PackageReqs(
+            venue=args.venue,
+            required_sections=sections,
+            figure_font_policy=args.figure_font_policy,
+            image_min_dpi=image_min_dpi,
+            reference_style=args.reference_style,
+            abstract_max_words=args.abstract_max_words,
+            body_word_range=body_word_range,
+            runs=runs,
+            advisory=list(args.advisory) if args.advisory else [],
+        )
+    except ValueError as e:  # e.g. a reference style that is not a BibTeX style name
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     # The digest is computed over the gate-bearing contract and STORED in the artifact (design
     # §2), unlike the Spec's on-demand digest. model_copy re-freezes with it set.
     digest = pkgreqs_digest(pkgreqs)
@@ -1867,6 +1881,16 @@ def _print_code_ref_warnings(compiler: ResearchCompiler) -> None:
                   "shipped as the reproduction script (kept as a pointer)", file=sys.stderr)
 
 
+def _print_render_warnings(compiler: ResearchCompiler) -> None:
+    """Print what the last render's prose sanitizer printed as literal text or replaced, per
+    slot (``compiler.prose_warnings``), and what it left out of or found in the references it
+    wrote (``compiler.reference_warnings``): stderr, non-blocking."""
+    for line in getattr(compiler, "prose_warnings", []):
+        print(f"  warning: {line}", file=sys.stderr)
+    for line in getattr(compiler, "reference_warnings", []):
+        print(f"  warning: {line}", file=sys.stderr)
+
+
 def _print_deposit_files(compiler: ResearchCompiler) -> None:
     """Say what the last render shipped under paper/deposit/ and print the protocol digest
     (design/deposit-files.md D1, D11); its warnings go to stderr (non-blocking)."""
@@ -1875,8 +1899,9 @@ def _print_deposit_files(compiler: ResearchCompiler) -> None:
         if summary.declaration:
             print(f"  deposit: declaration {summary.declaration}")
         else:
-            print("  deposit: no declaration (no runs/<id>/deposit.json): the protocol alone "
-                  "ships")
+            print("  deposit: no declaration (no runs/<id>/deposit.json): the protocol and the "
+                  "record ship")
+        print(f"  deposit: record shipped -> {summary.deposit_dir / 'record.tex'}")
         if summary.withheld_reason is not None:
             print(f"  deposit: protocol withheld ({summary.withheld_reason}); "
                   f"{summary.deposit_dir / 'manifest.csv'} lists the SHA-256 of each "
@@ -1954,6 +1979,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
         print(f"  deposit record: {record_path}")
     _print_deposit_files(compiler)
     _print_code_ref_warnings(compiler)
+    _print_render_warnings(compiler)
     fc = figure_consistency
     if fc is not None and not fc.ok:
         print("  figure consistency warnings (non-blocking):")

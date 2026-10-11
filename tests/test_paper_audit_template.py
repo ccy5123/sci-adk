@@ -264,11 +264,16 @@ def test_a_split_number_sources_lens_has_a_range_size_and_unique_finding_ids():
 
 
 def test_a_revision_that_touches_the_conclusions_reruns_the_conclusions_reader():
-    """The blind reading was of the old text; a rewritten conclusion was never read."""
+    """The blind reading must be of the final text, and a rewritten conclusion re-read.
+
+    It once ran before the audit and again only if a conclusion changed; it now runs
+    after the final audit-driven revision and once more after the writer's pass on its
+    notes (tests/test_publish_review_order.py pins the rest of that order).
+    """
     for doc in (_PUBLISH, _HUB):
-        flat = _flat(_spawn_section(_read(doc)))
-        assert "re-run `evaluator-conclusions`" in flat, doc.parent.name
-        assert "if any declared sentence or the opening changed" in flat, doc.parent.name
+        flat = _flat(_read(doc))
+        assert "after the final audit-driven revision" in flat, doc.parent.name
+        assert "re-run the reviewer once on the revised paper" in flat, doc.parent.name
 
 
 def test_the_audit_procedure_ends_and_keeps_every_file_and_open_finding():

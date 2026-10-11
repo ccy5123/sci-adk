@@ -47,12 +47,14 @@ pipeline), src/sci_adk/render/si.py (the S-numbering + figure-package convention
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 from typing import List, Optional, Sequence
 
 from sci_adk.core.claim import Claim
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Spec
+from sci_adk.render.bib_latex import typesettable
 from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
@@ -66,7 +68,14 @@ from sci_adk.render.novelty import (
     novelty_scope_suffix,
     require_novelty_text,
 )
-from sci_adk.render.paper import HYPERREF_LINE, _latex_sanitize, text_font_lines
+from sci_adk.render.paper import (
+    HYPERREF_LINE,
+    _UNICODE_MAP,
+    _clean_text,
+    _latex_sanitize,
+    _one_line,
+    text_font_lines,
+)
 from sci_adk.render.prose import AuthoredSI
 
 
@@ -113,6 +122,53 @@ def _render_si_novelty(
     return "".join(out)
 
 
+# The characters an authored SI warning names per section before it counts the rest.
+_SHOWN = 8
+# What the per-section lines need, stated once per render (after them).
+AUTHORED_SI_RULE = (
+    "the authored SI body is LaTeX written as is: pdflatex stops on a character it cannot "
+    "typeset with the preamble render emits (utf8 inputenc, T1 font encoding) -- write its "
+    "LaTeX form (for a symbol, the math command, e.g. $\\alpha$, $\\geq$) or plain ASCII"
+)
+
+
+def _character_note(ch: str) -> str:
+    """``U+03B1 (GREEK SMALL LETTER ALPHA, LaTeX $\\alpha$)``: the codepoint, its name and the
+    form the prose sanitizer writes for it, when it has one."""
+    name = unicodedata.name(ch, "unnamed")
+    form = _UNICODE_MAP.get(ch)
+    return f"U+{ord(ch):04X} ({name}, LaTeX {form})" if form else f"U+{ord(ch):04X} ({name})"
+
+
+# @MX:NOTE: [AUTO] The writer's only signal for the one document render writes as is: render and
+#   run print these lines (compiler.prose_warnings) and still exit 0.
+def authored_si_warnings(si: Optional[AuthoredSI]) -> List[str]:
+    """One line per authored SI section whose body holds a character pdflatex cannot typeset
+    with the preamble render emits (``bib_latex.typesettable``: Greek letters, relations, CJK,
+    combining marks ...), naming each by codepoint, then :data:`AUTHORED_SI_RULE` once.
+
+    The body is LaTeX written as is (``render_authored_si_latex``), so render does not map or
+    replace such a character as it does in a prose slot; pdflatex would stop on it. The text
+    read is the text render writes (cleaned of control characters, ``paper._clean_text``). The
+    first :data:`_SHOWN` distinct characters of a section are named, the rest counted. An
+    absent SI, or one without such a character, gives ``[]``. PURE."""
+    if si is None:
+        return []
+    lines: List[str] = []
+    for section in si.sections:
+        body = _clean_text(section.body or "")
+        chars = list(dict.fromkeys(c for c in body if not c.isascii() and not typesettable(c)))
+        if not chars:
+            continue
+        shown = ", ".join(_character_note(c) for c in chars[:_SHOWN])
+        more = len(chars) - _SHOWN
+        rest = f", and {more} more" if more > 0 else ""
+        lines.append(
+            f"authored SI section '{_one_line(section.title)}': {shown}{rest} cannot be typeset"
+        )
+    return lines + [AUTHORED_SI_RULE] if lines else []
+
+
 def si_figure_labels(si: AuthoredSI) -> List[str]:
     """The ``fig:<id>`` labels the authored SI owns (the supplementary figure set).
 
@@ -138,9 +194,11 @@ def render_authored_si_latex(
 
     PURE + deterministic GIVEN the authored input + FAIL-LOUD (an unbacked ``\\evval`` /
     ``\\status`` raises ``ValueError`` via :func:`factref.substitute_factrefs`). Reuses the
-    SAME per-slot pipeline ``render_paper_latex`` applies to its prose -- factref
-    substitution -> ``\\novelty`` render + the prose sanitizer (``\\ref`` / ``\\cite``
-    preserved). NOT routed through ``render_si_latex`` (no record-dump sections).
+    gates of the per-slot pipeline ``render_paper_latex`` applies to its prose -- factref
+    substitution -> ``\\novelty`` render -- but writes the body as LaTeX as is (cleaned of
+    control characters), not through the prose sanitizer; a recorded string an ``\\evval``
+    cites is sanitized as it is substituted. NOT routed through ``render_si_latex`` (no
+    record-dump sections).
 
     Args:
         si: the authored Supporting Information (title + free-structured sections + the
@@ -205,15 +263,27 @@ def render_authored_si_latex(
         # authored LaTeX pass through verbatim. A bare-literal number is outside the fidelity
         # gate (the documented honest limit, identical to main.tex; the P2 number-audit --
         # already wired over si.tex -- is the belief-side backstop).
+        #
+        # Verbatim, but cleaned first (_clean_text: line ends normalized, C0 controls other
+        # than tab and line feed, and DEL, removed): pdflatex stops on a control character in
+        # any context, and the fact-macro and novelty matches then see the text written out.
+        # A recorded STRING an \evval cites is text, not LaTeX: nothing sanitizes this body
+        # afterwards, so it is sanitized as it is substituted (a recorded "Fe & Ni" would
+        # otherwise end a table cell, a recorded "x}\input{f}" would read a file).
         return _render_si_novelty(
-            substitute_factrefs(text.strip(), evidence, claims),
+            substitute_factrefs(
+                _clean_text(text).strip(), evidence, claims,
+                escape=lambda value: _latex_sanitize(_one_line(value)),
+            ),
             spec,
             novelty_decisions,
             found=novelty_sentences,
         )
 
     # Title: the agent's SI title, else spec.id (the same short fallback the paper uses).
-    title = (si.title.strip() if si.title else "") or spec.id
+    # One line, as each section title below: a blank line inside \title{} or
+    # \section{} stops pdflatex.
+    title = _one_line(si.title or "") or spec.id
 
     lines: List[str] = []
     # -- Preamble (standalone document; same base packages as the paper / dump). Figure
@@ -250,7 +320,7 @@ def render_authored_si_latex(
     lines.append(r"\renewcommand{\thefigure}{S\arabic{figure}}")
     lines.append(f"\\title{{{_latex_sanitize(title)}}}")
     lines.append(r"\author{}")
-    lines.append(r"\date{\today}")
+    lines.append(r"\date{}")  # no compile date: same source, same page (as draft.tex)
     lines.append("")
     lines.append(r"\begin{document}")
     lines.append(r"\maketitle")
@@ -261,7 +331,7 @@ def render_authored_si_latex(
     #    hand-authored table's \evval cells are gated cell-by-cell here (REQ-SA-104) and an
     #    inline plain-text "(Figure S<n>)" survives verbatim (REQ-SA-106).
     for section in si.sections:
-        lines.append(f"\\section{{{_latex_sanitize(section.title)}}}")
+        lines.append(f"\\section{{{_latex_sanitize(_one_line(section.title))}}}")
         if section.body:
             lines.append(_slot(section.body))
         lines.append("")
@@ -271,7 +341,7 @@ def render_authored_si_latex(
     #    its own set, not shared with the main paper's numbering). render_figure routes by
     #    kind (native pgfplots from the record / image \includegraphics of figures/fig<N>).
     if figures:
-        body_latex = "\n".join(s.body for s in si.sections if s.body)
+        body_latex = "\n".join(_clean_text(s.body) for s in si.sections if s.body)
         lines.append(r"\section{Figures}")
         lines.append("")
         for number, fig in order_figures_by_reference(figures, body_latex):
@@ -292,4 +362,4 @@ def render_authored_si_latex(
     return "\n".join(lines)
 
 
-__all__ = ["render_authored_si_latex", "si_figure_labels"]
+__all__ = ["AUTHORED_SI_RULE", "authored_si_warnings", "render_authored_si_latex", "si_figure_labels"]

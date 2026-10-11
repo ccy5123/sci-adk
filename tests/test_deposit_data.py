@@ -587,14 +587,16 @@ def test_rows_order_protocol_by_path_then_unshipped_study_then_third_party_by_sh
     _declare(run_dir, _COPY_ENTRY, _WORKBOOK_ENTRY, _TABLE_ENTRY)
     _render(run_dir)
     third = sorted([_W, _C])
-    assert [r[1] for r in _rows(run_dir)] == [_A2_SHA, _V1_SHA, _V2_SHA, _T, *third]
+    # the shipped record (record.tex) sorts by its path, after the protocol rows
+    record = _sha((run_dir / "record.tex").read_bytes())
+    assert [r[1] for r in _rows(run_dir)] == [_A2_SHA, _V1_SHA, _V2_SHA, record, _T, *third]
 
     _withhold(run_dir)
     payload = json.loads((run_dir / "deposit.json").read_text(encoding="utf-8"))
     payload["files"] = [_COPY_ENTRY, _WORKBOOK_ENTRY, _TABLE_ENTRY]
     (run_dir / "deposit.json").write_text(json.dumps(payload), encoding="utf-8")
     _render(run_dir)
-    assert [r[1] for r in _rows(run_dir)] == [_A2_SHA, _V1_SHA, _V2_SHA, _T, *third]
+    assert [r[1] for r in _rows(run_dir)] == [_A2_SHA, _V1_SHA, _V2_SHA, record, _T, *third]
 
 
 def test_a_shipped_data_row_sorts_by_its_path_before_the_protocol_rows(tmp_path):
@@ -603,7 +605,7 @@ def test_a_shipped_data_row_sorts_by_its_path_before_the_protocol_rows(tmp_path)
     _render(run_dir)
     assert [r[0] for r in _rows(run_dir)] == [
         "data/notes.csv", "inputs/w.xls", "protocol/amendment-v2.json",
-        "protocol/protocol-v1.json", "protocol/protocol-v2.json"]
+        "protocol/protocol-v1.json", "protocol/protocol-v2.json", "record.tex"]
 
 
 def test_rerender_with_data_is_byte_identical(tmp_path):
@@ -655,7 +657,13 @@ def test_a_bare_render_and_resolve_ship_what_the_last_declaration_named(tmp_path
     assert main(["render", str(run_dir)]) == 0
     assert _files_under(_deposit(run_dir)) == first
     run_checkpoint_loop(run_dir=run_dir, spec=_spec_of(run_dir))
-    assert _files_under(_deposit(run_dir)) == first
+    # resolve records new Claims, so the record copy and its manifest row follow the record;
+    # every other file is unchanged
+    after = _files_under(_deposit(run_dir))
+    assert sorted(after) == sorted(first)
+    assert after["record.tex"] == (run_dir / "record.tex").read_bytes()
+    unchanged = [k for k in first if k not in ("record.tex", "manifest.csv")]
+    assert [after[k] for k in unchanged] == [first[k] for k in unchanged]
 
 
 def test_run_with_deposit_and_a_bare_run_and_resolve_ship_the_data(tmp_path, capsys):
