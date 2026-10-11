@@ -109,11 +109,22 @@ verify gate) load `Skill("science-foundation-rigor")`; this skill is the HOW.
 package/
 ├── 01_manuscript/   main.tex + si.tex (BOTH authored belief) + references.bib (+ figures/)
 ├── 02_data/         claims_all.csv (master traceability) + per-run claim CSVs
+│                    + <id>/ (each run's declared study files that ship; rebuilt on every
+│                      assembly)
 ├── 03_figures/      per-run communication figures + their generators
 ├── 04_scripts/      the field-agnostic builders + each run's official scripts
-├── 05_inputs/       inputs or copyright-respecting pointers
-├── 06_provenance/   run_index.csv (spec-id · digest · verdict) + per-run verify logs
-│                    + record.tex (the deterministic record dump + availability statement)
+├── 05_inputs/       README.md (each third-party file and each study file of cited values,
+│                    with its citation, its SHA-256 and its terms or "not redistributed")
+│                    + <id>/ (each run's redistributed third-party files; rebuilt on every
+│                      assembly)
+├── 06_provenance/   run_index.csv (spec-id · digest · verdict · protocol digest)
+│                    + per-run verify logs
+│                    + record.tex (the deterministic record dump, each run's protocol
+│                      history, and the availability statement)
+│                    + protocol/<id>/ (each run's protocol versions and amendment
+│                      receipts, exact bytes; rebuilt whole on every assembly)
+│                    + deposit.csv (every protocol file and declared data file with its
+│                      SHA-256, size and terms)
 ├── MANIFEST.md      the file inventory
 └── README.md        overview + reproduction + submission-readiness self-assessment
 ```
@@ -132,12 +143,52 @@ reproduces (the record audit); `\evval`/`\status`-marked numbers re-derive from 
 (reuse the reframe value-fidelity gate); the `README.md` carries a submission-readiness
 section; and the deposit is complete — `06_provenance/record.tex` is present and its body
 carries a "Data & code availability" statement (reuses the per-run deposit-completeness
-checker; in the package path this is a HARD gate). The deterministic record at
+checker; in the package path this is a HARD gate); and the protocol files are current —
+`06_provenance/protocol/<id>/` holds exactly the bytes `runs/<id>/` keeps,
+`06_provenance/deposit.csv` is the manifest the record calls for now (an amendment after
+packaging fails until the package is re-assembled), and the folder holds no file the
+manifest does not list. A run that withholds its protocol (the switch in its
+`runs/<id>/deposit.json`, explained in `science-workflow-publish`) ships no protocol file;
+its rows keep the checksums, and the gate reports an advisory, never a failure. The declared
+data follow each run's `runs/<id>/deposit.json`: `02_data/<id>/` and `05_inputs/<id>/` hold
+exactly the files it ships, copied from the run's re-rendered `paper/deposit/` and checked
+against the record, and every `cite` key of a declared file must resolve in
+`01_manuscript/references.bib` — so a package with cited data needs
+`package_src/references.bib`. The deterministic record at
 `06_provenance/record.tex` is EXEMPT from the tool-vocab gate by construction (the gate reads
 only `01_manuscript/`), so it may legitimately name provenance. SURFACED as ADVISORY (never
 gated): `body_word_range`, free-prose numbers not
 behind `\evval`, and the §4 evaluator qualities. A gate-bearing field cannot be relaxed
 after a failure except by an explicit re-freeze (anti-moving-the-goalposts).
+
+### Naming files, checksums and times in the merged manuscript
+
+The package number audit reads `main.tex` and `si.tex` exact-only, and it strips
+`\texttt{…}`, `\path{…}` and `\url{…}` before it reads. Outside them, the digit groups of a
+path, a checksum or a time are numbers the record does not hold.
+
+- Put every path, checksum and date-time inside `\texttt{…}` or `\path{…}`. Bare,
+  `06\_provenance/protocol/<run>/protocol-v1.json` reads as 6 and 1, and
+  `2026-10-08T10:03:39Z` as −10, 8, 3 and 39. `\path{…}` needs no `\_`. It comes from the
+  `url` package, which the preambles of both skeletons (`main.tex`, `si.tex`) load with
+  `\usepackage{url}`; keep that line when you replace a preamble with a venue's.
+- Name a run's protocol files by their package paths
+  (`\path{06_provenance/protocol/<run>/protocol-v1.json}`, `…/amendment-v2.json`) and point
+  to `\path{06_provenance/deposit.csv}` for their checksums.
+- Write a checksum in full — 64 hex digits in `\texttt{…}` pieces of at least four characters
+  joined by `\allowbreak` — never elided: a bare prefix such as `4fa76e47…` reads as 4, and
+  a reader cannot check an elided value.
+- Name a run's data files by their package paths: `\path{02_data/<run>/<name>}` for a study
+  file, `\path{05_inputs/<run>/<name>}` for a redistributed third-party file. A per-run
+  `deposit/…` path fails the package names check, whose message gives the package path the
+  manifest maps it to.
+- A file that is cited, not shipped, has no package path: cite it with its checksum from
+  `deposit.csv`.
+- For a run that withholds its protocol, name no protocol file: say the protocol is
+  withheld, give the reason, and point to the checksums in `deposit.csv`.
+- State every time as a recorded time: each was read from a local clock and nothing
+  witnesses it. Write "was created at", "recorded at", never "time-stamped", and claim no
+  order the recorded times do not show.
 
 ### The HARD constraints (the discipline this obeys)
 

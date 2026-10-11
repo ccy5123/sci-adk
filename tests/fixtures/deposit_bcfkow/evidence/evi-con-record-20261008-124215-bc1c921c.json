@@ -1,0 +1,38 @@
+{
+  "id": "evi-con-record-20261008-124215-bc1c921c",
+  "created_at": "2026-10-08T12:42:15.495111Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "contested_record",
+  "provenance": {
+    "code_ref": "contested:record",
+    "data_ref": null,
+    "data_source": null,
+    "seed": null,
+    "environment": "contested record (Medium trigger); recording, not searching",
+    "cost": null,
+    "search_log": null
+  },
+  "result": {
+    "type": "qualitative",
+    "point": null,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "recorded: Published fish log BCF on log Kow slopes disagree on whether the slope lies in [0.7, 1.0]. Inside the band: Veith et al. 1979 (10.1139/f79-146) 0.85, n=55; Isnard & Lambert 1988 (10.1016/0045-6535(88)90040-9) 0.80, n=107 chemicals; Meylan et al. 1999 (10.1002/etc.5620180412) 0.77 for nonionic chemicals with log Kow 1-7, plus correction factors; Mackay 1982 (10.1021/es00099a008) BCF = 0.048 Kow, slope fixed at 1.0. Below the band: Arnot & Gobas 2006 (10.1139/a06-005) Table 4, acceptable-quality fish BCF, log BCF = -0.23 (SE 0.05) + 0.60 (SE 0.01) log Kow, n = 2393 BCF values, r2 = 0.52, regression over Kow > 1 with no upper bound; Neely et al. 1974 (10.1021/es60098a008) 0.542, n=8, and Davies et al. 1984 0.597, n=31, both as tabulated in Isnard & Lambert 1988 Table I. All values read from the PDFs on 2026-10-08. The Arnot & Gobas fit differs from H1's frozen analysis in range (log Kow > 0 with no cap at 6 vs 1 to 6), unit of analysis (individual BCF values vs one mean log BCF per chemical) and the absence of a neutral-chemical filter.",
+    "artifact_ref": null
+  },
+  "bears_on": [],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": {
+    "outcome": "recorded",
+    "hypothesis_id": "H1",
+    "kind": null,
+    "reason": "Published fish log BCF on log Kow slopes disagree on whether the slope lies in [0.7, 1.0]. Inside the band: Veith et al. 1979 (10.1139/f79-146) 0.85, n=55; Isnard & Lambert 1988 (10.1016/0045-6535(88)90040-9) 0.80, n=107 chemicals; Meylan et al. 1999 (10.1002/etc.5620180412) 0.77 for nonionic chemicals with log Kow 1-7, plus correction factors; Mackay 1982 (10.1021/es00099a008) BCF = 0.048 Kow, slope fixed at 1.0. Below the band: Arnot & Gobas 2006 (10.1139/a06-005) Table 4, acceptable-quality fish BCF, log BCF = -0.23 (SE 0.05) + 0.60 (SE 0.01) log Kow, n = 2393 BCF values, r2 = 0.52, regression over Kow > 1 with no upper bound; Neely et al. 1974 (10.1021/es60098a008) 0.542, n=8, and Davies et al. 1984 0.597, n=31, both as tabulated in Isnard & Lambert 1988 Table I. All values read from the PDFs on 2026-10-08. The Arnot & Gobas fit differs from H1's frozen analysis in range (log Kow > 0 with no cap at 6 vs 1 to 6), unit of analysis (individual BCF values vs one mean log BCF per chemical) and the absence of a neutral-chemical filter.",
+    "literature_evidence_id": null
+  },
+  "negative_control": null
+}

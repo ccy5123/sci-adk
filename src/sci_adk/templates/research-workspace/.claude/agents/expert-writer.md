@@ -53,7 +53,7 @@ externally and you reference it.
 | Verb | When | What it does |
 |---|---|---|
 | `sci-adk numbers draft` | After authoring `prose.json`, before render | Proposes `runs/<id>/numbers.draft.json`: for each number in the prose, the recorded field(s) it equals at its printed precision |
-| `sci-adk render` | After authoring the hooks | Renders `paper/draft.tex`, `figures/` and `references.bib` deterministically from the record, `paper/si.tex` only from an authored `--si si.json`, and re-deposits the record dump `runs/<id>/record.tex` outside `paper/` |
+| `sci-adk render` | After authoring the hooks | Renders `paper/draft.tex`, `figures/` and `references.bib` deterministically from the record, `paper/si.tex` only from an authored `--si si.json`, and `paper/deposit/` (the protocol files, plus the data declared with `--deposit`), and re-deposits the record dump `runs/<id>/record.tex` outside `paper/` |
 | `sci-adk verify` | As a read-only consistency self-check | Runs the paper-consistency gate (`\ref`↔`\label`, novelty sentences, figure sources) AND — when `runs/<id>/pubreqs.json` is frozen — the `paper_requirements_clean` gate (declared sections, font/DPI policy, reference style, max-words, reproduction bundle) over the rendered `.tex` |
 
 `sci-adk render` is the only way to produce the paper artifacts; do not hand-write
@@ -106,7 +106,21 @@ its precision. The manuscript itself stays plain LaTeX.
      any piece of one that does read as a number is an `identifier` too;
    - a reference year: `{"bib": "<key>", "field": "year"}`; a value computed from recorded
      ones: `formula` + `operands` (e.g. `"100 * a"` for a percentage).
-3. Render, record the conclusions in `declarations.json`, then `sci-adk verify`.
+3. Run `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]`,
+   record the conclusions in `declarations.json`, then `sci-adk verify`.
+
+## Deposit Files — Declared Beside the Paper
+
+Every render ships the run's protocol files under `paper/deposit/`. When the paper also
+ships data files, or must withhold its protocol, write the declaration
+`drafts/<spec-id>/paper/deposit.json` and pass it with `--deposit`; render keeps a copy at
+`runs/<id>/deposit.json` for later renders. The schema, the terms each file ships under
+(a third-party file, or a study file of third-party values, is cited, not shipped, unless
+its entry states both `license` and `redistribution`), the protocol switch and the example sentences are in
+`Skill("science-workflow-publish")`, section "Deposit files". In the SI and the
+availability statement, name each deposited file by its bundle path
+(`deposit/protocol/protocol-v1.json`, `deposit/manifest.csv`), and state every time as a
+recorded time, read from a local clock.
 
 [HARD] You never add a value to the record. A number with no recorded home — `unresolved`
 and not an identifier — is a BLOCKER: return it to the orchestrator with the sentence it

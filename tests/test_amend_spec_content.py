@@ -341,6 +341,9 @@ def _verify_findings(run_dir: Path) -> dict:
 
     report = vars(verify_run(run_dir)).copy()
     report.pop("digest", None)
+    # An amendment adds a protocol version and a receipt, so the protocol digest moves by
+    # design (design/deposit-files.md D11); it is a value, not a finding.
+    report.pop("protocol_digest", None)
     return {k: repr(v) for k, v in report.items()}
 
 

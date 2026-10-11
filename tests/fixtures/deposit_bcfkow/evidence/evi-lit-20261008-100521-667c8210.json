@@ -1,0 +1,32 @@
+{
+  "id": "evi-lit-20261008-100521-667c8210",
+  "created_at": "2026-10-08T10:05:21.485839Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "literature",
+  "provenance": {
+    "code_ref": null,
+    "data_ref": "runs/SPEC-BCFKOW-001/literature/manifest.csv",
+    "data_source": null,
+    "seed": null,
+    "environment": "paperforge@2cec69b version=0.1.0 returncode=2",
+    "cost": null,
+    "search_log": null
+  },
+  "result": {
+    "type": "qualitative",
+    "point": null,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "{\"acquired\": [], \"failed\": [], \"counts\": {\"succeeded\": 0, \"failed\": 0}, \"normalization\": {\"pdfs\": [], \"counts\": {\"normalized\": 0, \"already_extractable\": 0, \"locked\": 0, \"error\": 0}}, \"citation_keys\": {}, \"citation_key_collisions\": []}",
+    "artifact_ref": "runs/SPEC-BCFKOW-001/literature"
+  },
+  "bears_on": [],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": null,
+  "negative_control": null
+}

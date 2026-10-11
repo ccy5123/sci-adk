@@ -129,9 +129,11 @@ Two-pass, sequential (novelty search needs exact hypothesis text):
 ### Stage 4 — Publish (render)
 
 `expert-writer` authors the `PaperProse` / `AuthoredSI` / `FigureSpec` hooks and runs
-`sci-adk render` → `paper/draft.tex`, `figures/`, `references.bib`, and `paper/si.tex`
-only from an authored `--si si.json` (the SI is written like the paper; the record dump
-is deposited at `runs/<id>/record.tex`, outside the submission). Figures
+`sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]` →
+`paper/draft.tex`, `figures/`, `references.bib`, `paper/si.tex` only from an authored
+`--si si.json` (the SI is written like the paper; the record dump is deposited at
+`runs/<id>/record.tex`, outside the submission), and `paper/deposit/` (the run's protocol
+files, plus the data files declared with `--deposit`). Figures
 pull their `y` values **from Evidence by `evidence_id`** (record fidelity — the
 agent authors WHAT to render; the engine renders deterministically FROM the record).
 

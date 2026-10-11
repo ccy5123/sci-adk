@@ -224,6 +224,14 @@ def build_parser() -> argparse.ArgumentParser:
              "LLM-generated. Omit -> no figures",
     )
     run.add_argument(
+        "--deposit", default=None, metavar="PATH",
+        help="optional JSON file declaring the data files that ship with the paper and the "
+             "protocol switch (design/deposit-files.md D3; by convention "
+             "drafts/<id>/paper/deposit.json). Validated against the run, then copied to "
+             "runs/<id>/deposit.json, which later renders, resolve, verify and package read. "
+             "Omit -> the persisted declaration, if any",
+    )
+    run.add_argument(
         "--no-strict-science", dest="strict_science", action="store_false",
         default=True,
         help="disable the science-guard verdict-gate HALTS (design/science-guards.md: "
@@ -815,10 +823,18 @@ def _add_verb_parsers(sub) -> None:
              "(native or image). Same as `run --figures`",
     )
     render.add_argument(
+        "--deposit", default=None, metavar="PATH",
+        help="optional JSON file declaring the data files that ship under paper/deposit/ and "
+             "the protocol switch (design/deposit-files.md D3). Validated, then copied to "
+             "runs/<id>/deposit.json; a bare render uses the persisted one. Same as "
+             "`run --deposit`",
+    )
+    render.add_argument(
         "--record-only", action="store_true",
         help="deposit only the deterministic record (runs/<id>/record.tex) and write "
              "nothing under paper/ -- the first session of the two-session publish, before "
-             "the paper is written. Cannot be combined with --prose/--si/--si-prose/--figures",
+             "the paper is written. Cannot be combined with --prose/--si/--si-prose/--figures/"
+             "--deposit",
     )
 
     # numbers: the paper's declared number list (design/declared-numbers.md).
@@ -1000,6 +1016,24 @@ def _load_prose(args: argparse.Namespace):
     return prose, si_prose, figures
 
 
+def _load_deposit(args: argparse.Namespace):
+    """Read an optional ``--deposit`` declaration file (shared by run + render).
+
+    Returns a :class:`~sci_adk.core.deposit.DeclarationFile` (its exact bytes and path) or
+    ``None``. Validation against the run happens in the render stage, where the Spec id is
+    known (design/deposit-files.md D2). Raises :class:`_CliError` when the file is missing.
+    """
+    if not getattr(args, "deposit", None):
+        return None
+    from sci_adk.core.deposit import DeclarationFile
+
+    path = Path(args.deposit)
+    try:
+        return DeclarationFile.read(path)
+    except OSError:
+        raise _CliError(f"deposit declaration not found: {path}")
+
+
 def _load_authored_si(args: argparse.Namespace):
     """Load an optional ``--si`` AuthoredSI JSON file (shared by run + render).
 
@@ -1112,6 +1146,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         spec, experiment, proposal_text = _resolve_capability_selection(args)
         prose, si_prose, figures = _load_prose(args)
         si = _load_authored_si(args)
+        deposit = _load_deposit(args)
     except _CliError as e:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
@@ -1123,16 +1158,24 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # (e.g. synthetic data fed to an empirical claim) raises before any Claim is
     # written. Surface it as a friendly non-zero exit -- never a raw traceback and
     # never a "compiled ... supported" success line for an ungrounded result.
+    from sci_adk.core.deposit import DepositDeclarationError
     from sci_adk.core.validity import ValidityHalt
     from sci_adk.loop.prior_work import PriorWorkHalt
+    from sci_adk.render.deposit import DepositRefused
 
     try:
         result = compiler.compile(
             proposal_text, spec_id=args.spec_id, spec=spec, experiment=experiment,
             prose=prose, si_prose=si_prose, si=si, figures=figures,
-            enforce_prior_work=getattr(args, "enforce_prior_work", False))
+            enforce_prior_work=getattr(args, "enforce_prior_work", False),
+            deposit=deposit)
     except ValidityHalt as e:
         print(f"error: evidence-validity halt: {e.reason}", file=sys.stderr)
+        return 2
+    except (DepositRefused, DepositDeclarationError) as e:
+        # The render stage refused paper/deposit/ before writing anything under paper/
+        # (design/deposit-files.md D13) or the run's deposit.json is invalid.
+        print(f"error: {e}", file=sys.stderr)
         return 2
     except PriorWorkHalt as e:
         # The orchestrated "start research" path enforces the Spec-anchor prior-work
@@ -1153,6 +1196,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for c in result.checkpoints:
             print(f"    - {c.hypothesis_id} ({c.kind}): {c.expression[:60]}")
     print(f"  paper draft: {result.paper_path}")
+    _print_deposit_files(compiler)
     _print_code_ref_warnings(compiler)
     if result.science_findings:
         # Spec-gate science audit (design/science-guards.md): ALWAYS surfaced (never silent),
@@ -1658,7 +1702,7 @@ def _cmd_execute(args: argparse.Namespace) -> int:
     """
     run_dir = Path(args.run_dir)
     # workspace root holds runs/ (run_dir is <workspace>/runs/<spec.id>).
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
     try:
         spec = _load_run_spec(run_dir)
     except _CliError as e:
@@ -1706,7 +1750,7 @@ def _cmd_append_evidence(args: argparse.Namespace) -> int:
     ``EvidenceItem.model_validate`` and runs ``ResearchCompiler.stage_append_evidence``.
     """
     run_dir = Path(args.run_dir)
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
     try:
         spec = _load_run_spec(run_dir)
     except _CliError as e:
@@ -1758,7 +1802,7 @@ def _cmd_derive_claim(args: argparse.Namespace) -> int:
     friendly non-zero exit, never a traceback and never a spurious "supported" line.
     """
     run_dir = Path(args.run_dir)
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
     try:
         spec = _load_run_spec(run_dir)
     except _CliError as e:
@@ -1816,6 +1860,33 @@ def _print_code_ref_warnings(compiler: ResearchCompiler) -> None:
                   "shipped as the reproduction script (kept as a pointer)", file=sys.stderr)
 
 
+def _print_deposit_files(compiler: ResearchCompiler) -> None:
+    """Say what the last render shipped under paper/deposit/ and print the protocol digest
+    (design/deposit-files.md D1, D11); its warnings go to stderr (non-blocking)."""
+    summary = getattr(compiler, "deposit_summary", None)
+    if summary is not None:
+        if summary.declaration:
+            print(f"  deposit: declaration {summary.declaration}")
+        else:
+            print("  deposit: no declaration (no runs/<id>/deposit.json): the protocol alone "
+                  "ships")
+        if summary.withheld_reason is not None:
+            print(f"  deposit: protocol withheld ({summary.withheld_reason}); "
+                  f"{summary.deposit_dir / 'manifest.csv'} lists the SHA-256 of each "
+                  "withheld file")
+        else:
+            print(f"  deposit: protocol history shipped ({len(summary.shipped)} file(s)) -> "
+                  f"{summary.deposit_dir / 'protocol'}")
+        if summary.declaration:
+            print(f"  deposit: {len(summary.data_shipped)} data file(s) shipped, "
+                  f"{len(summary.not_shipped)} cited only -> {summary.deposit_dir}")
+            for line in summary.not_shipped:
+                print(f"    not shipped: {line}")
+        print(f"  protocol digest (sha256): {summary.protocol_digest}")
+    for line in getattr(compiler, "deposit_warnings", []):
+        print(f"  warning: {line}", file=sys.stderr)
+
+
 def _cmd_render(args: argparse.Namespace) -> int:
     """Render the paper/ artifacts from the recorded spec/evidence/claims (final stage).
 
@@ -1826,18 +1897,25 @@ def _cmd_render(args: argparse.Namespace) -> int:
     under ``paper/``.
     """
     run_dir = Path(args.run_dir)
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
     try:
         spec = _load_run_spec(run_dir)
         prose, si_prose, figures = _load_prose(args)
         si = _load_authored_si(args)
+        deposit = _load_deposit(args)
     except _CliError as e:
         print(f"error: {e.message}", file=sys.stderr)
         return e.exit_code
 
     compiler = ResearchCompiler(workspace_dir=workspace)
     if args.record_only:
-        record_path = compiler.stage_render_record(spec)
+        try:
+            record_path = compiler.stage_render_record(spec)
+        except ValueError as e:
+            # The protocol files cannot be read as the record keeps them (a symbolic link,
+            # a version past the files on disk): surface it, never a raw traceback.
+            print(f"error: {e}", file=sys.stderr)
+            return 2
         print(f"render: deposited the record for Spec '{spec.id}' -> {record_path} "
               "(record only: nothing written under paper/)")
         _print_code_ref_warnings(compiler)
@@ -1851,7 +1929,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
         return 0
     try:
         paper_path, si_path, record_path, figure_consistency = compiler.stage_render(
-            spec, prose=prose, si_prose=si_prose, si=si, figures=figures
+            spec, prose=prose, si_prose=si_prose, si=si, figures=figures, deposit=deposit
         )
     except ValueError as e:
         # A missing image-figure source / malformed figure spec fails loud (record
@@ -1867,6 +1945,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
     # not the Supporting Information.
     if record_path is not None:
         print(f"  deposit record: {record_path}")
+    _print_deposit_files(compiler)
     _print_code_ref_warnings(compiler)
     fc = figure_consistency
     if fc is not None and not fc.ok:
@@ -1905,7 +1984,7 @@ def _cmd_numbers_draft(args: argparse.Namespace) -> int:
     no network, no model.
     """
     run_dir = Path(args.run_dir)
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
     try:
         spec = _load_run_spec(run_dir)
         prose, _si_prose, figures = _load_prose(args)
@@ -2081,6 +2160,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     print(f"verified run '{report.spec_id}' -> {run_dir}")
     print(f"  record digest (sha256): {report.digest}")
+    if report.protocol_digest:
+        print(f"  protocol digest (sha256): {report.protocol_digest}")
     if not report.outcomes:
         print("  no recorded claims to verify")
     for o in report.outcomes:
@@ -2217,6 +2298,18 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         for problem in report.search_log_problems:
             _err_in_order(f"    - {problem}")
 
+    # Deposit files (design/deposit-files.md D5): paper/deposit/ must hold exactly the files
+    # its manifest lists, as runs/<id>/ calls for, and the record's protocol files must agree.
+    if not report.deposit_files_clean:
+        _err_in_order("  deposit files FAILED (paper/deposit/ does not match the record):")
+        for problem in report.deposit_file_problems:
+            _err_in_order(f"    - {problem}")
+    elif (run_dir / "paper" / "draft.tex").is_file() and (run_dir / "paper" / "deposit").is_dir():
+        print("  deposit files: OK (paper/deposit/ holds exactly the files its manifest "
+              "lists, and they match the record)")
+    if report.protocol_history:
+        print(f"  {report.protocol_history}")
+
     # SPEC-SI-AUTHORING-001 M2 (Pillar C): the RECORD-side deposit-completeness channel --
     # the retained record artifact + a "Data & code availability" statement. Surfaced here,
     # ADDITIVE (REQ-SA-305): NOT in report.passed, so it never weakens the claim-reproduction
@@ -2252,7 +2345,7 @@ def _cmd_prior_work(args: argparse.Namespace) -> int:
 
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
     # workspace root holds runs/ (run_dir is <workspace>/runs/<spec.id>).
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
 
     rc = _check_searched_dois(args.searched)
     if rc is not None:
@@ -2329,7 +2422,7 @@ def _cmd_inquiry(args: argparse.Namespace) -> int:
         return 2
 
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
 
     rc = _check_searched_dois(args.searched)
     if rc is not None:
@@ -2404,7 +2497,7 @@ def _cmd_novelty(args: argparse.Namespace) -> int:
         return 2
 
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
 
     rc = _check_searched_dois(args.searched)
     if rc is not None:
@@ -2489,7 +2582,7 @@ def _cmd_contested(args: argparse.Namespace) -> int:
         return 2
 
     spec = Spec.model_validate(json.loads(spec_path.read_text(encoding="utf-8")))
-    workspace = run_dir.parent.parent
+    workspace = run_dir.resolve().parent.parent
 
     rc = _check_searched_dois(args.searched)
     if rc is not None:
@@ -2761,6 +2854,7 @@ def main(argv=None) -> int:
                 ("--si", args.si),
                 ("--si-prose", args.si_prose),
                 ("--figures", args.figures),
+                ("--deposit", args.deposit),
             ) if given]
             if clashes:
                 parser.error(

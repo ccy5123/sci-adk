@@ -1071,7 +1071,14 @@ _PAPER_ARTIFACT_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bevi-[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"),   # Evidence ids
     re.compile(r"\bclaim-(?:hyp|novelty)-[A-Za-z0-9._-]*[A-Za-z0-9]"),  # Claim ids
     re.compile(
-        r"\b(?:spec|pubreqs|pkgreqs|declarations|review|numbers(?:\.draft)?)\.json\b",
+        r"\b(?:spec|pubreqs|pkgreqs|declarations|review|deposit|numbers(?:\.draft)?)\.json\b",
+        re.IGNORECASE,
+    ),
+    # The run's working checkpoint files (design/deposit-files.md D6). ``checkpoints/`` alone
+    # is not banned -- a paper may deposit its own model checkpoints -- and the deposited
+    # copy ``deposit/protocol/amendment-v2.json`` passes: the folder decides.
+    re.compile(
+        r"\bcheckpoints/(?:amendment-v\d+|prior(?:\\_|_)work|science)\.json\b",
         re.IGNORECASE,
     ),
     # the novelty bindings; a prose slot reaches the source with the underscore escaped

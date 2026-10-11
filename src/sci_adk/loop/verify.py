@@ -52,6 +52,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.declarations import load_declarations, load_review
+from sci_adk.core.deposit import DepositDeclarationError, load_deposit_declaration
 from sci_adk.core.evidence import BearingDirection, EvidenceItem, EvidenceKind
 from sci_adk.core.numbers import NUMBERS_FILE, load_numbers
 from sci_adk.core.pkgreqs import (
@@ -88,6 +89,20 @@ from sci_adk.loop.recorded_judge import RecordedJudge
 from sci_adk.provenance import record_digest
 from sci_adk.search.literature_merge import _sidecar_doi, bib_field, parse_bib_entries
 from sci_adk.search.manual_literature import SI_SUFFIX
+from sci_adk.render.deposit import (
+    DEPOSIT_DIR,
+    DataPlan,
+    deposit_bundle_problems,
+    deposit_data_problems,
+    deposit_name_problems,
+    plan_data,
+    plan_protocol,
+    protocol_digest,
+    protocol_history_line,
+    protocol_record_problems,
+    times_advisory,
+    withheld_advisory,
+)
 from sci_adk.render.consistency import (
     LatexRefReport,
     check_cross_doc_s_refs,
@@ -127,6 +142,7 @@ from sci_adk.render.pkgreqs_checks import (
     figure_presence_problems,
     font_encoding_problems,
     layout_problems,
+    package_deposit_problems,
     package_record_path,
     readme_submission_readiness_problems,
     unpublished_citation_warnings,
@@ -322,10 +338,26 @@ class VerifyReport:
             not listed here -- it gets a non-blocking line in ``paper_advisory`` instead, so
             runs recorded before the log existed keep passing. EMPTY when clean.
         search_log_clean: True iff ``search_log_problems`` is empty. Part of the HARD gate.
+        deposit_file_problems: the deposit-file failures (design/deposit-files.md D5) of a
+            run whose ``paper/draft.tex`` exists: the bundle ``paper/deposit/`` does not hold
+            exactly the files its manifest lists, the manifest is not the one ``runs/<id>/``
+            calls for (a stale render), a shipped protocol copy differs from the record's
+            file, or the record's own protocol files disagree (a receipt's
+            ``prior_spec_sha256`` vs its history file, ``prior_version_id`` vs the earlier
+            ``created_at``, a receipt's rationale vs the version it produced), or the
+            persisted ``deposit.json`` is invalid. EMPTY when clean, when the run has no
+            paper, or when the paper predates deposit files (no ``paper/deposit/``: one
+            advisory, no verdict change).
+        deposit_files_clean: True iff ``deposit_file_problems`` is empty. Part of the HARD
+            gate.
+        protocol_digest: the run's protocol digest (D11) -- every kept protocol version and
+            amendment receipt under its bundle name; ``""`` when it cannot be computed.
+        protocol_history: for an amended run whose deposit checks pass, the "consistent"
+            line of the earlier-protocols check (D5); ``""`` otherwise.
         passed: the COMBINED exit gate -- ``all_reproduced and paper_consistent and
             paper_factref_clean and paper_tool_clean and paper_novelty_clean and
             declarations_clean and numbers_clean and paper_cross_doc_clean and
-            paper_requirements_clean and search_log_clean``.
+            paper_requirements_clean and search_log_clean and deposit_files_clean``.
             This is what the CLI exits
             on; ``all_reproduced`` alone is the claim signal.
     """
@@ -356,7 +388,113 @@ class VerifyReport:
     deposit_complete: bool = field(default=True)
     search_log_problems: List[str] = field(default_factory=list)
     search_log_clean: bool = field(default=True)
+    deposit_file_problems: List[str] = field(default_factory=list)
+    deposit_files_clean: bool = field(default=True)
+    protocol_digest: str = field(default="")
+    protocol_history: str = field(default="")
     passed: bool = field(default=False)
+
+
+@dataclass(frozen=True)
+class DepositFileCheck:
+    """The deposit-file checks of one run (design/deposit-files.md D5, D11, D12).
+
+    Attributes:
+        problems: the failures (see ``VerifyReport.deposit_file_problems``).
+        advisories: never gated -- a version not kept, a missing receipt, the withheld
+            protocol, a paper without ``paper/deposit/``, the times advisory.
+        protocol_digest: the run's protocol digest; ``""`` when it cannot be computed.
+        protocol_history: the "consistent" line for an amended run that passed ("partly
+            compared", naming the steps compared, when a version was not kept or a receipt
+            is missing or records no checksum); else ``""``.
+    """
+
+    problems: List[str] = field(default_factory=list)
+    advisories: List[str] = field(default_factory=list)
+    protocol_digest: str = ""
+    protocol_history: str = ""
+
+
+_NO_DEPOSIT_ADVICE: str = (
+    "paper/deposit/ is missing: the paper was rendered before the protocol history shipped "
+    "with it -- re-render to ship the protocol files and their manifest"
+)
+
+
+def check_deposit_files(
+    run_dir: Path, spec: Spec, evidence: List[EvidenceItem]
+) -> DepositFileCheck:
+    """The D5 deposit checks of ``run_dir``, READ-ONLY (design/deposit-files.md).
+
+    The protocol digest is computed for every run. The rest runs only when
+    ``paper/draft.tex`` exists: the record-side comparisons among the run's protocol files,
+    then -- when ``paper/deposit/`` exists -- the bundle checks (inventory, plan, copies),
+    every hash recomputed from bytes and the expected manifest rebuilt from ``runs/<id>/``,
+    its persisted ``deposit.json`` and the declared sources; the data checks against the
+    Evidence on disk (``evidence``) and ``paper/references.bib``; and the names check over
+    ``draft.tex`` / ``si.tex``. A paper with no ``paper/deposit/`` (rendered before this
+    feature) gets one advisory and no failure. The times advisory (D12) is added for every
+    run with a paper.
+    """
+    run_dir = Path(run_dir)
+    declaration = None
+    declaration_error: Optional[str] = None
+    data = DataPlan()
+    try:
+        declaration = load_deposit_declaration(run_dir, spec.id)
+        data = plan_data(run_dir, declaration)
+    except DepositDeclarationError as e:
+        declaration = None
+        declaration_error = str(e)
+    try:
+        plan = plan_protocol(run_dir, declaration)
+    except (OSError, ValueError) as e:
+        return DepositFileCheck(problems=[f"protocol history: {e}"])
+    digest = protocol_digest(plan)
+    if not (run_dir / "paper" / "draft.tex").is_file():
+        return DepositFileCheck(protocol_digest=digest)
+
+    times = times_advisory(plan, evidence)
+    deposit_dir = run_dir / "paper" / DEPOSIT_DIR
+    if not deposit_dir.exists() and not deposit_dir.is_symlink():
+        return DepositFileCheck(advisories=[_NO_DEPOSIT_ADVICE, times], protocol_digest=digest)
+
+    problems: List[str] = []
+    advisories: List[str] = []
+    fails, notes = protocol_record_problems(plan)
+    problems.extend(fails)
+    advisories.extend(notes)
+    if declaration_error is not None:
+        problems.append(declaration_error)
+    else:
+        paper_dir = run_dir / "paper"
+        record_path = deposit_record_path(run_dir)
+        record_text = (
+            record_path.read_text(encoding="utf-8") if record_path.is_file() else None
+        )
+        problems.extend(deposit_bundle_problems(paper_dir, plan, record_text, data))
+        bib = paper_dir / "references.bib"
+        data_fails, data_notes = deposit_data_problems(
+            plan, data, evidence,
+            bib.read_text(encoding="utf-8", errors="replace") if bib.is_file() else None,
+        )
+        problems.extend(data_fails)
+        advisories.extend(data_notes)
+        docs = {
+            name: (paper_dir / name).read_text(encoding="utf-8", errors="replace")
+            for name in _PAPER_DOCS if (paper_dir / name).is_file()
+        }
+        name_fails, name_notes = deposit_name_problems(docs, plan, data)
+        problems.extend(name_fails)
+        advisories.extend(name_notes)
+    if plan.withheld_reason is not None:
+        advisories.append(withheld_advisory(plan.withheld_reason))
+    advisories.append(times)
+    history = protocol_history_line(plan) if plan.version > 1 and not problems else ""
+    return DepositFileCheck(
+        problems=problems, advisories=advisories, protocol_digest=digest,
+        protocol_history=history,
+    )
 
 
 @dataclass(frozen=True)
@@ -625,6 +763,13 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
     # pointer. READ-ONLY (stats/hashes the named files, executes nothing), no LLM.
     reproduction_notes = _reproduction_advisory(run_dir, evidence)
 
+    # Deposit files (design/deposit-files.md D5): the protocol history shipped under
+    # paper/deposit/ must be exactly what its manifest lists and what runs/<id>/ calls for,
+    # and the record's own protocol files must agree. FAIL lines gate; the times advisory
+    # (D12), the withheld advisory and a paper without paper/deposit/ are advisory only.
+    # READ-ONLY, every hash recomputed from bytes, no LLM.
+    deposit_check = check_deposit_files(run_dir, spec, evidence)
+
     return VerifyReport(
         spec_id=spec.id,
         outcomes=outcomes,
@@ -648,11 +793,16 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
         paper_requirements_problems=paper_requirements_problems,
         paper_requirements_clean=paper_requirements_clean,
         paper_advisory=(paper_advisory + number_notes + conclusion_review_notes
-                        + search_log_notes + literature_key_notes + reproduction_notes),
+                        + search_log_notes + literature_key_notes + reproduction_notes
+                        + deposit_check.advisories),
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
         search_log_problems=search_log_problems,
         search_log_clean=search_log_clean,
+        deposit_file_problems=deposit_check.problems,
+        deposit_files_clean=not deposit_check.problems,
+        protocol_digest=deposit_check.protocol_digest,
+        protocol_history=deposit_check.protocol_history,
         passed=(
             all_reproduced
             and paper_consistent
@@ -664,6 +814,7 @@ def verify_run(run_dir: Path, strict_science: bool = False) -> VerifyReport:
             and paper_cross_doc_clean
             and paper_requirements_clean
             and search_log_clean
+            and not deposit_check.problems
         ),
     )
 
@@ -2240,6 +2391,20 @@ def _check_package_requirements(
     #    to the package `problems`, so the package path's `clean = not problems` / `passed = clean`
     #    makes it a HARD gate -- a package is the final submission unit (REQ-SA-510).
     problems.extend(deposit_completeness_problems(package_record_path(package_dir)))
+
+    # 10. Deposit files (design/deposit-files.md D5, D8): each packaged run's protocol files
+    #     under 06_provenance/protocol/<id>/ and 06_provenance/deposit.csv must be what
+    #     runs/<id>/ calls for NOW (an amendment after packaging fails), and the package must
+    #     hold exactly the files deposit.csv lists. The withheld advisory and the record-side
+    #     notes go to the advisory channel. The packaged runs are the assembler's own
+    #     selection (resolve_runs), imported here because render.package imports this module.
+    from sci_adk.render.package import resolve_runs
+
+    deposit_fails, deposit_notes = package_deposit_problems(
+        workspace_dir, package_dir, resolve_runs(workspace_dir, pkgreqs)
+    )
+    problems.extend(deposit_fails)
+    warnings.extend(deposit_notes)
 
     return problems, warnings, runs, runs_reproduced
 

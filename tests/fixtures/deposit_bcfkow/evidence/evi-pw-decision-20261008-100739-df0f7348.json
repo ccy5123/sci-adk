@@ -1,0 +1,1609 @@
+{
+  "id": "evi-pw-decision-20261008-100739-df0f7348",
+  "created_at": "2026-10-08T10:07:39.816296Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "prior_work_decision",
+  "provenance": {
+    "code_ref": "prior_work:searched",
+    "data_ref": "literature_evidence=evi-lit-20261008-100739-627357c7; manifest=runs/SPEC-BCFKOW-001/literature",
+    "data_source": null,
+    "seed": null,
+    "environment": "prior-work decision (Spec-time trigger); see referenced LITERATURE item for the acquired corpus",
+    "cost": null,
+    "search_log": {
+      "searched_at": [
+        "2026-10-08T09:41:36Z",
+        "2026-10-08T09:41:13Z",
+        "2026-10-08T09:41:25Z"
+      ],
+      "queries": [
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:bioconcentration factor fish octanol-water partition coefficient regression slope",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:partition coefficients bioaccumulation potential chemicals fish",
+          "status": "ok",
+          "n_results": 46,
+          "detail": "first 25 inspected"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:review bioconcentration factor BCF bioaccumulation factor BAF assessments organic chemicals aquatic organisms",
+          "status": "ok",
+          "n_results": 5,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:measuring estimating bioconcentration factor chemicals fish",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429, Retry-After 51479 s"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:correlation of bioconcentration factors",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:OPERA models predicting physicochemical properties environmental fate endpoints",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:improved method estimating bioconcentration bioaccumulation factor octanol/water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:measuring estimating bioconcentration factor chemicals fish (single retry, via curl)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429: keyless daily budget for this IP exhausted; resets midnight UTC"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Veith DeFoe Bergstedt measuring and estimating the bioconcentration factor of chemicals in fish",
+          "status": "ok",
+          "n_results": 25,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Mackay 1982 correlation of bioconcentration factors",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (parallel requests)"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Mansouri OPERA models for predicting physicochemical properties and environmental fate endpoints",
+          "status": "ok",
+          "n_results": 25,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Meylan improved method for estimating bioconcentration bioaccumulation factor from octanol water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Mackay 1982 correlation of bioconcentration factors (retry)",
+          "status": "ok",
+          "n_results": 25,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Meylan improved method for estimating bioconcentration bioaccumulation factor from octanol water partition coefficient (retry)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Meylan 1999 bioconcentration bioaccumulation factor octanol water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Meylan estimating bioconcentration bioaccumulation factor octanol water",
+          "status": "ok",
+          "n_results": 20,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Bintein Devillers Karcher nonlinear dependence of fish bioconcentration on n-octanol water partition coefficient",
+          "status": "ok",
+          "n_results": 15,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Devillers Bintein Domine comparison of BCF models based on log P Chemosphere",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=comparison of BCF models based on log P",
+          "status": "ok",
+          "n_results": 15,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=linear regression log BCF log Kow fish slope neutral organic chemicals",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "loose ranking; no relevant item in the 25 returned"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Neely Branson Blau partition coefficient to measure bioconcentration potential of organic chemicals in fish",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=partition coefficient to measure bioconcentration potential of organic chemicals in fish",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Neely Branson Blau partition coefficient to measure bioconcentration potential of organic chemicals in fish (retry via curl)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=bioconcentration factor octanol-water partition coefficient correlation fish organic chemicals",
+          "status": "ok",
+          "n_results": 25,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1139/f79-146 (WebFetch)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1139/f79-146 (curl; metadata + abstract)",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1021/es00099a008",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1016/0045-6535(88)90040-9",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1002/etc.5620180412",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1139/a06-005",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1186/s13321-018-0263-1",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1080/10629369308028814",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "works/10.1016/0045-6535(96)00246-9",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "search_query=abs:\"bioconcentration factor\" AND abs:octanol",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "search_query=abs:bioconcentration AND abs:fish",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "search_query=abs:bioaccumulation AND abs:octanol",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "search_query=abs:\"partition coefficient\" AND abs:octanol",
+          "status": "ok",
+          "n_results": 16,
+          "detail": "control query confirming the index answers; no BCF item among the 16"
+        },
+        {
+          "index": "arxiv",
+          "query": "search_query=abs:bioconcentration",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "id_list=1710.08174",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "semanticscholar",
+          "query": "paper/search?query=fish bioconcentration factor log Kow linear regression slope",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "paper/search?query=log BCF log Kow fish regression (retry)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "europepmc",
+          "query": "DOI:\"10.1186/s13321-018-0263-1\" (resultType=core)",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "europepmc",
+          "query": "PMC5843579/fullTextXML (OPERA data-set table)",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "europepmc",
+          "query": "ABSTRACT:\"bioconcentration factor\" AND ABSTRACT:fish AND ABSTRACT:(octanol OR Kow) AND ABSTRACT:(regression OR slope)",
+          "status": "ok",
+          "n_results": 5,
+          "detail": null
+        },
+        {
+          "index": "europepmc",
+          "query": "TITLE:\"bioconcentration\" AND TITLE:(\"partition coefficient\" OR octanol OR Kow) AND TITLE:fish",
+          "status": "ok",
+          "n_results": 3,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "log BCF log Kow fish linear regression slope 0.85 Veith 1979 neutral organic chemicals",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Arnot Gobas 2006 review bioconcentration factor log BCF = 0.60 log Kow slope 0.46 acceptable quality data fish",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "\"Arnot\" \"Gobas\" 2006 \"log BCF\" \"0.60\" \"log KOW\" \"-0.23\" fish regression acceptable",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Arnot Gobas 2006 fish BCF regression \"2393\" log KOW slope acceptable data r2 0.52",
+          "status": "ok",
+          "n_results": 9,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Mackay 1982 \"Correlation of bioconcentration factors\" BCF = 0.048 Kow fish lipid regression",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Isnard Lambert 1988 Chemosphere \"log BCF = 0.80 log Kow\" fish bioconcentration regression",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Meylan 1999 BCFWIN nonionic equation \"log BCF = 0.77 log Kow - 0.70\" OR \"0.6598 log Kow\" log Kow 1 to 7",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Bintein Devillers Karcher 1993 bilinear model log BCF = 0.910 log Kow - 1.975 log(6.8 10-8 Kow + 1) - 0.786 n = 154",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "websearch",
+          "query": "Veith Macek Petrocelli Carroll 1980 ASTM STP 707 log BCF = 0.76 log P - 0.23 fish 84 chemicals",
+          "status": "ok",
+          "n_results": 10,
+          "detail": null
+        },
+        {
+          "index": "webfetch",
+          "query": "https://rem-main.rem.sfu.ca/papers/gobas/A%20Review%20of%20Bioconcentration%20factor%20(BCF)%20and.pdf (Arnot & Gobas 2006 full text)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "ECONNREFUSED twice via WebFetch; curl connection timeout after 40 s"
+        },
+        {
+          "index": "webfetch",
+          "query": "https://cdnsciencepub.com/doi/10.1139/a06-005",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 403"
+        },
+        {
+          "index": "webfetch",
+          "query": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9692598/ (list of log Kow-based BCF equations with references)",
+          "status": "ok",
+          "n_results": 1,
+          "detail": null
+        },
+        {
+          "index": "webfetch",
+          "query": "https://link.springer.com/article/10.1186/s13321-018-0263-1",
+          "status": "failed",
+          "n_results": null,
+          "detail": "redirect to Springer IdP authorization; full text read via Europe PMC instead"
+        },
+        {
+          "index": "webfetch",
+          "query": "https://pubmed.ncbi.nlm.nih.gov/8790626/ (Bintein 1993 abstract)",
+          "status": "failed",
+          "n_results": null,
+          "detail": "cookie wall; equation taken from WebSearch excerpt of the same PubMed abstract"
+        },
+        {
+          "index": "webfetch",
+          "query": "https://doi.org/10.48550/arXiv.1710.08174 and https://doi.org/10.1520/stp27411s (DOI resolution check)",
+          "status": "ok",
+          "n_results": 2,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"Gödel number\" molecule",
+          "status": "ok",
+          "n_results": 2,
+          "detail": "Both unrelated (biosystems origin-of-life essay; book chapter on combinatorialism)."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"Gödel numbering\" chemical",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "Zenodo artificial-life case study; unrelated."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime number\" \"molecular descriptor\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" molecular graph code",
+          "status": "ok",
+          "n_results": 3,
+          "detail": "Three versions of one Authorea preprint on pi and DNA; unrelated."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime factorization\" chemical structure",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "1998 Trends Cogn Sci reply letter; unrelated."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" molecular descriptor",
+          "status": "ok",
+          "n_results": 4,
+          "detail": "Hosoya polynomials / Zagreb indices of algebraic (group/ring) graphs; nanotopology review; no molecular prime code."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" \"topological index\"",
+          "status": "ok",
+          "n_results": 7,
+          "detail": "Topological indices of zero-divisor / power graphs of rings and groups; not molecules."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" canonical molecular structure",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime number\" octanol water partition",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429: keyless daily budget for this IP exhausted (retryAfter ~51,000 s). Retried after 20 s via curl and via WebFetch: both HTTP 429."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted); retried once at end of session, HTTP 429 again."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" QSAR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" QSPR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:molecular AND abs:descriptor",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:molecule AND abs:encoding",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:Gödel AND abs:molecule",
+          "status": "ok",
+          "n_results": 4,
+          "detail": "Fullerenes in Gödel spacetimes (x2), DNA coding and Gödel numbering (1909.13574), 'Mathematics is physical'; none on molecular graphs or partitioning."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:Godel AND abs:molecular",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime factorization\" AND abs:molecular",
+          "status": "ok",
+          "n_results": 3,
+          "detail": "Shor/hidden-subgroup symmetry (2605.04343, abstract read), tensor-train optimisation, Wigner-symbol library; unrelated."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:lipophilicity",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime\" AND abs:\"octanol-water\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:prime AND abs:\"molecular graph\"",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "'Singular graphs' (1806.07786); unrelated."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"number-theoretic\" AND abs:molecular",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:chemical",
+          "status": "ok",
+          "n_results": 2,
+          "detail": "Primon gas cosmology; bacterial gene-network computing; unrelated."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\" AND abs:\"partition coefficient\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:Matula AND abs:alkanes",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:\"molecular graphs\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime number molecular graph code octanol-water partition coefficient",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Loose ranking (total-results 5,045,427); top 25 are generic log Kow measurement/estimation works; none uses a prime-number code."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Gödel numbering molecular structure",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Neto 2013 (Matula numbers, Gödel numbering and Fock space) and Nicolaidis & Psomopoulos 2022 (DNA Gödel numbering); rest unrelated."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime numbers unique code chemical structure",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Top 25 are number-theory works; no chemistry."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Matula numbers prime numbers alkanes rooted trees chemical",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), first attempt."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime numbers canonical numbering atoms molecular graph",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Canonical-numbering papers (Jochum-Gasteiger 1977, HOC procedures 1985, Shelley-Munk 1981) plus number-theory books; no property correlation."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=topological index based on prime numbers molecular graph",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Prime/coprime graphs of rings and groups; no molecular prime code."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=number theory molecular descriptor QSPR lipophilicity",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Carbó-Dorca & Saliner 2009 (number of atoms as descriptor) and Malik & Noureen 2026 (augmented Sombor index); no prime code."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Matula numbers prime numbers alkanes rooted trees chemical",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), second attempt; replaced by the rephrased Matula query below."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime factorization encoding molecules integer representation",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), first attempt."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=molecular connectivity relationship to partition coefficients",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Murray, Hall & Kier 1975 and Šoškić & Plavšić 2005 (connectivity indices vs log P / log Kow)."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Gödel number molecular descriptor QSAR",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Generic QSAR descriptor papers and Gödel philosophy; no Gödel-based molecular descriptor."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Matula numbers coding chemical structures alkanes",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Elk 1995 (heteroatoms/rings), Gutman & Ivić 1996, Deutsch 2012, Dossou-Olory & Mojeed 2025 review."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Expansion of Matula numbers to heteroatoms and to ring compounds",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Title lookup: 10.1021/ci00024a012 confirmed."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime factorization encoding molecules integer representation",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), second attempt."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Elk Gutman 1994 properties derivable Matula numbers alkane",
+          "status": "ok",
+          "n_results": 8,
+          "detail": "Title lookup: 10.1021/ci00018a017 confirmed."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime factorization encoding molecules integer representation",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Third attempt answered; top 25 are integer factorisation / RSA works; no molecular encoding."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime numbers atomic number vertex degree molecular graph lipophilicity",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Top 25 are number-theory works; no chemistry."
+        },
+        {
+          "index": "semantic_scholar",
+          "query": "prime number molecular code octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (keyless request refused); retried once at end of session, HTTP 429 again."
+        },
+        {
+          "index": "semantic_scholar",
+          "query": "Gödel numbering molecular graph descriptor",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429."
+        },
+        {
+          "index": "semantic_scholar",
+          "query": "prime numbers molecular descriptor lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429."
+        },
+        {
+          "index": "websearch",
+          "query": "prime number molecular graph code octanol-water partition coefficient log P correlation",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No prime-code vs log P work. Nearest: Persona et al. 2007 Acta Pol Pharm 64:311 (information-theoretic graph index for log P of thiobenzanilides; no DOI, PubMed 18536156; not prime-based)."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Gödel numbering\" molecule chemical structure encoding descriptor",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Surfaced Weininger 1989 CANON (prime products of neighbour ranks) and Krotko 2020; Gödel encodings of DNA / genetic code."
+        },
+        {
+          "index": "websearch",
+          "query": "\"prime numbers\" molecular descriptor QSPR lipophilicity \"log P\"",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No prime-based log P descriptor. Surfaced Mannhold et al. 2009 (log P from carbon and heteroatom counts)."
+        },
+        {
+          "index": "websearch",
+          "query": "molecule encoded as product of primes atomic number \"prime\" integer code molecular graph descriptor",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No whole-molecule prime-power descriptor found; CANON/Krotko and DNA Gödel numbering again."
+        },
+        {
+          "index": "websearch",
+          "query": "Matula numbers prime numbers chemical trees alkanes canonical nomenclature",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Matula/Elk/Gutman line of work: prime-factorisation codes of alkanes, polybenzenes, polymantanes, heteroatoms; uses are nomenclature and graph statistics."
+        },
+        {
+          "index": "websearch",
+          "query": "\"prime number\" topological index molecular graph \"partition coefficient\" OR \"log Kow\" OR \"logP\" atoms weighted by primes",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No prime-weighted index for log P / log Kow; nearest are E-state, ETA, connectivity and optimised-correlation-weight indices."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Further Properties Derivable from the Matula Number of an Alkane\" Elk Gutman abstract",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Citation confirmed (J Chem Inf Comput Sci 1994, 34, 331-334); abstract not found; citing works (Deutsch 2012) describe it as deriving tree statistics from Matula numbers."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Expansion of Matula Numbers to Heteroatoms and to Ring Compounds\" Elk 1995 abstract",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Citation confirmed (35(2):233-236); abstract not shown; ACS page returned HTTP 403 to WebFetch."
+        },
+        {
+          "index": "websearch",
+          "query": "Gödel encoding molecules prime power atomic number vertex degree integer representation chemistry preprint",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Only molecular-graph hit is the GitHub repository ccy5123/sci-adk (software test of an injective Gödel-style molecule key; no log Kow; not a publication, no DOI). Rest: Gödel encodings of DNA / genetic code."
+        },
+        {
+          "index": "websearch",
+          "query": "\"number-theoretic\" molecular descriptor octanol-water partition coefficient prime",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No number-theoretic descriptor of log P found."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Matula numbers, Gödel numbering and Fock space\" Journal of Mathematical Chemistry 2013 abstract",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Abstract confirmed: bijection rooted trees <-> Fock-space vectors; no physicochemical property."
+        },
+        {
+          "index": "websearch",
+          "query": "Malik Noureen 2026 \"A novel descriptor of molecular graphs and its implications in QSPR studies of antiviral drugs\"",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Confirmed descriptor is the augmented Sombor index (degree-based), not a prime code."
+        },
+        {
+          "index": "crossref",
+          "query": "multiplicative topological index octanol-water partition coefficient",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "query.bibliographic, rows=25; total-results 3219891; top 25 are generic log Kow method/standard papers, none relevant"
+        },
+        {
+          "index": "crossref",
+          "query": "prime number molecular graph code octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException); retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "multiplicative Zagreb index lipophilicity log P QSPR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException); retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel number molecular structure code prime factorization chemical compounds",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 7818500; number-theory texts only"
+        },
+        {
+          "index": "crossref",
+          "query": "number theory molecular descriptor QSPR prime numbers",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 4783880; number-theory texts only"
+        },
+        {
+          "index": "crossref",
+          "query": "atom-weighted vertex degree descriptor lipophilicity octanol water",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2187625; surfaced 10.5772/31647 and 10.1002/jps.2600840120"
+        },
+        {
+          "index": "crossref",
+          "query": "multiplicative Zagreb index lipophilicity log P QSPR",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 1264942; multiplicative Zagreb bound/QSPR papers; examined 10.3390/math11102245 (pi-electron energy, no log P)"
+        },
+        {
+          "index": "crossref",
+          "query": "prime number molecular graph code octanol-water partition coefficient",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 5045428; generic log Kow papers, no prime/graph-code work"
+        },
+        {
+          "index": "crossref",
+          "query": "molecular identification numbers prime numbers chemical structures",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 6624773; number-theory texts only"
+        },
+        {
+          "index": "crossref",
+          "query": "product-type graph invariant logP drugs QSPR",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2306275; degree-based index QSPR of drug sets, none with a prime or element-weighted product code"
+        },
+        {
+          "index": "crossref",
+          "query": "Narumi-Katayama index product of vertex degrees physicochemical properties",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException); retried once, HTTP 500 again"
+        },
+        {
+          "index": "crossref",
+          "query": "molecular ID numbers Randic",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2513550; surfaced Randic ID-number papers 10.1021/ci00043a009, 10.1021/ci00051a009"
+        },
+        {
+          "index": "crossref",
+          "query": "prime numbers canonical numbering atoms molecular graph unique code",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 3182362; surfaced 10.1021/ci60002a007 and a Godel-number flow-cytometry identifier 10.3389/fimmu.2025.1481412"
+        },
+        {
+          "index": "crossref",
+          "query": "integer code molecular graph log Kow bioconcentration",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2840993; surfaced 10.1080/10629369508233995"
+        },
+        {
+          "index": "crossref",
+          "query": "arithmetic encoding molecular graph property prediction",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 3629056; graph-neural-network papers only"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel numbering chemistry molecular graph",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException)"
+        },
+        {
+          "index": "crossref",
+          "query": "prime number based topological index molecular descriptor",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 10530707; no molecular prime-code work"
+        },
+        {
+          "index": "crossref",
+          "query": "SMILES algorithm for generation of unique SMILES notation",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "known-item lookup; confirmed 10.1021/ci00062a008"
+        },
+        {
+          "index": "crossref",
+          "query": "Molecular hashkeys novel method molecular characterization predicting pharmaceutical properties",
+          "status": "ok",
+          "n_results": 5,
+          "detail": "known-item lookup; confirmed 10.1021/jm980527a"
+        },
+        {
+          "index": "crossref",
+          "query": "quantitative structure-property relationship analysis physicochemical properties anti-hepatitis prescription drugs linear regression model",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; DOI 10.1016/j.heliyon.2024.e25908 confirmed instead via PMC10877299"
+        },
+        {
+          "index": "crossref",
+          "query": "Estimating the Octanol/Water Partition Coefficient for Aliphatic Organic Compounds Using Semi-Empirical Electrotopological Index",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; DOI 10.3390/ijms12107250 confirmed instead via api.crossref.org/works/{doi}"
+        },
+        {
+          "index": "crossref",
+          "query": "Narumi Katayama index",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel numbering molecular graph",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "product of primes molecular descriptor lipophilicity",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2740848; nothing relevant"
+        },
+        {
+          "index": "crossref",
+          "query": "bond additive topological descriptor element weights octanol water",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; retried once, HTTP 500 again"
+        },
+        {
+          "index": "crossref",
+          "query": "Narumi Katayama index",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 1217460; graph-theoretic NK-index papers, none relating NK to log P"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel numbering molecular graph",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 2568110; nothing on molecular Godel codes"
+        },
+        {
+          "index": "crossref",
+          "query": "optimization of correlation weights of local graph invariants octanol water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; DOI 10.1021/ci034200g found via WebSearch and confirmed via api.crossref.org/works/{doi}"
+        },
+        {
+          "index": "crossref",
+          "query": "flexible topological descriptors octanol/water partition coefficient alcohols",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "Multiplicative Topological Indices of Molecular Structure in Anticancer Drugs Shao Jahanbani",
+          "status": "ok",
+          "n_results": 3,
+          "detail": "known-item lookup; 10.1080/10406638.2020.1743329 (no abstract deposited; not assessed further)"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"multiplicative\" AND abs:\"topological index\" AND abs:\"partition coefficient\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:\"molecular\" AND abs:\"descriptor\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"Godel\" AND abs:\"molecule\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\" AND abs:\"logP\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\"",
+          "status": "ok",
+          "n_results": 387,
+          "detail": "syntax check that phrase queries return hits; not a topical search"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\" AND abs:lipophilicity",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime\" AND abs:\"molecular graph\"",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "1806.07786 Singular graphs (spectral graph theory, unrelated)"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"octanol\" AND abs:\"graph\" AND abs:\"degree\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"multiplicative\" AND abs:\"Zagreb\" AND abs:\"QSPR\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime factorization\" AND abs:\"molecule\"",
+          "status": "ok",
+          "n_results": 2,
+          "detail": "NMR quantum-factoring experiments (quant-ph/0205193, quant-ph/0112176), unrelated"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"Godel numbering\" AND abs:\"chemical\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"multiplicative\" \"topological index\" \"partition coefficient\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429: keyless daily budget for this IP exhausted (resets midnight UTC); retried once later, HTTP 429 again"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"weighted vertex degree\" lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"number theory\" \"molecular descriptor\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" \"QSPR\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted); retried once later, HTTP 429 again"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"molecular code\" \"partition coefficient\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "multiplicative topological index octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "prime number molecular code lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "weighted vertex degree descriptor octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 on retry later in session"
+        },
+        {
+          "index": "websearch",
+          "query": "prime number molecular descriptor Gödel encoding molecule logP octanol-water correlation",
+          "status": "ok",
+          "n_results": 19,
+          "detail": "Godel encodings found only for DNA / genetic code / clustering; no molecular prime code tied to log P"
+        },
+        {
+          "index": "websearch",
+          "query": "multiplicative Zagreb index Narumi-Katayama logP QSPR drugs correlation",
+          "status": "ok",
+          "n_results": 19,
+          "detail": "multiplicative-index drug QSPR papers model BP/MP/MR, not log P; additive degree indices vs LogP in 10.1016/j.heliyon.2024.e25908"
+        },
+        {
+          "index": "websearch",
+          "query": "\"prime numbers\" molecular graph code atoms atomic number prime product chemical structure identifier",
+          "status": "ok",
+          "n_results": 10,
+          "detail": "prime products in canonical numbering (Weininger CANON; Krotko 2020); patent US 6,757,618 prime-array structure identifier; no property link"
+        },
+        {
+          "index": "websearch",
+          "query": "\"Gödel number\" OR \"Gödel numbering\" chemical structure molecule encoding descriptor property",
+          "status": "ok",
+          "n_results": 18,
+          "detail": "only molecule-level Godel encoding found is github.com/ccy5123/sci-adk (this workspace's own toolkit: injectivity test, no property, no DOI); hypermap patent US 10,985,775 (non-chemical)"
+        },
+        {
+          "index": "websearch",
+          "query": "atomic number weighted vertex degree topological index log Kow octanol-water partition coefficient correlation",
+          "status": "ok",
+          "n_results": 27,
+          "detail": "vertex-edge-weighted (atomic-property) degree indices (10.1021/acs.jcim.4c02013) tested on BP/MR/MV, not log Kow; electrotopological log P index 10.3390/ijms12107250"
+        },
+        {
+          "index": "websearch",
+          "query": "number-theoretic molecular descriptor primes assigned to elements molecule lipophilicity bioconcentration QSAR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "tool returned an API safeguard error; no results received"
+        },
+        {
+          "index": "websearch",
+          "query": "molecular hash prime factorization atoms bonds integer code cheminformatics partition coefficient",
+          "status": "ok",
+          "n_results": 19,
+          "detail": "molecular hashkeys (10.1021/jm980527a) predict log P from 3D surface similarity, not a prime graph code; Limeade arXiv 2411.16623 integer encoding for optimization"
+        },
+        {
+          "index": "websearch",
+          "query": "Toropov optimization of correlation weights of local graph invariants octanol/water partition coefficient alcohols",
+          "status": "ok",
+          "n_results": 18,
+          "detail": "atom-type and vertex-degree correlation weights fitted to log P (10.1021/ci034200g; Duchowicz et al. 2003 J. Argent. Chem. Soc., no DOI found)"
+        },
+        {
+          "index": "websearch",
+          "query": "multiplicative topological indices logP correlation \"multiplicative\" Randić Sombor lipophilicity drugs",
+          "status": "ok",
+          "n_results": 18,
+          "detail": "no multiplicative index tested against log P; additive Gutman/Randic indices vs lipophilicity in 10.3390/molecules28155822 and 10.3390/ph18091255"
+        }
+      ],
+      "candidates": [
+        {
+          "doi": "10.1139/f79-146",
+          "title": "Measuring and Estimating the Bioconcentration Factor of Chemicals in Fish (Veith, DeFoe & Bergstedt 1979, J. Fish. Res. Board Can. 36(9):1040-1048)",
+          "relevance": "same",
+          "basis": "Abstract (Crossref record) gives log BCF = 0.85 log P - 0.70 for organic chemicals in fathead minnows; slope 0.85 lies inside [0.7, 1.0]. The abstract does not restrict to neutral chemicals or state the log Kow range."
+        },
+        {
+          "doi": "10.1520/stp27411s",
+          "title": "An Evaluation of Using Partition Coefficients and Water Solubility to Estimate Bioconcentration Factors for Organic Chemicals in Fish (Veith, Macek, Petrocelli & Carroll 1980, ASTM STP 707:116-129)",
+          "relevance": "same",
+          "basis": "ASTM abstract (read through a WebSearch excerpt) gives log BCF = 0.76 log P - 0.23 for fish; slope 0.76 inside the band. Sample size is reported inconsistently (28 new chemicals in the abstract; 84 in secondary sources)."
+        },
+        {
+          "doi": "10.1021/es00099a008",
+          "title": "Correlation of bioconcentration factors (Mackay 1982, Environ. Sci. Technol. 16(5):274-278)",
+          "relevance": "same",
+          "basis": "Secondary sources (PMC9692598; WebSearch excerpts) give log BCF = log Kow - 1.32 (BCF = 0.048 Kow) for fish, r2 = 0.95. The slope is fixed at 1.0 rather than estimated freely, and sits on the band's inclusive upper edge. Crossref has no abstract; primary text not read."
+        },
+        {
+          "doi": "10.1016/0045-6535(88)90040-9",
+          "title": "Estimating bioconcentration factors from octanol-water partition coefficient and aqueous solubility (Isnard & Lambert 1988, Chemosphere 17(1):21-34)",
+          "relevance": "same",
+          "basis": "PMC9692598 lists log BCF = 0.80 log Kow - 0.52 (n = 107, R2 = 0.81) among equations citing this paper. The equation-to-reference mapping is by elimination, not stated explicitly. Slope 0.80 is inside the band; primary text not read."
+        },
+        {
+          "doi": "10.1002/etc.5620180412",
+          "title": "Improved method for estimating bioconcentration/bioaccumulation factor from octanol/water partition coefficient (Meylan et al. 1999, Environ. Toxicol. Chem. 18(4):664-672) [METHOD DATA SET, fallback (c): BCFBAF/BCFWIN training set]",
+          "relevance": "same",
+          "basis": "Abstract (Crossref) confirms a separate nonionic equation for log Kow 1.0-7.0 over 694 chemicals (r2 = 0.73). ECETOC 2000 and an ECHA dossier (via WebSearch) give it as log BCF = 0.77 log Kow - 0.70 + sum of Fi; slope 0.77 is inside the band. The later BCFWIN v2.15 software uses 0.6598 log Kow - 0.333, which falls below the band."
+        },
+        {
+          "doi": "10.1139/a06-005",
+          "title": "A review of bioconcentration factor (BCF) and bioaccumulation factor (BAF) assessments for organic chemicals in aquatic organisms (Arnot & Gobas 2006, Environ. Rev. 14(4):257-297) [METHOD DATA SET, primary choice (a)]",
+          "relevance": "related",
+          "basis": "Data-set source: 5317 BCF values for 842 chemicals in 219 species (Crossref abstract). Citing papers and WebSearch excerpts of the full text report a fish fit of log BCF = 0.60 log Kow - 0.23 (r2 about 0.52, acceptable data, log Kow > 0 up to about 8.7). That slope falls below the band, but the fit is not restricted to log Kow 1-6. The regression table was not read: SFU PDF unreachable, publisher HTTP 403."
+        },
+        {
+          "doi": "10.1186/s13321-018-0263-1",
+          "title": "OPERA models for predicting physicochemical properties and environmental fate endpoints (Mansouri, Grulke, Judson & Williams 2018, J. Cheminform. 10:10) [METHOD DATA SET, fallback (b): OPERA BCF and LogP sets]",
+          "relevance": "related",
+          "basis": "Data-set source; no log BCF-log Kow slope is reported. Full text (Europe PMC PMC5843579): BCF set from PHYSPROP file EPI_BCF_Data_SDF.sdf, 685 to 618 top-quality to 608 QSAR-ready chemicals. LogP set: 15,806 to 14,544 to 14,041. Data at github.com/kmansouri/OPERA. The BCF set descends from the EPI Suite BCF data, so fallbacks (b) and (c) share lineage."
+        },
+        {
+          "doi": "10.1080/10629369308028814",
+          "title": "Nonlinear Dependence of Fish Bioconcentration on n-Octanol/Water Partition Coefficient (Bintein, Devillers & Karcher 1993, SAR QSAR Environ. Res. 1(1):29-39)",
+          "relevance": "related",
+          "basis": "Bilinear model, log BCF = 0.910 log P - 1.975 log(6.8e-7 P + 1) - 0.786 (n = 154, r = 0.950), taken from a WebSearch excerpt of the PubMed abstract. Its linear-limb coefficient 0.91 is not a straight-line OLS slope; the curve peaks near log Kow 6."
+        },
+        {
+          "doi": "10.1016/0045-6535(96)00246-9",
+          "title": "Comparison of BCF models based on log P (Devillers, Bintein & Domine 1996, Chemosphere 33(6):1047-1065)",
+          "relevance": "related",
+          "basis": "Comparison of linear, quadratic, polynomial and bilinear log P-based fish BCF models. Secondary sources say the linear models give similar predictions for log Kow < 6. A review, not a new slope estimate."
+        },
+        {
+          "doi": "10.1021/es60098a008",
+          "title": "Partition coefficient to measure bioconcentration potential of organic chemicals in fish (Neely, Branson & Blau 1974, Environ. Sci. Technol. 8:1113-1115)",
+          "relevance": "related",
+          "basis": "Earliest fish log BCF-log Kow regression; PMC9692598 lists log BCF = 0.542 log Kow + 0.124 (n = 8, R2 = 0.90). The slope falls below the band."
+        },
+        {
+          "doi": "10.1021/es60165a001",
+          "title": "Correlation of bioconcentration factors of chemicals in aquatic and terrestrial organisms with their physical and chemical properties (Kenaga 1980, Environ. Sci. Technol.)",
+          "relevance": "related",
+          "basis": "Classic BCF-Kow/solubility correlation spanning aquatic and terrestrial organisms. Surfaced on Crossref; slope not checked in this search."
+        },
+        {
+          "doi": "10.1016/0273-2300(85)90007-8",
+          "title": "Relation between water solubility, octanol/water partition coefficients, and bioconcentration of organic chemicals in fish: a review (van Gestel, Otermann & Canton 1985, Regul. Toxicol. Pharmacol.)",
+          "relevance": "related",
+          "basis": "Review of fish BCF-Kow relations (Crossref and Europe PMC title hit); slopes not checked."
+        },
+        {
+          "doi": "10.1002/etc.5620170803",
+          "title": "Evaluation of log KOW and tissue lipid content as predictors of chemical partitioning to fish tissues (Bertelsen et al. 1998)",
+          "relevance": "related",
+          "basis": "Argues that Kow-BCF relationships largely reflect accumulation in lipid. Mechanistic context; no band-relevant slope found."
+        },
+        {
+          "doi": "10.1016/0045-6535(92)90570-h",
+          "title": "The i/o-characters to evaluate n-octanol/water partition coefficient in bioconcentration of organic chemicals in fish (Saito et al. 1992, Chemosphere)",
+          "relevance": "related",
+          "basis": "Fish BCF modeled against Kow-derived descriptors (title-level); slope not checked."
+        },
+        {
+          "doi": "10.1520/stp29034s",
+          "title": "Bioconcentration of Hydrophobic Chemicals in Fish (Opperhuizen 1986, ASTM STP)",
+          "relevance": "related",
+          "basis": "Covers fish BCF of hydrophobic chemicals, including the high log Kow deviation (title-level); slope not checked."
+        },
+        {
+          "doi": "10.1016/j.envres.2014.12.019",
+          "title": "Evaluation and comparison of benchmark QSAR models to predict a relevant REACH endpoint: The bioconcentration factor (BCF) (2015, Environ. Res.)",
+          "relevance": "related",
+          "basis": "Benchmarks Kow-based fish BCF equations (Veith, Mackay, Bintein, TGD) against complex QSARs; no new slope."
+        },
+        {
+          "doi": "10.1016/j.chemosphere.2006.09.079",
+          "title": "Linear QSAR regression models for the prediction of bioconcentration factors by physicochemical properties and structural theoretical molecular descriptors (Papa, Dearden & Gramatica 2007)",
+          "relevance": "related",
+          "basis": "Multivariate BCF QSAR (Europe PMC hit); not a single log Kow slope."
+        },
+        {
+          "doi": "10.1016/j.yrtph.2023.105556",
+          "title": "Are current regulatory log Kow cut-off values fit-for-purpose as a screening tool for bioaccumulation potential in aquatic organisms? (2023)",
+          "relevance": "related",
+          "basis": "Regulatory evaluation of the log Kow-BCF relationship (OpenAlex title hit); slope not checked."
+        },
+        {
+          "doi": "10.1080/10629360412331297489",
+          "title": "Improved prediction of fish bioconcentration factor of hydrophobic chemicals (Dearden 2004, SAR QSAR Environ. Res.)",
+          "relevance": "related",
+          "basis": "Fish BCF QSAR for hydrophobic chemicals (Crossref title hit); not a log Kow-only slope."
+        },
+        {
+          "doi": "10.3390/toxics10100581",
+          "title": "Predicting the Bioconcentration Factor in Fish from Molecular Structures (Bertato 2022, Toxics)",
+          "relevance": "related",
+          "basis": "Structure-based fish BCF prediction; cites Veith 1979 data. No band-relevant slope."
+        },
+        {
+          "doi": "10.1897/08-233.1",
+          "title": "Methods for estimating the bioconcentration factor of ionizable organic chemicals (Fu et al. 2009, Environ. Toxicol. Chem.)",
+          "relevance": "unrelated",
+          "basis": "Covers ionizable chemicals, outside H1's neutral-organic scope."
+        },
+        {
+          "doi": "10.1016/s0045-6535(97)00241-5",
+          "title": "Two-compartment thermodynamic model for bioconcentration of hydrophobic organic chemicals by alga (Wang 1997, Chemosphere)",
+          "relevance": "unrelated",
+          "basis": "Algae, not fish."
+        },
+        {
+          "doi": "10.1016/j.aquatox.2007.02.022",
+          "title": "Assessing metal bioaccumulation in aquatic environments: The inverse relationship between bioaccumulation factors, trophic transfer factors and exposure concentration (2007)",
+          "relevance": "unrelated",
+          "basis": "Metals, not neutral organics; no Kow."
+        },
+        {
+          "doi": "10.48550/arXiv.1710.08174",
+          "title": "Predicting bioaccumulation using molecular theory: A machine learning approach (Sosnin, Misin & Fedorov 2017, arXiv)",
+          "relevance": "unrelated",
+          "basis": "3D-RISM plus CNN prediction of bioaccumulation factor; no log BCF-log Kow regression."
+        },
+        {
+          "doi": "10.1021/ci00062a008",
+          "title": "SMILES. 2. Algorithm for generation of unique SMILES notation",
+          "relevance": "related",
+          "basis": "Weininger et al. 1989: replaces each atom rank by a prime and takes products over neighbours to refine canonical ranks; prime codes used for canonical naming only, no partitioning property."
+        },
+        {
+          "doi": "10.1186/s13321-020-00453-4",
+          "title": "Atomic ring invariant and Modified CANON extended connectivity algorithm for symmetry perception in molecular graphs and rigorous canonicalization of SMILES",
+          "relevance": "related",
+          "basis": "Krotko 2020 (abstract read): product of primes for ring sizes as an atom invariant for canonicalisation; no log P / log Kow."
+        },
+        {
+          "doi": "10.1007/BF01170004",
+          "title": "A canonical ordering of polybenzenes and polymantanes using a prime number factorization technique",
+          "relevance": "related",
+          "basis": "Elk 1990: prime-factorisation code used to give canonical names to polybenzenes/polymantanes; nomenclature only."
+        },
+        {
+          "doi": "10.1021/ci00024a012",
+          "title": "Expansion of Matula Numbers to Heteroatoms and to Ring Compounds",
+          "relevance": "related",
+          "basis": "Elk 1995: extends prime-factorisation (Matula) codes to heteroatoms and rings; title and citing works place it in nomenclature; abstract not readable (ACS HTTP 403), so heteroatom weighting scheme and any property use unverified."
+        },
+        {
+          "doi": "10.1021/ci00018a017",
+          "title": "Further Properties Derivable from the Matula Number of an Alkane",
+          "relevance": "related",
+          "basis": "Elk & Gutman 1994: per citing work (Deutsch 2012), the 'properties' are graph statistics of the alkane tree read from its Matula number, not physicochemical data; abstract not read."
+        },
+        {
+          "doi": "10.1016/0012-365x(95)00182-v",
+          "title": "On Matula numbers",
+          "relevance": "related",
+          "basis": "Gutman & Ivić 1996: mathematical properties of the prime-based tree code motivated by alkane coding; no partitioning."
+        },
+        {
+          "doi": "10.5772/intechopen.1006120",
+          "title": "Matula Numbers and their Applications",
+          "relevance": "related",
+          "basis": "Dossou-Olory & Mojeed 2025 review (chapter read): chemistry applications listed are nomenclature and information retrieval only; no log P, boiling point or QSPR."
+        },
+        {
+          "doi": "10.1007/s10910-013-0178-z",
+          "title": "Matula numbers, Gödel numbering and Fock space",
+          "relevance": "related",
+          "basis": "Neto 2013 (abstract read): Gödel-type relabelling links rooted-tree codes to Fock space; no physicochemical property."
+        },
+        {
+          "doi": "10.1002/jps.2600641216",
+          "title": "Molecular Connectivity III: Relationship to Partition Coefficients",
+          "relevance": "related",
+          "basis": "Murray, Hall & Kier 1975: degree-based connectivity index correlated with partition coefficients; nearest descriptor-vs-log P work, but not a prime code."
+        },
+        {
+          "doi": "10.1021/ci050024v",
+          "title": "Modeling the Octanol−Water Partition Coefficients by an Optimized Molecular Connectivity Index",
+          "relevance": "related",
+          "basis": "Šoškić & Plavšić 2005: connectivity index with optimised atom weights fitted to log Kow; fitted weights, not fixed prime weights."
+        },
+        {
+          "doi": "10.1002/jps.21494",
+          "title": "Calculation of Molecular Lipophilicity: State-of-the-Art and Comparison of LogP Methods on more than 96,000 Compounds",
+          "relevance": "related",
+          "basis": "Mannhold et al. 2009: log P from carbon and heteroatom counts alone; an element-count size baseline close to what log10(code) measures, no prime code."
+        },
+        {
+          "doi": "10.1002/jcc.21208",
+          "title": "Notes on quantitative structure-properties relationships (QSPR) part 2: The role of the number of atoms as a molecular descriptor",
+          "relevance": "related",
+          "basis": "Carbó-Dorca & Saliner 2009 (abstract read): atom count as QSPR descriptor; size-type descriptor, no prime code, log Kow not the stated focus."
+        },
+        {
+          "doi": "10.1016/j.physa.2022.127053",
+          "title": "DNA coding and Gödel numbering",
+          "relevance": "unrelated",
+          "basis": "Nicolaidis & Psomopoulos 2022: Gödel number of a nucleotide sequence, not an atom-level molecular graph; no partitioning."
+        },
+        {
+          "doi": "10.3390/molecules27186081",
+          "title": "Hosoya Polynomials of Power Graphs of Certain Finite Groups",
+          "relevance": "unrelated",
+          "basis": "Primes index group orders of algebraic graphs; no molecules or log P."
+        },
+        {
+          "doi": "10.1016/j.jmgm.2026.109483",
+          "title": "A novel descriptor of molecular graphs and its implications in QSPR studies of antiviral drugs",
+          "relevance": "unrelated",
+          "basis": "Malik & Noureen 2026: augmented Sombor (degree-based) index vs drug properties; no prime code, log Kow not reported in the abstract seen."
+        },
+        {
+          "doi": "10.1021/ci00062a008",
+          "title": "SMILES. 2. Algorithm for generation of unique SMILES notation (Weininger, Weininger, Weininger 1989)",
+          "relevance": "related",
+          "basis": "CANON multiplies primes of neighbour ranks to refine atom invariants: a prime-product molecular graph code used for canonical ordering, not related to partitioning"
+        },
+        {
+          "doi": "10.1186/s13321-020-00453-4",
+          "title": "Atomic ring invariant and Modified CANON extended connectivity algorithm for symmetry perception in molecular graphs and rigorous canonicalization of SMILES (Krotko 2020)",
+          "relevance": "related",
+          "basis": "prime products for neighbour ranks and ring sizes in canonicalization; paper relates the encoding to no physicochemical property (checked on PMC7439248)"
+        },
+        {
+          "doi": "10.1021/ci034200g",
+          "title": "QSPR Modeling of Lipid-Water Partition Coefficient by Optimization of Correlation Weights of Local Graph Invariants (Toropov, Roy 2003)",
+          "relevance": "related",
+          "basis": "nearest mathematical form: atom-additive descriptor built from element-type and vertex-degree weights correlated with log P, but the weights are fitted to the property, not fixed prime logarithms"
+        },
+        {
+          "doi": "10.1080/10629369508233995",
+          "title": "Evaluation of Molecular Connectivity Indices as a Predictive Method of log Kow for Different Classes of Chemicals (Finizio, Sicbaldi, Vighi 1995)",
+          "relevance": "related",
+          "basis": "degree-based indices with element-specific valence deltas regressed on measured log Kow across chemical classes; different functional form, no prime code"
+        },
+        {
+          "doi": "10.1016/j.heliyon.2024.e25908",
+          "title": "On quantitative structure-property relationship (QSPR) analysis of physicochemical properties and anti-hepatitis prescription drugs using a linear regression model (Mahboob et al. 2024)",
+          "relevance": "related",
+          "basis": "14 element-blind degree-based indices vs LogP for 16 drugs (r 0.68-0.91); no element weighting, no prime code"
+        },
+        {
+          "doi": "10.5772/31647",
+          "title": "Structural Relationship Study of Octanol-Water Partitioning Coefficients and Total Biodegradation of Barbiturate Medicines by Randic Descriptor (Taherpour et al. 2012)",
+          "relevance": "related",
+          "basis": "single degree-based index (Randic) related to log Kow within one drug class; not a prime or element-weighted code"
+        },
+        {
+          "doi": "10.3390/ijms12107250",
+          "title": "Estimating the Octanol/Water Partition Coefficient for Aliphatic Organic Compounds Using Semi-Empirical Electrotopological Index (Souza et al. 2011)",
+          "relevance": "related",
+          "basis": "one graph-derived index regressed on log P of 131 aliphatics; index built from semi-empirical atomic charges, not a prime-power code"
+        },
+        {
+          "doi": "10.3390/molecules28155822",
+          "title": "Evaluation of the Usefulness of Topological Indices for Predicting Selected Physicochemical Properties of Bioactive Substances with Anti-Androgenic and Hypouricemic Activity (Wardecki et al. 2023)",
+          "relevance": "related",
+          "basis": "Gutman M/Mv, Randic and Wiener indices vs lipophilicity of a small drug set; additive degree indices, no prime code"
+        },
+        {
+          "doi": "10.3390/ph18091255",
+          "title": "Use of TLC and Computational Methods to Determine Lipophilicity Parameters of Selected Neuroleptics (Klimoszek et al. 2025)",
+          "relevance": "related",
+          "basis": "Gutman M and connectivity indices correlated with calculated logP of five neuroleptics; additive degree indices, no prime code"
+        },
+        {
+          "doi": "10.1021/acs.jcim.4c02013",
+          "title": "Vertex-Edge-Weighted Molecular Graphs: A Study on Topological Indices and Their Relevance to Physicochemical Properties of Drugs Used in Cancer Treatment (Sorgun, Birgin 2025)",
+          "relevance": "related",
+          "basis": "degree-based indices with vertex/edge weights from atomic properties (closest element-weighted degree form); log P not among the properties named in the abstract or search excerpts"
+        },
+        {
+          "doi": "10.1038/s41598-025-33532-3",
+          "title": "Leveraging topological indices and machine learning for advanced prediction of antidepressant drug properties (Zhang et al. 2026)",
+          "relevance": "unrelated",
+          "basis": "eight multiplicative degree indices, but properties modelled are BP, MP, Tc, Vc and MR; log P not modelled (checked on PMC12848129)"
+        },
+        {
+          "doi": "10.3390/math11102245",
+          "title": "Sharp Bounds on the Generalized Multiplicative First Zagreb Index of Graphs with Application to QSPR Modeling (Hayat, Asmat 2023)",
+          "relevance": "unrelated",
+          "basis": "multiplicative index applied only to pi-electron energy of benzenoid hydrocarbons (Crossref abstract)"
+        },
+        {
+          "doi": "10.1021/jm980527a",
+          "title": "Molecular Hashkeys: A Novel Method for Molecular Characterization and Its Application for Predicting Important Pharmaceutical Properties of Molecules (Ghuloum, Sage, Jain 1999)",
+          "relevance": "unrelated",
+          "basis": "predicts log P from a 3D surface-similarity vector called a hashkey; not an integer code of the molecular graph"
+        },
+        {
+          "doi": "10.1002/jps.2600840120",
+          "title": "Atom/Fragment Contribution Method for Estimating Octanol-Water Partition Coefficients (Meylan, Howard 1995)",
+          "relevance": "unrelated",
+          "basis": "atom-additive like the code's logarithm, but constants are fitted fragment values; no fixed graph code"
+        },
+        {
+          "doi": "10.1021/ci00043a009",
+          "title": "On molecular identification numbers (Randic 1984)",
+          "relevance": "unrelated",
+          "basis": "path-weighted numeric graph identifiers for discrimination; not prime-based, no partitioning"
+        },
+        {
+          "doi": "10.1021/ci00051a009",
+          "title": "Molecular ID numbers: by design (Randic 1986)",
+          "relevance": "unrelated",
+          "basis": "numeric graph identifiers; not prime-based, no partitioning"
+        },
+        {
+          "doi": "10.1021/ci60002a007",
+          "title": "On Unique Numbering of Atoms and Unique Codes for Molecular Graphs (Randic 1975)",
+          "relevance": "unrelated",
+          "basis": "adjacency-matrix code for canonical numbering; not prime-based, no property"
+        },
+        {
+          "doi": "10.3389/fimmu.2025.1481412",
+          "title": "Unique gating strategy identifier based on the Prime Population System and Godel Numbers (2025)",
+          "relevance": "unrelated",
+          "basis": "Godel numbers for flow-cytometry gating strategies, not molecules"
+        }
+      ]
+    }
+  },
+  "result": {
+    "type": "qualitative",
+    "point": null,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "searched: DOIs=['10.1139/f79-146', '10.1520/stp27411s', '10.1021/es00099a008', '10.1016/0045-6535(88)90040-9', '10.1002/etc.5620180412', '10.1139/a06-005', '10.1186/s13321-018-0263-1', '10.1080/10629369308028814', '10.1016/0045-6535(96)00246-9', '10.1021/es60098a008', '10.1021/es60165a001', '10.1016/0273-2300(85)90007-8', '10.1002/etc.5620170803', '10.1016/0045-6535(92)90570-h', '10.1520/stp29034s', '10.1016/j.envres.2014.12.019', '10.1016/j.chemosphere.2006.09.079', '10.1016/j.yrtph.2023.105556', '10.1080/10629360412331297489', '10.3390/toxics10100581', '10.1021/ci00062a008', '10.1186/s13321-020-00453-4', '10.1007/BF01170004', '10.1021/ci00024a012', '10.1021/ci00018a017', '10.1016/0012-365x(95)00182-v', '10.5772/intechopen.1006120', '10.1007/s10910-013-0178-z', '10.1002/jps.2600641216', '10.1021/ci050024v', '10.1002/jps.21494', '10.1002/jcc.21208', '10.1021/ci034200g', '10.1080/10629369508233995', '10.1016/j.heliyon.2024.e25908', '10.5772/31647', '10.3390/ijms12107250', '10.3390/molecules28155822', '10.3390/ph18091255', '10.1021/acs.jcim.4c02013']",
+    "artifact_ref": null
+  },
+  "bears_on": [],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": null,
+  "negative_control": null
+}

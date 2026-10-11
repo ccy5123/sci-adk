@@ -1,7 +1,7 @@
 # sci-adk: Agentic Discovery Kit (ADK)
 
 > Version: 0.2.0
-> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 2,653 engineering tests
+> Status: working rigor/verification ADK — compiler + DecisionEngine + science guards (G1–G5) + deterministic record-fidelity render spine + publishing requirements (F1/F2/F3) + near-submission package layer + 3,129 engineering tests
 > Last Updated: 2026-06-30
 
 ## What is sci-adk?
@@ -237,9 +237,10 @@ kernel** — it adds delegation and early checks, never a new verdict path. See
 - **Workspace near-submission package**: `sci-adk package` assembles a workspace-level submission — one merged `main.tex` + `si.tex` + figures from ALL runs, plus a standard 6-folder reproduction package. A `pkgreqs.json` frozen contract (venue + format) gates the package via the `package_requirements_clean` HARD gate inside `sci-adk verify`. CLI: `sci-adk package`, `sci-adk pkgreqs freeze`. `/sci package` drives the full [0]–[5] contract. See `design/near-submission-package.md`.
 - **Novelty 2-kind (result vs method)** — `novelty_result` / `novelty_method` are independent flags per hypothesis (N1); each produces a separate `claim-novelty-<hyp>-result` / `-method` Claim derived by the B-replace rule; `sci-adk novelty` + `sci-adk contested` CLI verbs; `verify` re-derives both. `\novelty{}` render markup (N2) and render/verify novelty gate (N3) track the 2-kind split into the rendered paper. See `design/literature-acquisition.md`.
 - **Paper figures + SI**: native pgfplots data-plot renderer with stable labels + Overleaf folder co-location; an authored Supporting Information (`paper/si.tex`, written only when `sci-adk render` is given `--si si.json`), with the deterministic record dump deposited outside the submission as `runs/<id>/record.tex`; a `\ref`↔`\label` within-document consistency gate as a `sci-adk verify` HARD gate; image-path figures (`ImageFigureSpec`, domain-general — the kernel carries zero domain code); optional `SIProse` hook around the record dump; body-order figure numbering. See `design/paper-figures-and-si.md` and `design/si-belief-record-split.md`.
+- **Deposit files**: every full render writes `paper/deposit/`, holding the exact bytes of each frozen protocol version and amendment receipt (unless the run marks its protocol withheld), the data files declared with `--deposit`, and `manifest.csv` with each file's SHA-256, size and terms. A third-party file, or a table built from third-party values, is cited by its checksum and not shipped unless its entry states both a license and that redistribution is permitted (`design/deposit-files.md`).
 - **LaTeX paper output**: `render_paper_latex` emits a tex-only, Overleaf-compilable `draft.tex` (IMRaD structure, no-dep pdflatex-safe unicode net, `references.bib` co-located into `paper/`), an agent-authored prose-input hook, and a References section wiring cited DOIs — `render/paper.py`
 - **paperforge re-pin → DOI→BibTeX**: pin `2cec69b` ships `paperforge.bibtex`
-- 2,653 engineering tests (`python3 -m pytest -q`, measured 2026-10-10): 2,637 pass; 14 need a running Docker daemon and 2 skip without an optional package (`mcp`, LaTeX `pgfplots`)
+- 3,129 engineering tests (`python3 -m pytest -q`, measured 2026-10-11): 3,113 pass; 14 need a running Docker daemon and 2 skip without an optional package (`mcp`, LaTeX `pgfplots`)
 
 ### Remaining
 
@@ -315,7 +316,7 @@ sci-adk/
 │   └── handoffs/             # Per-session handoff logs (session-1..10, ...)
 ├── environments/             # Docker images
 │   └── python-base/          # Python 3.11 + scientific stack
-├── tests/                    # Engineering-layer tests (2,653)
+├── tests/                    # Engineering-layer tests (3,129)
 │   ├── test_spec.py          # Spec invariants
 │   ├── test_evidence.py      # Evidence invariants
 │   ├── test_claim.py         # Claim invariants
@@ -328,7 +329,7 @@ sci-adk/
 │   ├── test_compiler.py
 │   ├── test_kernel_adapter_seam.py  # F4 lint: kernel must not import adapter
 │   ├── test_t1_end_to_end.py
-│   └── ...                   # 68 test files total
+│   └── ...                   # 140 test files total
 ├── runs/                     # Research output (per-run artifacts)
 │   └── <spec_id>/
 │       ├── spec.json         # Compiled Spec (frozen)
@@ -346,7 +347,7 @@ sci-adk/
 ## Testing
 
 ```bash
-# All tests (2,653; 14 need Docker)
+# All tests (3,129; 14 need Docker)
 python3 -m pytest -q
 
 # Integration tests (require Docker)

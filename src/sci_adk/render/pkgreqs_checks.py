@@ -23,7 +23,12 @@ The checks (design §3 table):
   - :func:`figure_presence_problems` -- every ``\\includegraphics`` in main.tex resolves to a
     co-located file (the package's manuscript ``figures/`` dir);
   - :func:`readme_submission_readiness_problems` -- the README carries a submission-readiness
-    section.
+    section;
+  - :func:`package_deposit_problems` -- each packaged run's protocol files under
+    ``06_provenance/protocol/<id>/``, its declared files under ``02_data/<id>/`` and
+    ``05_inputs/<id>/`` and ``06_provenance/deposit.csv`` are what ``runs/<id>/`` calls for,
+    the package holds exactly the files the manifest lists, and the paths ``main.tex`` /
+    ``si.tex`` name exist (design/deposit-files.md D5, D8).
 
 The compile-integrity (ref/label), required-sections, reference-style, tool-vocabulary, and
 value-fidelity checks are NOT re-implemented here -- they are the SAME pure checkers the per-run
@@ -39,11 +44,40 @@ per-run sibling), src/sci_adk/render/package.py (the assembler that produces the
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
+import json
 import re
 import unicodedata
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from sci_adk.render.deposit import (
+    DATA_DIR,
+    INPUTS_DIR,
+    PACKAGE_DATA_DIR,
+    PACKAGE_INPUTS_DIR,
+    PACKAGE_MANIFEST,
+    PACKAGE_MANIFEST_COLUMNS,
+    PACKAGE_PROTOCOL_DIR,
+    PACKAGE_RECORD,
+    DataPlan,
+    ProtocolPlan,
+    deposit_data_problems,
+    is_plain_name,
+    package_data_root,
+    package_manifest_differences,
+    package_manifest_records,
+    package_manifest_text,
+    package_name_problems,
+    package_protocol_root,
+    package_rows,
+    plan_run_deposit,
+    protocol_digest,
+    protocol_record_problems,
+    withheld_advisory,
+)
 from sci_adk.render.bib_latex import (
     HTML_ENTITY_RE,
     T1_ONLY_CHARS,
@@ -806,6 +840,436 @@ def deposit_completeness_problems(record_path: Path) -> List[str]:
     return []
 
 
+# -- deposit files (design/deposit-files.md D5, D8) -------------------------------
+
+_DEPOSIT_TAG = "deposit files"
+_REASSEMBLE = "re-assemble the package (sci-adk package)"
+_NO_PACKAGE_DEPOSIT_ADVICE = (
+    f"{_DEPOSIT_TAG}: {PACKAGE_MANIFEST} is missing: the package was assembled before each "
+    f"run's protocol history shipped with it -- {_REASSEMBLE} to ship the protocol files and "
+    "their manifest"
+)
+
+
+_PACKAGE_OWNED_ROOTS: Tuple[str, ...] = (
+    PACKAGE_PROTOCOL_DIR, PACKAGE_DATA_DIR, PACKAGE_INPUTS_DIR,
+)
+
+
+def _package_cell_problem(package_dir: Path, cell: str, packaged: Set[str]) -> Optional[str]:
+    """Why a ``deposit.csv`` ``file`` cell is not one the package could have written, or
+    ``None``: ``06_provenance/protocol/``, ``02_data/`` or ``05_inputs/``, then a packaged
+    run and a plain file name, with no symbolic link on the way."""
+    parts = cell.split("/")
+    ok = False
+    for root in _PACKAGE_OWNED_ROOTS:
+        prefix = root.split("/")
+        if (len(parts) == len(prefix) + 2 and parts[:len(prefix)] == prefix
+                and parts[-2] in packaged and is_plain_name(parts[-1])):
+            ok = True
+    if not ok:
+        return (f"not {', '.join(r + '/' for r in _PACKAGE_OWNED_ROOTS)} followed by a "
+                "packaged run and a plain file name")
+    for depth in range(1, len(parts) + 1):
+        if package_dir.joinpath(*parts[:depth]).is_symlink():
+            return f"{'/'.join(parts[:depth])} is a symbolic link"
+    return None
+
+
+def _run_evidence(run_dir: Path) -> list:
+    """The run's Evidence log, read-only (the same files ``verify`` reads)."""
+    from sci_adk.core.evidence import EvidenceItem
+
+    evidence_dir = run_dir / "evidence"
+    if not evidence_dir.is_dir():
+        return []
+    return [EvidenceItem.model_validate(json.loads(p.read_text(encoding="utf-8")))
+            for p in sorted(evidence_dir.glob("*.json"))]
+
+
+def _workspace_runs(workspace_dir: Path) -> Set[str]:
+    runs_root = workspace_dir / "runs"
+    if not runs_root.is_dir():
+        return set()
+    return {d.name for d in runs_root.iterdir() if d.is_dir() and (d / "spec.json").is_file()}
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# How the package gate names the bibliography a declared file's ``cite`` keys resolve in: the
+# package's own, which the assembler copies from the author's drop point (a placeholder with no
+# entry when there is none).
+_PACKAGE_BIB_NAME = "01_manuscript/references.bib, supplied via package_src/references.bib"
+_RUN_INDEX = "06_provenance/run_index.csv"
+_DIGEST_COLUMN = "protocol_digest_sha256"
+_PROTOCOL_HISTORY = "\\section{Protocol history}"
+# The digest line make_si.py prints in a run's Protocol history block ("Protocol digest:" and,
+# after the line break and font commands, the 64-hex digest).
+_RECORD_DIGEST_RE = re.compile(
+    r"Protocol digest.{0,120}?(?<![0-9A-Fa-f])([0-9A-Fa-f]{64})(?![0-9A-Fa-f])", re.DOTALL)
+
+
+def _read_text(path: Path) -> Optional[str]:
+    """``path``'s UTF-8 text, or ``None`` when it is missing, a link or unreadable."""
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _run_index_digests(text: Optional[str]) -> Optional[Dict[str, str]]:
+    """``{run id: protocol_digest_sha256 cell}`` of a ``run_index.csv`` text, or ``None`` when
+    there is no such column."""
+    if text is None:
+        return None
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames or _DIGEST_COLUMN not in reader.fieldnames \
+                or "run_id" not in reader.fieldnames:
+            return None
+        return {row["run_id"]: row[_DIGEST_COLUMN] or "" for row in reader}
+    except csv.Error:
+        return None
+
+
+def _has_deposit_trace(package_dir: Path) -> bool:
+    """Whether the package was assembled with deposit files: its ``record.tex`` has a Protocol
+    history section, or its ``run_index.csv`` a ``protocol_digest_sha256`` column."""
+    record = _read_text(package_dir / PACKAGE_RECORD)
+    if record is not None and _PROTOCOL_HISTORY in record:
+        return True
+    index = _read_text(package_dir / _RUN_INDEX)
+    if index is None:
+        return False
+    header = next(csv.reader(io.StringIO(index)), [])
+    return _DIGEST_COLUMN in header
+
+
+def _record_tex_escape(text: str) -> str:
+    """The escaping the shipped ``make_si.py`` applies to a run id (its ``esc``)."""
+    return (text.replace("\\", "\\textbackslash{}").replace("_", "\\_").replace("%", "\\%")
+            .replace("&", "\\&").replace("#", "\\#"))
+
+
+def _record_digest(record: str, rid: str) -> Optional[str]:
+    """The protocol digest ``record.tex`` prints in run ``rid``'s Protocol history block, or
+    ``None`` when there is no such block or no digest line in it."""
+    if _PROTOCOL_HISTORY not in record:
+        return None
+    history = record.split(_PROTOCOL_HISTORY, 1)[1].split("\\section{", 1)[0]
+    head = f"\\subsection*{{Run \\texttt{{{_record_tex_escape(rid)}}}}}"
+    if head not in history:
+        return None
+    block = history.split(head, 1)[1].split("\\subsection*{", 1)[0]
+    match = _RECORD_DIGEST_RE.search(block)
+    return match.group(1).lower() if match else None
+
+
+def _protocol_digest_problems(
+    package_dir: Path, plans: Sequence[Tuple[str, ProtocolPlan]]
+) -> List[str]:
+    """D11 in the package: ``run_index.csv`` (``protocol_digest_sha256``) and each run's
+    Protocol history block of ``record.tex`` print the protocol digest the record computes now
+    (:func:`~sci_adk.render.deposit.protocol_digest`, from ``runs/<id>/``)."""
+    if not plans:
+        return []
+    out: List[str] = []
+    cells = _run_index_digests(_read_text(package_dir / _RUN_INDEX))
+    if cells is None:
+        out.append(f"{_DEPOSIT_TAG}: {_RUN_INDEX} has no {_DIGEST_COLUMN} column, so it "
+                   f"states no run's protocol digest -- {_REASSEMBLE}")
+    record = _read_text(package_dir / PACKAGE_RECORD) or ""
+    for rid, plan in plans:
+        digest = protocol_digest(plan)
+        tag = f"{_DEPOSIT_TAG}: run '{rid}'"
+        if cells is not None and cells.get(rid) != digest:
+            given = cells.get(rid)
+            stated = ("has no row for the run" if given is None
+                      else f"gives protocol digest {given or '(empty)'}")
+            out.append(f"{tag}: {_RUN_INDEX} {stated}, but runs/{rid}/ gives protocol digest "
+                       f"{digest} -- {_REASSEMBLE}")
+        printed = _record_digest(record, rid)
+        if printed != digest:
+            stated = ("prints no protocol digest in the run's Protocol history block"
+                      if printed is None else f"prints protocol digest {printed}")
+            out.append(f"{tag}: {PACKAGE_RECORD} {stated}, but runs/{rid}/ gives protocol "
+                       f"digest {digest} -- {_REASSEMBLE}")
+    return out
+
+
+# @MX:ANCHOR: [AUTO] the package's deposit-file gate -- verify_package folds it into the HARD
+#   package gate; the assembler (render/package.py _write_deposit) writes what it checks.
+# @MX:REASON: [AUTO] D8: the package's rows must be current at verify time (an amendment or a
+#   changed declaration after packaging fails), and 06_provenance/protocol/ and the packaged
+#   runs' 02_data/<id>/ and 05_inputs/<id>/ must hold exactly the files deposit.csv lists.
+#   Every hash is recomputed from bytes and the expected rows are rebuilt from runs/<id>/ and
+#   the declared sources; trusting deposit.csv or the copies would let a stale package pass.
+def package_deposit_problems(
+    workspace_dir: Path, package_dir: Path, run_ids: Sequence[str]
+) -> Tuple[List[str], List[str]]:
+    """The deposit-file checks of an assembled package (design/deposit-files.md D5, D8).
+
+    READ-ONLY; every hash is recomputed from bytes and the expected ``deposit.csv`` is rebuilt
+    from ``runs/<id>/``, each run's persisted ``deposit.json`` and the declared sources --
+    never read from the package. For each packaged run (``run_ids``):
+
+      - the record-side protocol comparisons (receipts vs history files, ``prior_version_id``
+        links, rationales), whether the protocol ships or is withheld;
+      - copies: each protocol file the run ships is at ``06_provenance/protocol/<id>/`` with
+        exactly the record's bytes; each declared file it ships is at ``02_data/<id>/`` or
+        ``05_inputs/<id>/`` with exactly its source's bytes;
+      - the D5 data checks (recorded, derived, external against the run's Evidence; citations
+        against ``01_manuscript/references.bib``; cited not shipped, terms);
+      - the withheld advisory for a run that withholds its protocol;
+      - an advisory for a declared file whose bytes also sit under ``04_scripts/runs/<id>/``.
+
+    Then for the package:
+
+      - inventory: every ``deposit.csv`` row's file exists with that SHA-256 and size; every
+        file under ``06_provenance/protocol/`` and the packaged runs' ``02_data/<id>/`` and
+        ``05_inputs/<id>/`` is a row; a subfolder of the protocol folder that is not a packaged
+        run fails, as does a ``02_data/`` or ``05_inputs/`` subfolder named after a workspace
+        run that is not packaged; one named after no workspace run gets an advisory;
+      - plan: ``deposit.csv`` is the text the package writes for the record as it is now (an
+        amendment, a new declaration or a re-selection since the assembly fails here);
+      - names: the paths ``main.tex`` / ``si.tex`` name exist in the package
+        (:func:`~sci_adk.render.deposit.package_name_problems`);
+      - protocol digests: each packaged run's digest, recomputed from ``runs/<id>/``, is the
+        one ``run_index.csv`` (``protocol_digest_sha256``) and the run's Protocol history block
+        of ``record.tex`` print.
+
+    A package with no trace of this feature -- no ``deposit.csv``, no
+    ``06_provenance/protocol/``, no Protocol history section in ``record.tex`` and no
+    ``protocol_digest_sha256`` column in ``run_index.csv`` (assembled before it) -- gets one
+    advisory and no failure; any trace of it makes a missing ``deposit.csv`` or protocol
+    folder fail.
+
+    Returns ``(problems, advisories)``.
+    """
+    workspace_dir = Path(workspace_dir)
+    package_dir = Path(package_dir)
+    manifest = package_dir / PACKAGE_MANIFEST
+    root = package_dir / PACKAGE_PROTOCOL_DIR
+    if not (manifest.exists() or manifest.is_symlink() or root.exists() or root.is_symlink()
+            or _has_deposit_trace(package_dir)):
+        return [], [_NO_PACKAGE_DEPOSIT_ADVICE]
+
+    bib_path = package_dir / "01_manuscript" / "references.bib"
+    bib_text = (bib_path.read_text(encoding="utf-8", errors="replace")
+                if bib_path.is_file() else None)
+    problems: List[str] = []
+    notes: List[str] = []
+    deposits: List[Tuple[str, ProtocolPlan, DataPlan]] = []
+    planned_all = True
+    for rid in run_ids:
+        tag = f"{_DEPOSIT_TAG}: run '{rid}'"
+        run_dir = workspace_dir / "runs" / rid
+        try:
+            plan, data = plan_run_deposit(run_dir)
+        except (OSError, ValueError) as e:
+            problems.append(f"{tag}: {e}")
+            planned_all = False
+            continue
+        fails, advice = protocol_record_problems(plan)
+        problems.extend(f"{tag}: {m}" for m in fails)
+        notes.extend(f"{tag}: {m}" for m in advice)
+        if plan.withheld_reason is not None:
+            notes.append(f"{tag}: {withheld_advisory(plan.withheld_reason)}")
+        deposits.append((rid, plan, data))
+        for f in plan.shipped:
+            rel = f"{package_protocol_root(rid)}/{f.name}"
+            copy = package_dir / rel
+            if copy.is_symlink() or not copy.is_file():
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {rel} is missing ({f.description}; the record keeps it "
+                    f"as runs/{rid}/{f.record_name}) -- {_REASSEMBLE}"
+                )
+            elif copy.read_bytes() != f.data:
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {rel} differs from runs/{rid}/{f.record_name} -- "
+                    f"{_REASSEMBLE}"
+                )
+        for df in data.shipped:
+            rel = f"{package_data_root(df.entry.folder, rid)}/{df.entry.name}"
+            copy = package_dir / rel
+            if copy.is_symlink() or not copy.is_file():
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {rel} is missing ({df.entry.label}) -- {_REASSEMBLE}")
+            elif copy.read_bytes() != df.data:
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {rel} differs from its source {df.entry.source} -- "
+                    f"{_REASSEMBLE}"
+                )
+        if data.files:
+            data_fails, data_notes = deposit_data_problems(
+                plan, data, _run_evidence(run_dir), bib_text,
+                folder_of={folder: package_data_root(folder, rid)
+                           for folder in (DATA_DIR, INPUTS_DIR)},
+                bib_name=_PACKAGE_BIB_NAME,
+            )
+            problems.extend(f"{tag}: {m}" for m in data_fails)
+            notes.extend(f"{tag}: {m}" for m in data_notes)
+            notes.extend(f"{tag}: {m}" for m in _artifact_copies(package_dir, rid, data))
+
+    # inventory: deposit.csv against the files, and the files against deposit.csv
+    text: Optional[str] = None
+    records: List[dict] = []
+    if manifest.is_symlink() or not manifest.is_file():
+        problems.append(f"{_DEPOSIT_TAG}: {PACKAGE_MANIFEST} is missing -- {_REASSEMBLE}")
+    else:
+        try:
+            text = manifest.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"{_DEPOSIT_TAG}: {PACKAGE_MANIFEST} is not UTF-8 text")
+        if text is not None:
+            parsed = package_manifest_records(text)
+            if parsed is None:
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {PACKAGE_MANIFEST} does not have the columns "
+                    f"{','.join(PACKAGE_MANIFEST_COLUMNS)}"
+                )
+            else:
+                records = parsed
+    packaged = set(run_ids)
+    listed = {r["file"]: r for r in records if r["file"]}
+    for rel, row in sorted(listed.items()):
+        reason = _package_cell_problem(package_dir, rel, packaged)
+        if reason:
+            problems.append(f"{_DEPOSIT_TAG}: {PACKAGE_MANIFEST} row file {rel!r}: {reason}")
+            continue
+        path = package_dir / rel
+        if not path.is_file():
+            problems.append(
+                f"{_DEPOSIT_TAG}: {rel} is listed in {PACKAGE_MANIFEST} but missing -- "
+                f"{_REASSEMBLE}")
+            continue
+        held = path.read_bytes()
+        actual = hashlib.sha256(held).hexdigest()
+        if actual != row["sha256"]:
+            problems.append(
+                f"{_DEPOSIT_TAG}: {rel}: its SHA-256 {actual} differs from the one "
+                f"{PACKAGE_MANIFEST} gives, {row['sha256'] or '(empty)'}"
+            )
+        if str(len(held)) != row["bytes"]:
+            problems.append(
+                f"{_DEPOSIT_TAG}: {rel}: {len(held)} bytes, {PACKAGE_MANIFEST} says "
+                f"{row['bytes'] or '(empty)'}"
+            )
+    if root.is_symlink():
+        problems.append(f"{_DEPOSIT_TAG}: {PACKAGE_PROTOCOL_DIR} is a symbolic link -- "
+                        f"{_REASSEMBLE}")
+    elif root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.name not in packaged or child.is_symlink() or not child.is_dir():
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {PACKAGE_PROTOCOL_DIR}/{child.name} is not the folder "
+                    f"of a packaged run; the package rebuilds {PACKAGE_PROTOCOL_DIR}/ whole "
+                    f"-- {_REASSEMBLE}"
+                )
+                continue
+            problems.extend(_unlisted(package_dir, child, listed))
+    workspace_runs = _workspace_runs(workspace_dir)
+    for folder in (PACKAGE_DATA_DIR, PACKAGE_INPUTS_DIR):
+        base = package_dir / folder
+        if not base.is_dir() or base.is_symlink():
+            continue
+        for child in sorted(base.iterdir()):
+            if not (child.is_dir() or child.is_symlink()):
+                continue                       # claims_all.csv, README.md: not a namespace
+            where = f"{folder}/{child.name}"
+            if child.name in packaged:
+                if child.is_symlink():
+                    problems.append(f"{_DEPOSIT_TAG}: {where} is a symbolic link -- "
+                                    f"{_REASSEMBLE}")
+                    continue
+                problems.extend(_unlisted(package_dir, child, listed))
+            elif child.name in workspace_runs:
+                problems.append(
+                    f"{_DEPOSIT_TAG}: {where} belongs to run '{child.name}', which is not "
+                    f"packaged; the package rebuilds it -- {_REASSEMBLE}"
+                )
+            else:
+                notes.append(
+                    f"{_DEPOSIT_TAG}: {where} is named after no run of the workspace; it is "
+                    "not the package's and ships unchecked"
+                )
+
+    # plan: deposit.csv is what the record calls for now
+    if text is not None and planned_all:
+        record = package_dir / PACKAGE_RECORD
+        record_text = record.read_text(encoding="utf-8") if record.is_file() else None
+        expected = package_manifest_text(package_rows(
+            [(rid, plan) for rid, plan, _ in deposits], record_text,
+            {rid: data for rid, _, data in deposits},
+        ))
+        if text != expected:
+            problems.extend(
+                f"{_DEPOSIT_TAG}: {line} -- {_REASSEMBLE}"
+                for line in package_manifest_differences(text, expected)
+            )
+
+    # names: the package paths main.tex / si.tex name (D8)
+    docs: Dict[str, str] = {}
+    for name in ("main.tex", "si.tex"):
+        doc = package_dir / "01_manuscript" / name
+        if doc.is_file():
+            docs[name] = doc.read_text(encoding="utf-8", errors="replace")
+    problems.extend(
+        f"{_DEPOSIT_TAG}: {m}" for m in package_name_problems(package_dir, docs, deposits))
+
+    # protocol digests: run_index.csv and record.tex print what runs/<id>/ computes now (D11)
+    problems.extend(_protocol_digest_problems(
+        package_dir, [(rid, plan) for rid, plan, _ in deposits]))
+    return problems, notes
+
+
+def _unlisted(package_dir: Path, folder: Path, listed: dict) -> List[str]:
+    out: List[str] = []
+    for path in sorted(folder.rglob("*")):
+        if path.is_dir() and not path.is_symlink():
+            continue
+        rel = path.relative_to(package_dir).as_posix()
+        if rel not in listed:
+            out.append(
+                f"{_DEPOSIT_TAG}: {rel} is not in {PACKAGE_MANIFEST}: the package did not "
+                f"write it -- {_REASSEMBLE}"
+            )
+    return out
+
+
+def _artifact_copies(package_dir: Path, rid: str, data: DataPlan) -> List[str]:
+    """D8: a declared file whose bytes also sit under ``04_scripts/runs/<id>/`` (the
+    wholesale copy of ``runs/<id>/artifacts/``) -- shipped twice, or shipped there although
+    the declaration does not ship it."""
+    scripts = package_dir / "04_scripts" / "runs" / rid
+    if not scripts.is_dir():
+        return []
+    by_sha: Dict[str, List[str]] = {}
+    for path in sorted(scripts.rglob("*")):
+        if path.is_file() and not path.is_symlink():
+            by_sha.setdefault(_sha256_file(path), []).append(
+                path.relative_to(package_dir).as_posix())
+    out: List[str] = []
+    for df in data.files:
+        for copy in by_sha.get(df.sha256, []):
+            if df.entry.ships:
+                checked = f"{package_data_root(df.entry.folder, rid)}/{df.entry.name}"
+                out.append(
+                    f"{df.entry.label} ships twice: {checked} and {copy}; the {checked} copy "
+                    "is the checked one"
+                )
+            else:
+                out.append(
+                    f"{copy} ships {df.entry.label} although the declaration does not ship it "
+                    f"({df.entry.not_shipped_reason()})"
+                )
+    return out
+
+
 __all__ = [
     "PACKAGE_FOLDERS",
     "PACKAGE_RECORD_NAME",
@@ -831,4 +1295,5 @@ __all__ = [
     "figure_presence_problems",
     "readme_submission_readiness_problems",
     "deposit_completeness_problems",
+    "package_deposit_problems",
 ]

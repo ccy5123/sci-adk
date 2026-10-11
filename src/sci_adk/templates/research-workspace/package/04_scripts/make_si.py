@@ -33,14 +33,29 @@ narrative band). A run NOT listed is appended, ungrouped, in record (id) order; 
 number -- it is presentation only. This is the generic, record-derived-or-config-driven
 replacement for any hardcoded cycle map.
 
+Protocol history: for each run, every frozen version of its protocol and the receipt of each
+amendment, with the time stated in the file, the SHA-256 of its bytes and the run's protocol
+digest -- computed here with the standard library only, from ``runs/<id>/spec.json``,
+``spec_history/`` and ``checkpoints/amendment-v<N>.json``. ``06_provenance/deposit.csv``
+lists the same files and names this record wherever it prints a checksum. As sci-adk does,
+a protocol file or folder that is a symbolic link is refused, and so is a ``spec.json``
+whose version lies more than 10 versions past the files that account for it.
+
+Declared data files: for each run, each file its declaration (``runs/<id>/deposit.json``)
+declares ``recorded`` or ``external``, under the Evidence item it is declared against, with
+the SHA-256 of its bytes -- so ``deposit.csv``'s ``evidence`` column resolves here.
+
 Self-contained: paths are resolved from this file's location
 (package/04_scripts/make_si.py -> workspace root), so ``python3 04_scripts/make_si.py`` run
 from the package regenerates 06_provenance/record.tex against the workspace record.
 """
 import glob
+import hashlib
 import json
 import os
 import re
+import stat
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))   # package/04_scripts
 PKG = os.path.dirname(HERE)                          # package
@@ -57,6 +72,18 @@ SY = {"supported": "S", "refuted": "R", "contested": "C", "proposed": "P"}
 def esc(s):
     return (str(s).replace("\\", "\\textbackslash{}").replace("_", "\\_")
             .replace("%", "\\%").replace("&", "\\&").replace("#", "\\#"))
+
+
+# Every character LaTeX treats specially in text, for author-written text (a declared file's
+# description) that may hold any of them.
+_TEX_SPECIAL = {
+    "\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "&": r"\&", "#": r"\#",
+    "%": r"\%", "_": r"\_", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
+def esc_text(s):
+    return "".join(_TEX_SPECIAL.get(ch, ch) for ch in str(s))
 
 
 def discover_runs():
@@ -136,6 +163,269 @@ def _digest_via_cli(rid):
         return m.group(1)[:12] if m else "n/a"
     except Exception:
         return "n/a"
+
+
+def _read_json_bytes(data):
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _when(value):
+    """A recorded time as an aware UTC datetime, or None (naive times are read as UTC)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        t = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+
+
+def _from_timestamp(value):
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _fmt_time(t):
+    return "time unknown" if t is None else t.astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+
+
+# How many of versions 1..V (V: the version spec.json states) may have no file accounting for
+# them (sci_adk.render.deposit.VERSION_MARGIN); past it spec.json is not what sci-adk wrote.
+VERSION_MARGIN = 10
+_HISTORY_NAME_RE = re.compile(r"spec\.v([1-9][0-9]{0,8})\.json")
+_RECEIPT_NAME_RE = re.compile(r"amendment-v([1-9][0-9]{0,8})\.json")
+
+
+def _plain_folder(run_dir, name):
+    """Refuse a protocol folder of the run that is a symbolic link or not a folder."""
+    path = os.path.join(run_dir, name)
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise ValueError(f"{path} is a symbolic link or not a folder; protocol files are read "
+                         "only from plain folders")
+
+
+def _protocol_bytes(run_dir, rel):
+    """The bytes of a protocol file of the run, or None when there is none. Never read through
+    a symbolic link: a link, or anything but a plain file, is refused (ValueError)."""
+    path = os.path.join(run_dir, rel)
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"{path} is a symbolic link or not a plain file; protocol files are "
+                         "read only as plain files")
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _numbers_on_disk(folder, pattern):
+    if not os.path.isdir(folder):
+        return []
+    return [int(m.group(1)) for m in (pattern.fullmatch(n) for n in os.listdir(folder)) if m]
+
+
+def _check_version_bound(run_dir, version):
+    """Refuse a version with more than VERSION_MARGIN of versions 1..version that no file of
+    the run accounts for (its history file, the receipt that produced it or replaced it, or
+    spec.json itself)."""
+    history = _numbers_on_disk(os.path.join(run_dir, "spec_history"), _HISTORY_NAME_RE)
+    receipts = _numbers_on_disk(os.path.join(run_dir, "checkpoints"), _RECEIPT_NAME_RE)
+    accounted = {version} | set(history) | set(receipts) | {n - 1 for n in receipts}
+    missing = version - len({n for n in accounted if 1 <= n <= version})
+    if missing > VERSION_MARGIN:
+        raise ValueError(f"{run_dir}/spec.json says version {version}, but no file accounts "
+                         f"for {missing} of versions 1 to {version}")
+
+
+def protocol_history(run_dir):
+    """The run's protocol files in the order they were written, and its protocol digest.
+
+    Returns ``(entries, digest)``: ``entries`` is a list of ``(name, description, time label,
+    sha256)`` -- version 1, then each amendment receipt followed by the version it produced;
+    ``sha256`` is empty for a version whose file was not kept, whose time is the one the next
+    version records for it (``prior_version_id``). ``digest`` is the SHA-256 of the listing
+    ``sha256sum`` prints for the kept files under these names, names in byte order. Every time
+    comes from a local clock.
+
+    Raises ValueError for a protocol file or folder that is a symbolic link, and for a version
+    more than VERSION_MARGIN versions past the files on disk (as sci-adk refuses them).
+    """
+    for folder in ("spec_history", "checkpoints"):
+        _plain_folder(run_dir, folder)
+    current = _protocol_bytes(run_dir, "spec.json")
+    if current is None:
+        raise ValueError(f"{run_dir}/spec.json does not exist")
+    version = int(json.loads(current.decode("utf-8")).get("version", 1))
+    if version < 1:
+        raise ValueError(f"{run_dir}/spec.json has version {version}")
+    _check_version_bound(run_dir, version)
+    versions = {}
+    for n in range(1, version):
+        data = _protocol_bytes(run_dir, f"spec_history/spec.v{n}.json")
+        if data is not None:
+            versions[n] = data
+    versions[version] = current
+    receipts = {}
+    for n in range(2, version + 1):
+        data = _protocol_bytes(run_dir, f"checkpoints/amendment-v{n}.json")
+        if data is not None:
+            receipts[n] = data
+    payloads = {n: _read_json_bytes(data) for n, data in versions.items()}
+
+    def sha(data):
+        return hashlib.sha256(data).hexdigest()
+
+    entries = []
+    for n in range(1, version + 1):
+        if n in receipts:
+            t = _when(_read_json_bytes(receipts[n]).get("recorded_at"))
+            entries.append((f"amendment-v{n}.json", f"amendment that produced version {n}",
+                            f"recorded {_fmt_time(t)}", sha(receipts[n])))
+        t = _when(payloads[n].get("created_at")) if n in payloads else None
+        if t is None and n + 1 in payloads:
+            t = _from_timestamp(payloads[n + 1].get("prior_version_id"))
+        if n == version:
+            description = f"protocol, version {n} (current)"
+        elif n in versions:
+            description = f"protocol, version {n}, replaced by version {n + 1}"
+        else:
+            description = f"protocol, version {n}; file not kept"
+        entries.append((f"protocol-v{n}.json", description, f"created {_fmt_time(t)}",
+                        sha(versions[n]) if n in versions else ""))
+    listing = "".join(
+        f"{entry[3]}  {entry[0]}\n" for entry in sorted(entries) if entry[3]
+    )
+    return entries, hashlib.sha256(listing.encode("utf-8")).hexdigest()
+
+
+def protocol_section(runs):
+    """The record's "Protocol history" section: one block per run (in index order)."""
+    L = [r"\section{Protocol history}"]
+    L.append(
+        r"For each run, every frozen version of its protocol and the receipt of each "
+        r"amendment, in the order they were written, with the time stated in the file and "
+        r"the SHA-256 of the file's bytes. The times come from local clocks; nothing "
+        r"witnesses them. \texttt{06\_provenance/deposit.csv} lists the same files; those "
+        r"a run ships are in the folder named after it under "
+        r"\texttt{06\_provenance/protocol/}. A run's protocol digest is the SHA-256 of the "
+        r"listing \texttt{sha256sum} prints for its files that were kept, names in byte "
+        r"order."
+    )
+    for rid, _label, _section in runs:
+        L.append(r"\subsection*{Run \texttt{" + esc(rid) + r"}}")
+        try:
+            entries, digest = protocol_history(os.path.join(RUNS, rid))
+        except (OSError, ValueError, AttributeError, TypeError):
+            L.append(r"\emph{The protocol files of this run could not be read.}")
+            continue
+        L.append(r"\begin{description}")
+        for name, description, when, sha in entries:
+            checksum = ("SHA-256:\\\\\n    {\\small\\texttt{" + sha + "}}") if sha else "no SHA-256"
+            # "created <time>" / "recorded <time>": the time in an \mbox, so a line never
+            # breaks at one of its hyphens (as the per-run record.tex sets it).
+            verb, _, at = when.partition(" ")
+            L.append(r"  \item[\texttt{" + esc(name) + r"}] " + esc(description) + "; "
+                     + esc(verb) + r" \mbox{" + esc(at) + "}; " + checksum)
+        L.append(r"\end{description}")
+        L.append("\\noindent Protocol digest:\\\\\n{\\small\\texttt{" + digest + "}}")
+    return L
+
+
+# The declared origins whose bytes the record fixes (sci_adk.core.deposit: recorded study data
+# and external third-party data); a derived file carries no checksum claim.
+DECLARED_ORIGINS = ("recorded", "external")
+
+
+def _source_sha256(run_dir, source):
+    """The SHA-256 of a declared ``source`` -- looked up in the run's folder, then the
+    workspace, as sci-adk looks it up -- or "" when it is not a readable file there."""
+    if not isinstance(source, str) or not source or os.path.isabs(source) \
+            or ".." in source.replace("\\", "/").split("/"):
+        return ""
+    for root in (run_dir, WS):
+        path = os.path.join(root, source)
+        if os.path.isfile(path):
+            digest = hashlib.sha256()
+            try:
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        digest.update(chunk)
+            except OSError:
+                return ""
+            return digest.hexdigest()
+    return ""
+
+
+def declared_files(rid):
+    """``[(Evidence id, description, SHA-256)]`` of each ``recorded`` or ``external`` entry of
+    the run's declaration (``runs/<id>/deposit.json``), in declaration order; ``[]`` when the
+    run has none. The SHA-256 is "" for a source that cannot be read."""
+    run_dir = os.path.join(RUNS, rid)
+    path = os.path.join(run_dir, "deposit.json")
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        payload = json.load(fh)
+    out = []
+    for entry in payload.get("files") or []:
+        if isinstance(entry, dict) and entry.get("origin") in DECLARED_ORIGINS:
+            out.append((str(entry.get("evidence") or ""), str(entry.get("description") or ""),
+                        _source_sha256(run_dir, entry.get("source"))))
+    return out
+
+
+def declared_files_section(runs):
+    """The record's "Declared data files" section (one block per run that declares a recorded
+    or external file, in index order), or ``[]`` when no run does."""
+    blocks = []
+    for rid, _label, _section in runs:
+        try:
+            files = declared_files(rid)
+        except (OSError, ValueError, AttributeError, TypeError):
+            blocks.append((rid, None))
+            continue
+        if files:
+            blocks.append((rid, files))
+    if not blocks:
+        return []
+    L = [r"\section{Declared data files}"]
+    L.append(
+        r"For each run, each declared file whose bytes the record fixes (a table of the "
+        r"study declared as recorded, or a third-party file), under the Evidence item declared "
+        r"to hold its SHA-256, with that SHA-256. "
+        r"\texttt{06\_provenance/deposit.csv} lists the same files with their terms (its "
+        r"\texttt{evidence} column names the item); those a run ships are in the folder named "
+        r"after it under \texttt{02\_data/} or \texttt{05\_inputs/}. A derived file is not "
+        r"listed: nothing in the record fixes its bytes."
+    )
+    for rid, files in blocks:
+        L.append(r"\subsection*{Run \texttt{" + esc(rid) + r"}}")
+        if files is None:
+            L.append(r"\emph{The declaration of this run could not be read.}")
+            continue
+        L.append(r"\begin{description}")
+        for evidence, description, sha in files:
+            checksum = (("SHA-256:\\\\\n    {\\small\\texttt{" + sha + "}}") if sha
+                        else "Its file could not be read.")
+            sentence = description.strip()
+            if sentence and not sentence.endswith("."):
+                sentence += "."
+            L.append(r"  \item[\texttt{" + esc_text(evidence) + r"}] "
+                     + (esc_text(sentence) + " " if sentence else "") + checksum)
+        L.append(r"\end{description}")
+    return L
 
 
 def build():
@@ -228,6 +518,12 @@ def build():
             L.append(f"{esc(hyp)} & {esc(pt)} & {opx} & {esc(th)} & "
                      f"\\textbf{{{SY.get(st, st)}}} \\\\")
     L.append(r"\bottomrule\end{longtable}")
+
+    # Each run's protocol history and protocol digest (design/deposit-files.md D11).
+    L.extend(protocol_section(runs))
+    # Each declared recorded / external file's Evidence item and SHA-256 (D4: the package's
+    # Evidence ids sit beside the record that resolves them).
+    L.extend(declared_files_section(runs))
 
     L.append(r"\section{Reproducibility}")
     L.append(

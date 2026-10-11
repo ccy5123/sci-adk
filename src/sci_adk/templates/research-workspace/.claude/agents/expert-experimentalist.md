@@ -77,6 +77,17 @@ go in the result's finding, not in `code_ref`. Anything the bundle cannot resolv
 file is kept as a pointer, and a file whose sha256 no longer matches the recorded one is
 not shipped as the recorded code.
 
+## Recording Output Tables In `provenance.data_ref`
+
+For every output table the analysis writes that a paper may offer its readers (a filtered
+data set, a results table), write `<path> sha256=<hex>` (`sha256sum <file>` on the file as
+written) in the `data_ref` of the Evidence item that produced or used it, one pair per
+file, separated by `; `. At publish time a table ships with the paper as a checked file
+only when an Evidence item holds its checksum; a table no item names can only be declared
+`derived`, which carries no integrity claim. Name a third-party input file the same way,
+and each copy you made in order to read it (decrypted, decompressed, converted) with its
+own checksum.
+
 ## Record The Numbers A Paper Will State — As Values
 
 The paper is written later, in another session, from the record, and every number it

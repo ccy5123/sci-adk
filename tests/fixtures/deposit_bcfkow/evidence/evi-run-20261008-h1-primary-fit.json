@@ -1,0 +1,41 @@
+{
+  "id": "evi-run-20261008-h1-primary-fit",
+  "created_at": "2026-10-08T16:53:36.856690Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "experiment_run",
+  "provenance": {
+    "code_ref": "analysis/SPEC-BCFKOW-001/s4_h1_fit.py sha256=b8521680d066e3db36b962ea1cb751b7d720ec9875d756de7bc001188539e2b2 (input built by analysis/SPEC-BCFKOW-001/s1_select_records.py sha256=a5a9cab9c96805e31e27db0a0e902900b328d2226aa93ff687457bfccadcb68b and s3_build_chemicals.py sha256=da7209721794fb63a5af69df79edeab2395751acdc0a15ae361dfeefb71d2153); no git commit (the workspace repository has no commits)",
+    "data_ref": "Arnot & Gobas 2006 SI (DOI 10.1139/a06-005) a06-005.xls sha256 d5f642bdaf3c69fa1cf5de3679a5f6d5ed920d8ca68cc8bd86aaece87dc7f8f0, decrypted sha256 1081e637f6bd39f9ba86d0e005cf657ea054ad302fd57e5d2e8d6841fd95c461, obtained 2026-10-08; CompTox QSAR-ready SMILES retrieved 2026-10-08; OPERA LogP_QR.sdf sha256 de50a1eb020ae42f7f89f8cb7dd73987048e80f30ef32eeaf376451cb832e489; chemical table analysis/SPEC-BCFKOW-001/out/s3_chemicals_final.csv sha256 5e6f3568fd1c7f1beccbb10ef3fef2c2736ef2086f304af3b4986bb9c888b871",
+    "data_source": "measured",
+    "seed": null,
+    "environment": "Python 3.13.11 (Anaconda, run with -I); NumPy 2.4.0; SciPy 1.17.0; RDKit 2025.09.4; Linux 6.6.87.2-microsoft-standard-WSL2",
+    "cost": null,
+    "search_log": null
+  },
+  "result": {
+    "type": "quantitative",
+    "point": 0.06893200672734412,
+    "effect_size": 0.7689320067273441,
+    "ci": [
+      0.7123415910062878,
+      0.8255224224484004
+    ],
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "H1 primary fit (approach [7]). H1 analysis set: the 404 chemicals passing approaches [1]-[6] restricted to measured log Kow in [1, 6] inclusive: n = 341 chemicals (log Kow 1.06 to 5.96). OLS of per-chemical mean log BCF on measured log Kow, one point per chemical, unweighted, with intercept: log BCF = a + b log Kow with a = -0.806328, b = 0.768932 (SE 0.028770), 95% CI of b [0.712342, 0.825522] (t distribution, 339 df, t = 1.966986), R^2 = 0.678161. Band margin m = min(b - 0.7, 1.0 - b) = 0.068932. Result.point = m, Result.effect_size = b, Result.ci = 95% CI of b. Pre-registered bearing: supports if m >= 0, refutes otherwise -> supports. SciPy linregress on the same points gives the same slope, intercept and R^2.",
+    "artifact_ref": "analysis/SPEC-BCFKOW-001/out/s4_h1_fit.json"
+  },
+  "bears_on": [
+    {
+      "target_id": "H1",
+      "direction": "supports",
+      "weight": null
+    }
+  ],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": null,
+  "negative_control": null
+}

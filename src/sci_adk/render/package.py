@@ -22,11 +22,15 @@ contract lives at the workspace root, beside ``runs/``).
 
 Layout (design §2 [2]):
   01_manuscript/   main.tex + si.tex + references.bib (+ figures/)
-  02_data/         claims_all.csv (+ per-run claim CSVs)
+  02_data/         claims_all.csv (+ per-run claim CSVs) + <id>/ (each run's declared study
+                   files that ship, rebuilt whole on every assembly; design/deposit-files.md D8)
   03_figures/      the figures + their per-run generators/specs
   04_scripts/      the field-agnostic builders + each run's official scripts
-  05_inputs/       a copyright-respecting pointers README
-  06_provenance/   run_index.csv + per-run verify logs
+  05_inputs/       a README generated from the declared third-party and cited files + <id>/
+                   (each run's redistributed third-party files, rebuilt on every assembly)
+  06_provenance/   run_index.csv + per-run verify logs + record.tex + protocol/<id>/ (each
+                   run's protocol files, rebuilt whole on every assembly) + deposit.csv
+                   (their checksums; design/deposit-files.md D8)
   MANIFEST.md      the file inventory
   README.md        overview + reproduction + submission-readiness self-assessment
 
@@ -41,14 +45,31 @@ import csv
 import importlib.resources
 import json
 import math
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from sci_adk.core.pkgreqs import ALL_RUNS, PackageReqs
 from sci_adk.core.spec import Spec
 from sci_adk.loop.verify import verify_run
+from sci_adk.render.deposit import (
+    DEPOSIT_DIR,
+    PACKAGE_DATA_DIR,
+    PACKAGE_INPUTS_DIR,
+    PACKAGE_MANIFEST,
+    PACKAGE_PROTOCOL_DIR,
+    PACKAGE_RECORD,
+    DataPlan,
+    ProtocolPlan,
+    package_data_root,
+    package_manifest_records,
+    package_manifest_text,
+    package_protocol_root,
+    package_rows,
+    plan_run_deposit,
+)
 from sci_adk.render.paper import TIMES_FONT_LINES
 # The 6 canonical package folders are defined in the pure gate module (kernel-side, no
 # verify_run dependency) so importing it here does not re-introduce a circular import; the
@@ -198,7 +219,20 @@ def assemble_package(
             "nothing to package (record is empty)"
         )
 
+    # Deposit files (design/deposit-files.md D8): each packaged run's protocol history and
+    # declared data, with its persisted declaration applied, read from runs/<id>/ BEFORE
+    # anything is written -- an invalid runs/<id>/deposit.json, or a declared file that ships
+    # but is missing from (or stale in) the run's paper/deposit/, stops the assembly with
+    # package/ untouched.
+    deposits = [(rid, *plan_run_deposit(workspace_dir / "runs" / rid)) for rid in runs]
+    _check_per_run_copies(workspace_dir, deposits)
+
     package_dir = workspace_dir / "package"
+    # No write or delete through a symbolic link: checked before the first write, so a link
+    # stops the assembly with package/ untouched.
+    _refuse_links(
+        package_dir, _cleared_paths(workspace_dir, runs, deposits), _generated_files(runs)
+    )
     manuscript_dir = package_dir / "01_manuscript"
     for folder in PACKAGE_FOLDERS:
         (package_dir / folder).mkdir(parents=True, exist_ok=True)
@@ -212,13 +246,18 @@ def assemble_package(
     # (4) Run the builders in-process to populate the record-derived tables + the SI.
     builder_outputs = _run_builders(workspace_dir, package_dir)
 
+    # (4b) The protocol files, the declared data files and their manifest (D8), after
+    # make_si.py wrote record.tex: deposit.csv's sha256_also_in names that record wherever it
+    # prints a checksum.
+    _write_deposit(workspace_dir, package_dir, deposits, notes)
+
     # (5) Merged manuscript: preserve an author-supplied main.tex/references.bib, else emit a
     # deterministic record-derived skeleton (tool-agnostic, names the science).
     main_tex_authored, si_tex_authored = _ensure_manuscript(
         workspace_dir, manuscript_dir, runs, pkgreqs
     )
     _write_verify_logs(workspace_dir, package_dir, runs)
-    _write_inputs_readme(package_dir)
+    _write_inputs_readme(package_dir, deposits)
 
     # (6) The two index documents. The MANIFEST is written LAST among the folder-populating
     # steps so its inventory is complete + stable (every 05_inputs/06_provenance file already
@@ -259,29 +298,248 @@ def _colocate_run_artifacts(
     A run lacking a given source contributes nothing for it (recorded as a note), never an
     error -- a pointer-only / figure-less run is honest, not a failure.
     """
-    figures_root = package_dir / "03_figures"
-    scripts_root = package_dir / "04_scripts" / "runs"
     for rid in runs:
         run_dir = workspace_dir / "runs" / rid
 
         fig_src = run_dir / "paper" / "figures"
         if fig_src.is_dir():
-            fig_dest = figures_root / rid
-            _copytree_idempotent(fig_src, fig_dest)
+            _copytree_idempotent(fig_src, package_dir, f"03_figures/{rid}")
         else:
             notes.append(f"run '{rid}': no per-run paper/figures/ to co-locate")
 
         art_src = run_dir / "artifacts"
         if art_src.is_dir():
-            art_dest = scripts_root / rid
-            _copytree_idempotent(art_src, art_dest)
+            _copytree_idempotent(art_src, package_dir, f"04_scripts/runs/{rid}")
 
 
-def _copytree_idempotent(src: Path, dest: Path) -> None:
-    """Copy ``src`` tree into ``dest``, overwriting (deterministic re-run)."""
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest)
+def _copytree_idempotent(src: Path, package_dir: Path, rel: str) -> None:
+    """Copy ``src`` tree into ``package_dir/rel``, overwriting (deterministic re-run); a
+    link at ``rel`` is removed, never followed (:func:`_clear`)."""
+    _clear(package_dir, rel)
+    shutil.copytree(src, package_dir / rel)
+
+
+def _check_per_run_copies(
+    workspace_dir: Path, deposits: List[tuple[str, ProtocolPlan, DataPlan]]
+) -> None:
+    """Every declared file a packaged run ships must be in that run's ``paper/deposit/``
+    with its source's bytes -- the copy the per-run ``verify`` checked (D8).
+
+    Raises:
+        ValueError: naming the file and "re-render run <id>".
+    """
+    for rid, _plan, data in deposits:
+        for df in data.shipped:
+            copy = workspace_dir / "runs" / rid / "paper" / DEPOSIT_DIR / df.path
+            where = f"runs/{rid}/paper/{DEPOSIT_DIR}/{df.path}"
+            if copy.is_symlink() or not copy.is_file():
+                raise ValueError(
+                    f"run '{rid}': {df.entry.label} ships, but {where} is missing -- re-render "
+                    f"run {rid}"
+                )
+            if copy.read_bytes() != df.data:
+                raise ValueError(
+                    f"run '{rid}': {where} differs from its source {df.entry.source} -- "
+                    f"re-render run {rid}"
+                )
+
+
+#: The folders the assembly writes into or deletes from, relative to ``package/``. A link at
+#: any of them would send a write or a delete outside the package.
+_WRITTEN_FOLDERS: tuple[str, ...] = (
+    *PACKAGE_FOLDERS, "04_scripts/runs", "06_provenance/verify_logs",
+)
+
+
+def _linked_component(package_dir: Path, rel: str, *, last: bool) -> Optional[str]:
+    """The first component of ``rel`` (as a path relative to ``package_dir``) that is a
+    symbolic link, the final component included only when ``last``; ``None`` when none is."""
+    parts = rel.split("/")
+    for depth in range(1, len(parts) + (1 if last else 0)):
+        if package_dir.joinpath(*parts[:depth]).is_symlink():
+            return "/".join(parts[:depth])
+    return None
+
+
+def _link_refusal(where: str) -> ValueError:
+    return ValueError(
+        f"{where} is a symbolic link; the assembly writes and deletes only inside package/ "
+        "and never through a link -- replace it with a plain folder (nothing was written)"
+    )
+
+
+def _cleared_paths(
+    workspace_dir: Path, runs: List[str], deposits: List[tuple[str, ProtocolPlan, DataPlan]]
+) -> List[str]:
+    """Every path the assembly removes whole before rebuilding it, relative to ``package/``:
+    the protocol folder, ``02_data/<id>/`` and ``05_inputs/<id>/`` of every workspace run
+    (D8), and each packaged run's co-located figures and scripts."""
+    workspace_runs = set(discover_runs(workspace_dir)) | {rid for rid, _, _ in deposits}
+    out = [PACKAGE_PROTOCOL_DIR]
+    out.extend(f"{folder}/{rid}" for rid in sorted(workspace_runs)
+               for folder in (PACKAGE_DATA_DIR, PACKAGE_INPUTS_DIR))
+    out.extend(f"{folder}/{rid}" for rid in runs for folder in ("03_figures", "04_scripts/runs"))
+    return out
+
+
+def _generated_files(runs: List[str]) -> List[str]:
+    """Every file the assembly writes by name, relative to ``package/``. A link at any of
+    them would send that write outside the package."""
+    out = [
+        "MANIFEST.md", "README.md", "02_data/claims_all.csv", "05_inputs/README.md",
+        "06_provenance/run_index.csv", "06_provenance/record.tex", PACKAGE_MANIFEST,
+        "01_manuscript/main.tex", "01_manuscript/si.tex",
+        "01_manuscript/references.bib", "01_manuscript/references_SI.bib",
+    ]
+    out.extend(f"04_scripts/{name}" for name in _BUILDER_NAMES)
+    out.extend(f"06_provenance/verify_logs/{rid}.txt" for rid in runs)
+    return out
+
+
+def _refuse_links(
+    package_dir: Path, cleared: List[str], written: Sequence[str] = ()
+) -> None:
+    """Refuse an assembly that would write or delete through a symbolic link: ``package/``
+    itself, a folder it writes into (:data:`_WRITTEN_FOLDERS`), a folder between
+    ``package/`` and a path it clears, or a file it writes by name (``written``). A link AT a
+    cleared path is allowed: :func:`_clear` removes the link and leaves its target alone.
+
+    Raises:
+        ValueError: naming the link; raised before anything is written.
+    """
+    if package_dir.is_symlink():
+        raise _link_refusal("package/")
+    for rel, last in [*((r, True) for r in _WRITTEN_FOLDERS), *((r, False) for r in cleared)]:
+        link = _linked_component(package_dir, rel, last=last)
+        if link is not None:
+            raise _link_refusal(f"package/{link}")
+    for rel in written:
+        if (package_dir / rel).is_symlink():
+            raise _link_refusal(f"package/{rel}")
+
+
+# @MX:WARN: [AUTO] the assembly's only delete (shutil.rmtree of package paths).
+# @MX:REASON: [AUTO] a link at package/ or at a folder above a cleared path once sent rmtree
+#   into the link's target (data loss outside the package); every delete goes through here,
+#   after _refuse_links, and a link is unlinked, never followed.
+def _clear(package_dir: Path, rel: str) -> None:
+    """Remove ``package_dir/rel`` whole: a folder tree, a file or a symbolic link (a link is
+    removed, never followed).
+
+    Raises:
+        ValueError: ``package_dir`` or a folder between it and ``rel`` is a symbolic link --
+            the delete would land outside the package.
+    """
+    if package_dir.is_symlink():
+        raise _link_refusal("package/")
+    link = _linked_component(package_dir, rel, last=False)
+    if link is not None:
+        raise _link_refusal(f"package/{link}")
+    path = package_dir / rel
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _previously_listed(package_dir: Path) -> set:
+    """The ``file`` cells of the ``06_provenance/deposit.csv`` an earlier assembly wrote (an
+    empty set when there is none, or it is a link or unreadable)."""
+    manifest = package_dir / PACKAGE_MANIFEST
+    if manifest.is_symlink() or not manifest.is_file():
+        return set()
+    try:
+        records = package_manifest_records(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return set()
+    return {r["file"] for r in records or [] if r["file"]}
+
+
+def _entries_under(package_dir: Path, rel: str) -> List[tuple[str, bool]]:
+    """``(path relative to package/, is a link)`` of every file and link at or under
+    ``package_dir/rel``, links never followed."""
+    top = package_dir / rel
+    if top.is_symlink():
+        return [(rel, True)]
+    if top.is_file():
+        return [(rel, False)]
+    out: List[tuple[str, bool]] = []
+    for dirpath, dirnames, filenames in os.walk(top):     # never descends into a link
+        for name in dirnames + filenames:
+            path = Path(dirpath) / name
+            if path.is_symlink() or name in filenames:
+                out.append((path.relative_to(package_dir).as_posix(), path.is_symlink()))
+    return sorted(out)
+
+
+# @MX:NOTE: [AUTO] The package owns 06_provenance/protocol/ whole and 02_data/<id>/ and
+#   05_inputs/<id>/ for every workspace run (design/deposit-files.md D8): they are removed and
+#   rebuilt on every assembly, so a run that withholds its protocol, shrinks its declaration,
+#   leaves the package or leaves the workspace leaves no stale file, and an author file put
+#   there is removed. The package gate fails any file there that 06_provenance/deposit.csv
+#   does not list.
+def _write_deposit(
+    workspace_dir: Path,
+    package_dir: Path,
+    deposits: List[tuple[str, ProtocolPlan, DataPlan]],
+    notes: List[str],
+) -> None:
+    """Rebuild the package's deposit folders and write ``06_provenance/deposit.csv`` (D8).
+
+    Each packaged run's shipped protocol files are copied from the plan (the exact bytes
+    ``runs/<id>/`` keeps, never the per-run copies under ``paper/deposit/``) into
+    ``06_provenance/protocol/<id>/``; a run that withholds its protocol gets no folder, and
+    its rows keep the checksums. Each shipped declared file is copied from the run's
+    ``paper/deposit/`` (the copy the per-run ``verify`` checked) into ``02_data/<id>/`` or
+    ``05_inputs/<id>/``; those two namespaces are cleared first for every workspace run,
+    packaged or not. Deterministic: the same record writes the same bytes.
+
+    Each file removed that neither the earlier ``deposit.csv`` nor the rows written now list
+    (put there by hand, or left by an assembly whose manifest is gone) gets a note.
+    """
+    root = package_dir / PACKAGE_PROTOCOL_DIR
+    workspace_runs = set(discover_runs(workspace_dir)) | {rid for rid, _, _ in deposits}
+    cleared = [PACKAGE_PROTOCOL_DIR] + [
+        f"{folder}/{rid}" for rid in sorted(workspace_runs)
+        for folder in (PACKAGE_DATA_DIR, PACKAGE_INPUTS_DIR)]
+    listed = _previously_listed(package_dir)
+    for rid, plan, data in deposits:
+        listed.update(f"{package_protocol_root(rid)}/{f.name}" for f in plan.shipped)
+        listed.update(f"{package_data_root(df.entry.folder, rid)}/{df.entry.name}"
+                      for df in data.shipped)
+    for rel in cleared:
+        for gone, is_link in _entries_under(package_dir, rel):
+            if is_link:
+                notes.append(f"removed {gone}, a symbolic link (its target was not touched); "
+                             f"the package rebuilds {rel}/ on every assembly")
+            elif gone not in listed:
+                notes.append(f"removed {gone}: no row of {PACKAGE_MANIFEST} listed it; the "
+                             f"package rebuilds {rel}/ on every assembly")
+        _clear(package_dir, rel)
+    for rid, plan, data in deposits:
+        for f in plan.shipped:
+            dest = root / rid / f.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(f.data or b"")
+        if plan.withheld_reason is not None:
+            notes.append(
+                f"run '{rid}': protocol withheld ({plan.withheld_reason}); "
+                f"{PACKAGE_MANIFEST} lists the SHA-256 of each withheld file"
+            )
+        bundle = workspace_dir / "runs" / rid / "paper" / DEPOSIT_DIR
+        for df in data.shipped:
+            dest = package_dir / package_data_root(df.entry.folder, rid) / df.entry.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(bundle / df.path, dest)
+    record = package_dir / PACKAGE_RECORD
+    record_text = record.read_text(encoding="utf-8") if record.is_file() else None
+    (package_dir / PACKAGE_MANIFEST).write_text(
+        package_manifest_text(package_rows(
+            [(rid, plan) for rid, plan, _ in deposits], record_text,
+            {rid: data for rid, _, data in deposits},
+        )),
+        encoding="utf-8", newline="\n",
+    )
 
 
 # -- (4) run the record-driven builders --------------------------------------
@@ -375,8 +633,11 @@ def _invoke_index_builder(mod, workspace_dir: Path, package_dir: Path) -> None:
     with open(idx_path, "w", newline="") as fi, open(cl_path, "w", newline="") as fc:
         iw = csv.writer(fi)
         cw = csv.writer(fc)
+        # protocol_digest_sha256 (design/deposit-files.md D11): the full digest, computed by
+        # the builder's own standard-library function so the shipped script and this copy
+        # print the same value.
         iw.writerow(["run_id", "n_hypotheses", "verdicts", "reproduced",
-                     "record_digest_sha256_12"])
+                     "record_digest_sha256_12", "protocol_digest_sha256"])
         cw.writerow(["run_id", "hyp_id", "mode", "referent", "status",
                      "point_statistic", "op", "threshold", "statement"])
         for run_dir in runs:
@@ -392,7 +653,8 @@ def _invoke_index_builder(mod, workspace_dir: Path, package_dir: Path) -> None:
             verd = "/".join(
                 f"{n}{SY.get(k, k[:1].upper())}" for k, n in sorted(cnt.items())
             )
-            iw.writerow([rid, len(claims), verd, repro, dig])
+            iw.writerow([rid, len(claims), verd, repro, dig,
+                         mod.protocol_digest_cell(run_dir)])
             for c in claims:
                 mode, ref = modes.get(c["hyp"], (c["mode"], ""))
                 cw.writerow([rid, c["hyp"], mode or c["mode"], ref, c["status"],
@@ -500,6 +762,8 @@ def _skeleton_si_tex() -> str:
         "\n" r"\usepackage{newtxmath}"
         "\n" r"\usepackage[scaled]{helvet}"
         "\n" r"\usepackage{graphicx}"
+        # \path{...}, which the package skill recommends for every package path.
+        "\n" r"\usepackage{url}"
         "\n" r"\title{Supplementary Information (skeleton)}"
         "\n" r"\author{~}\date{}"
         "\n" r"\begin{document}\maketitle"
@@ -547,6 +811,8 @@ def _skeleton_main_tex(
     lines.append(r"\usepackage{newtxmath}")
     lines.append(r"\usepackage[scaled]{helvet}")
     lines.append(r"\usepackage{graphicx}")
+    # \path{...}, which the package skill recommends for every package path.
+    lines.append(r"\usepackage{url}")
     lines.append(r"\usepackage{natbib}")
     lines.append(r"\title{Near-submission package (skeleton)}")
     lines.append(r"\author{~}\date{}")
@@ -767,6 +1033,11 @@ def _write_manifest(package_dir: Path, runs: List[str]) -> None:
             if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
         )
         lines.append(f"## {folder}/ ({len(files)} file(s))")
+        if folder in (PACKAGE_DATA_DIR, PACKAGE_INPUTS_DIR):
+            lines.append(
+                "The `<id>/` folders hold each run's declared files and are rebuilt on every "
+                "assembly; a file put there by hand is removed."
+            )
         for rel in files:
             lines.append(f"- `{rel}`")
         lines.append("")
@@ -868,19 +1139,60 @@ def _write_readme(
     (package_dir / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_inputs_readme(package_dir: Path) -> None:
-    """Write the ``05_inputs/`` pointer README (copyright-respecting; nothing redistributed).
+_INPUTS_INTRO = (
+    "Pointers to the model inputs and any primary-literature sources used by the runs. "
+)
+_NOTHING_COPYRIGHTED = (
+    "Nothing copyrighted is redistributed here; curated values live in each run's official "
+    "scripts (`04_scripts/runs/<id>/`)."
+)
+_CURATED = "Curated values live in each run's official scripts (`04_scripts/runs/<id>/`)."
+
+
+def _readme_line(rid: str, df, top_license: Optional[str]) -> str:
+    entry = df.entry
+    if entry.ships:
+        where = f"`{package_data_root(entry.folder, rid)}/{entry.name}`"
+        terms = f"distributed under: {entry.terms(top_license)}"
+    else:
+        where = "not included"
+        terms = "not redistributed"
+    return (
+        f"- {where} (run `{rid}`): {entry.description} Source: {', '.join(entry.cite)}. "
+        f"SHA-256 `{df.sha256}`; {terms}."
+    )
+
+
+def _write_inputs_readme(
+    package_dir: Path, deposits: Optional[List[tuple[str, ProtocolPlan, DataPlan]]] = None
+) -> None:
+    """Write the ``05_inputs/`` README (D7), generated from the declared data rows.
+
+    Each third-party file with its citation, its checksum and "not redistributed" or its
+    terms; then each study file holding values from a cited source, the same way. The
+    sentence "Nothing copyrighted is redistributed here" is written only when no shipped file
+    has a cited source. With no declared data the README keeps its fixed text.
 
     Written BEFORE the MANIFEST (so the inventory is stable across rebuilds, design §C
-    idempotence). Pointers only -- curated input values live in each run's official scripts.
+    idempotence).
     """
-    (package_dir / "05_inputs" / "README.md").write_text(
-        "# Inputs\n\n"
-        "Pointers to the model inputs and any primary-literature sources used by the runs. "
-        "Nothing copyrighted is redistributed here; curated values live in each run's "
-        "official scripts (`04_scripts/runs/<id>/`).\n",
-        encoding="utf-8",
-    )
+    rows = [(rid, data.license, df) for rid, _plan, data in (deposits or [])
+            for df in data.files]
+    if not rows:
+        text = "# Inputs\n\n" + _INPUTS_INTRO + _NOTHING_COPYRIGHTED + "\n"
+    else:
+        cited_ships = any(df.entry.ships and df.entry.cite for _, _, df in rows)
+        lines = ["# Inputs", "",
+                 _INPUTS_INTRO + (_CURATED if cited_ships else _NOTHING_COPYRIGHTED)]
+        third = [_readme_line(rid, df, lic) for rid, lic, df in rows if df.entry.external]
+        cited = [_readme_line(rid, df, lic) for rid, lic, df in rows
+                 if not df.entry.external and df.entry.cite]
+        if third:
+            lines += ["", "## Third-party files", "", *third]
+        if cited:
+            lines += ["", "## Study files holding values from cited sources", "", *cited]
+        text = "\n".join(lines) + "\n"
+    (package_dir / "05_inputs" / "README.md").write_text(text, encoding="utf-8")
 
 
 __all__ = [

@@ -83,6 +83,15 @@ artifacts; the kernel carries no domain code.
   shipped. Descriptions and notes such as "no git commit" go in the finding. A
   `code_ref` that does not resolve to a file is kept as a pointer, and a file whose
   sha256 no longer matches is not shipped as the recorded code.
+- **Name every output table a paper may ship by its checksum, in `provenance.data_ref`.**
+  For every output table the analysis writes that a paper may offer its readers (a
+  filtered data set, a results table), write `<path> sha256=<hex>` (`sha256sum <file>` on
+  the file as written; workspace- or run-relative path) in the `data_ref` of the Evidence
+  item that produced or used it, one pair per file, separated by `; `. At publish time a
+  table ships with the paper as a checked file only when an Evidence item holds its
+  checksum; a table no item names can only be declared `derived`, which carries no
+  integrity claim. Name a third-party input file the same way, and each copy the study
+  made in order to read it (decrypted, decompressed, converted) with its own checksum.
 - **Record the numbers a paper will state as values, not only prose.** Every count,
   constant and quoted value a paper may state goes into the finding JSON as a named
   number: `{"summary": "<what was done>", "<name>": <value>, ...}` (counts after each

@@ -37,6 +37,12 @@ from typing import List, Optional, Sequence
 from sci_adk.core.claim import Claim
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Spec
+from sci_adk.render.deposit import (
+    ProtocolPlan,
+    protocol_digest,
+    protocol_history,
+    time_label,
+)
 from sci_adk.render.factref import substitute_factrefs
 from sci_adk.render.figures import (
     AnyFigure,
@@ -73,6 +79,45 @@ _NUMERIC_FIELDS: tuple[str, ...] = (
     "residual",
     "predictive_error",
 )
+
+
+def _protocol_history_section(protocol: ProtocolPlan) -> str:
+    """The record's "Protocol history" section (design/deposit-files.md D11).
+
+    Each protocol version and amendment receipt, in the order they were written, under the
+    name the paper's deposit manifest gives it, with its recorded time and the SHA-256 of its
+    bytes; then the protocol digest. Each checksum is printed whole on a line of its own, so a
+    reader -- and the manifest's ``sha256_also_in`` column -- finds it by searching for it.
+    The same text whether the protocol ships or is withheld.
+    """
+    lines = [
+        r"\section{Protocol history}",
+        "Each frozen version of this run's protocol and the receipt of each amendment, under "
+        r"the file names the paper's \texttt{deposit/manifest.csv} lists, with the time "
+        "stated in the file and the SHA-256 of the file's bytes. The times come from local "
+        "clocks; nothing witnesses them.",
+        r"\begin{description}",
+    ]
+    for entry in protocol_history(protocol):
+        checksum = (
+            f"SHA-256:\\\\\n    {{\\small\\texttt{{{entry.sha256}}}}}" if entry.sha256
+            else "no SHA-256"
+        )
+        # "created <time>" / "recorded <time>": the time in an \mbox, so a line never
+        # breaks at one of its hyphens.
+        verb, _, when = entry.time_label.partition(" ")
+        lines.append(
+            f"  \\item[\\texttt{{{_latex_sanitize(entry.name)}}}] "
+            f"{_latex_sanitize(entry.description)}; {_latex_sanitize(verb)} "
+            f"{_time_box(when)}; {checksum}"
+        )
+    lines.append(r"\end{description}")
+    lines.append(
+        r"\noindent Protocol digest, the SHA-256 of the listing \texttt{sha256sum} prints for "
+        "the files above that were kept, names in byte order:\\\\\n"
+        f"{{\\small\\texttt{{{protocol_digest(protocol)}}}}}"
+    )
+    return "\n".join(lines)
 
 
 def _fmt_cell(value: object) -> str:
@@ -124,8 +169,9 @@ def _kind_str(ev: EvidenceItem) -> str:
 
 def _dedupe_evidence_for_render(
     evidence: Sequence[EvidenceItem],
-) -> List[tuple[EvidenceItem, int]]:
-    """Collapse repeated Evidence items into ``(item, count)`` for the SI render (3.3).
+) -> List[tuple[EvidenceItem, List[EvidenceItem]]]:
+    """Collapse repeated Evidence items into ``(first item, its group)`` for the SI render
+    (3.3).
 
     A repeated acquisition (e.g. the SAME DOI literature item recorded six times, or a
     re-run novelty decision) clutters the record dump with byte-identical entries. This
@@ -134,19 +180,35 @@ def _dedupe_evidence_for_render(
 
     Two items collapse iff they share ``(kind, finding, point)`` -- the record content a
     reader sees. Distinct experiment runs (different findings) never collapse; the 6
-    identical literature items do. First-seen order is preserved (deterministic).
+    identical literature items do. First-seen order is preserved (deterministic); each
+    group lists its items in record order, the first one first.
     """
-    out: List[tuple[EvidenceItem, int]] = []
+    out: List[tuple[EvidenceItem, List[EvidenceItem]]] = []
     index: dict[tuple[str, str, object], int] = {}
     for ev in evidence:
         key = (_kind_str(ev), ev.result.finding or "", ev.result.point)
         if key in index:
-            item, count = out[index[key]]
-            out[index[key]] = (item, count + 1)
+            out[index[key]][1].append(ev)
         else:
             index[key] = len(out)
-            out.append((ev, 1))
+            out.append((ev, [ev]))
     return out
+
+
+def _time_box(label: str) -> str:
+    """A recorded time as LaTeX: sanitized and set in an ``\\mbox``, so the line never
+    breaks at one of its hyphens (``2026-10-08T10:03:39Z``)."""
+    return f"\\mbox{{{_latex_sanitize(label)}}}"
+
+
+def _created_label(group: Sequence[EvidenceItem]) -> str:
+    """The recorded creation time of an entry (design/deposit-files.md D10, Phase 3), as
+    LaTeX: the item's ``created_at`` in UTC to the second; for an entry recorded more than
+    once, the earliest and the latest of its items' times, or one time when they print the
+    same. Each time is set in an ``\\mbox``."""
+    labels = [time_label(ev.created_at) for ev in group]
+    first, last = min(labels), max(labels)
+    return _time_box(first) if first == last else f"{_time_box(first)} to {_time_box(last)}"
 
 
 def render_si_latex(
@@ -160,6 +222,7 @@ def render_si_latex(
     paper_body: Optional[str] = None,
     bib_path: Optional[str] = None,
     repro_listings: Optional[Sequence[ReproListing]] = None,
+    protocol: Optional[ProtocolPlan] = None,
 ) -> str:
     """Render the full record as a STANDALONE Supporting Information ``si.tex``.
 
@@ -178,8 +241,9 @@ def render_si_latex(
     Sections (a faithful record dump; every interpolated string sanitized):
       1. Title -- ``Supporting Information: <spec goal>``.
       2. Evidence record -- every ``EvidenceItem`` (stable order = as given): id, kind, a
-         result summary (point or finding), and its provenance/capability. The complete
-         append-only record.
+         result summary (point or finding), its recorded ``created_at`` (UTC, to the
+         second; the earliest and latest for a collapsed repeat), and its
+         provenance/capability. The complete append-only record.
       3. Quantitative data -- a ``tabular`` of the numeric ``Result`` fields for each item
          that has them; all-empty columns are skipped deterministically.
       4. Claims and verdicts -- per Claim: the hypothesis it answers, statement, status,
@@ -198,6 +262,9 @@ def render_si_latex(
          as a POINTER line. Emitted after Figures, before Record integrity; adds a guarded
          ``\\usepackage{listings}`` when a script is present. Absent/empty -> no section
          (byte-identical to today).
+      5c. Protocol history (OPTIONAL, design/deposit-files.md D11) -- when ``protocol`` is
+         supplied: each protocol version and amendment receipt with its recorded time and
+         SHA-256, then the protocol digest. ``None`` -> no section.
       6. Record integrity -- ``digest`` embedded as ``Record digest (sha256): <digest>``
          when provided; ELSE a note that the record is independently auditable via
          ``sci-adk verify <run>`` (which computes the digest over the persisted run).
@@ -249,6 +316,11 @@ def render_si_latex(
             regression invariant, exactly like the ``figures``/``prose``/``digest``
             defaults). The code listing lives in the SI (the exempt record dump), NEVER
             in the tool-agnostic main paper.
+        protocol: optional protocol plan of the run (``render.deposit.plan_protocol``,
+            read from ``runs/<id>/`` by the compiler -- this renderer stays pure). Present
+            -> a "Protocol history" section before Record integrity. Only the files, their
+            times and checksums are used, so the section is the same whether the protocol
+            ships or is withheld. ``None`` -> no section (a Spec with no run directory).
 
     Returns:
         A STANDALONE LaTeX document string.
@@ -360,14 +432,25 @@ def render_si_latex(
     if not evidence:
         lines.append(r"\emph{No evidence recorded.}")
     else:
+        # Each item's recorded time (design/deposit-files.md D10, Phase 3): the only place
+        # the time of a record selection is held, and no clock behind it is witnessed (D12).
+        lines.append(
+            r"Each item's \textit{created} time is the time stored in the item, set by the "
+            "program that recorded it or, when it stored none, by the recording command; both "
+            "read a local clock, and nothing witnesses them. An entry recorded more than once "
+            "shows the earliest and the latest of its times."
+        )
         lines.append(r"\begin{description}")
-        for ev, count in deduped:
+        for ev, group in deduped:
             summary = _result_summary(ev)
-            times = f" (recorded {count}x)" if count > 1 else ""
+            times = f" (recorded {len(group)}x)" if len(group) > 1 else ""
             lines.append(
                 f"  \\item[\\texttt{{{_latex_sanitize(ev.id)}}} "
                 f"({_latex_sanitize(_kind_str(ev))})] "
                 f"{_latex_sanitize(summary)}{times}"
+            )
+            lines.append(
+                f"    \\\\ \\textit{{created:}} {_created_label(group)}"
             )
             lines.append(
                 f"    \\\\ \\textit{{provenance:}} "
@@ -383,7 +466,7 @@ def render_si_latex(
     #    with ``\caption`` + ``\label{tab:s1}`` and referenced within the SI (Table~\ref),
     #    so the "Table S1" a main-paper author cites resolves to a real, S-numbered table.
     quant_items = [
-        ev for ev, _count in deduped
+        ev for ev, _group in deduped
         if any(getattr(ev.result, f, None) is not None for f in _NUMERIC_FIELDS)
     ]
     active_fields = [
@@ -506,6 +589,14 @@ def render_si_latex(
     repro_section = render_reproduction_section(repro_listings)
     if repro_section:
         lines.append(repro_section)
+        lines.append("")
+
+    # -- Section: Protocol history (OPTIONAL; design/deposit-files.md D11) ----------
+    # The protocol files the paper's deposit ships (or withholds), their recorded times
+    # and checksums, and the protocol digest. The history is on disk before any render, so
+    # the record can carry the digest; it never moves when Evidence is appended.
+    if protocol is not None:
+        lines.append(_protocol_history_section(protocol))
         lines.append("")
 
     # -- Section: Record integrity ------------------------------------------------

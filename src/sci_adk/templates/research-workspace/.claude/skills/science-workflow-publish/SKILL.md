@@ -108,12 +108,15 @@ Bayesian rule's posterior is a probability).
 Then the writer:
 
 1. authors the manuscript into a `prose.json` (a `PaperProse`: title / abstract /
-   introduction / methods / results / discussion);
+   introduction / methods / results / discussion), and, when the paper ships data files
+   or withholds its protocol, the deposit declaration `drafts/<spec-id>/paper/deposit.json`
+   beside it (below);
 2. runs `sci-adk numbers draft <run> --prose prose.json [--si si.json]` and completes
    `runs/<id>/numbers.json` from the proposals it writes (below) — every number the
    paper and its SI state;
-3. runs `sci-adk render <run> --prose prose.json [--si si.json]` — this also re-deposits
-   the identical `record.tex`, since the record inputs have not changed;
+3. runs `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]`
+   — this also re-deposits the identical `record.tex`, since the record inputs have not
+   changed;
 4. records the conclusions in `runs/<id>/declarations.json` (below);
 5. runs `sci-adk verify <run>`;
 6. once it passes, the paper session — the session driving `/sci publish` — runs the
@@ -225,6 +228,120 @@ covered by an entry, and every entry's source exists and, rounded to the printed
 precision, equals the number (`0.769` matches a recorded 0.768932; `0.768` does not).
 An entry that no longer matches anything, and every identifier, is reported as advisory.
 A run without `numbers.json` is still checked by the older pattern audit.
+
+### Deposit files: the protocol and the data that ship with the paper
+
+Every full render writes `paper/deposit/`: the run's protocol under `deposit/protocol/` (the
+exact bytes of each frozen version, `protocol-v1.json`, `protocol-v2.json`, …, and of each
+amendment receipt, `amendment-v2.json`, …), the data files you declare under `deposit/data/`
+(study files) and `deposit/inputs/` (third-party files), and `deposit/manifest.csv`, which
+lists every file with its SHA-256, size and terms, and the SHA-256 of each declared file that
+does not ship. `sci-adk verify` re-hashes every file against the record. Render owns
+`paper/deposit/`: never put or edit a file there — `verify` fails a file render did not write.
+
+**Declare the data in `drafts/<spec-id>/paper/deposit.json`**, beside `prose.json`, and pass
+it with `--deposit` (step 3 above). Render validates it and keeps a copy at
+`runs/<id>/deposit.json`; later bare renders, `resolve`, `verify` and `package` read that copy,
+so pass `--deposit` again only when the declaration changes. A declaration whose `files` is
+empty stops shipping data.
+
+```json
+{"spec_id": "<id>", "license": "CC-BY-4.0", "files": [
+  {"source": "analysis/<id>/out/results.csv", "name": "results.csv", "origin": "recorded",
+   "evidence": "<id of the Evidence item whose data_ref holds its sha256>", "cite": [],
+   "description": "One line: what the file holds, for a reader of the manifest."},
+  {"source": "analysis/<id>/out/selected.csv", "name": "selected.csv", "origin": "recorded",
+   "evidence": "<evidence id>", "cite": ["<bib key>"],
+   "description": "The records that passed the filters, with values from the cited source."},
+  {"source": "data/raw/<file>", "origin": "external", "evidence": "<evidence id>",
+   "cite": ["<bib key>"], "description": "The cited source's file, as received."}
+]}
+```
+
+- `origin`: `recorded` — the study wrote the file and an Evidence item holds its checksum (the
+  experiment stage wrote `<path> sha256=<hex>` in its `data_ref`); `derived` — the study wrote
+  it but no item holds its checksum: it carries no integrity claim, and `verify` lists it as
+  unchecked; `external` — a third-party file.
+- **A copy the study made of a third-party file** (decrypted, decompressed, converted) is its
+  own `external` entry, with its own checksum and `evidence`; its `description` and the methods
+  name the step that made it.
+- `source`: a path relative to the run directory or the workspace, inside the workspace; never
+  a protocol file or anything under `paper/`. `cite`: the bib keys of the sources the file's
+  values come from — required for `external`, and for a study file whenever it holds values
+  taken from a third-party source; every key must be in `references.bib`.
+- **Terms.** The top-level `"license"` covers the files the study produced: the protocol files
+  and each study file with an empty `cite`. A study file with a non-empty `cite` is **cited,
+  not shipped**, by default: the manifest gives its checksum and citation, render says it was
+  not shipped, and it ships only when its entry states both `"license"` (the terms the file
+  itself is distributed under) and `"redistribution": "author-asserted"` (the authors'
+  statement that they may redistribute it). An `external` file takes the same rule: it is
+  cited with its checksum, not shipped, unless its entry states both. sci-adk records these
+  statements and checks neither.
+- `name`: the file's name in the bundle, required for every entry that ships — letters,
+  digits, `.`, `_` and `-`, with no digit group after a hyphen or at its start (`table_2.csv`,
+  not `table-2.csv` or `2023_table.csv`); otherwise every sentence that names the file holds a
+  number to declare in `numbers.json`.
+
+**Withholding the protocol.** The protocol ships by default. When it must not be distributed
+(for example, its proposal includes a collaborator's unpublished results), the declaration
+carries `"protocol": "withheld"` and a one-line `"protocol_reason"`, with or without `files`.
+Render then ships no protocol file, and the manifest keeps each file's SHA-256 with the reason.
+`verify` reports, as an advisory and never a failure, that readers cannot check the protocol or
+what the paper says about it, such as when it was written. The paper and SI then name no
+protocol file: `verify` fails every sentence that does, by bundle path or bare name. A
+declaration without the two keys ships the protocol again.
+
+**Name the deposited files by their bundle paths** — `deposit/protocol/protocol-v1.json`,
+`deposit/protocol/amendment-v2.json`, `deposit/data/results.csv`, `deposit/manifest.csv` — in
+the SI and in the availability statement, never by a record name (`spec.json`,
+`spec_history/…`, `checkpoints/…`, `deposit.json`), which the vocabulary check fails. `verify`
+fails a `deposit/…` path that names no file the bundle holds; a cited file that is not shipped
+has no bundle path, so cite it by its checksum. In LaTeX write a path as
+`\path{deposit/data/results.csv}`, which needs no `\_`.
+
+> Version 1 of the protocol (\path{deposit/protocol/protocol-v1.json}) was created at
+> \texttt{2026-10-08T10:03:39Z}. The amendment (\path{deposit/protocol/amendment-v2.json}),
+> recorded at \texttt{2026-10-08T14:05:17Z}, stores the SHA-256 of the version it replaced,
+> which is the checksum of \path{deposit/protocol/protocol-v1.json}. Version 2
+> (\path{deposit/protocol/protocol-v2.json}) is the protocol the results were judged against.
+
+The availability statement names the folders, the manifest and the terms:
+
+> The protocol in both versions and its amendment (\path{deposit/protocol/}) and the analysis
+> scripts (\path{code/}; \path{reproduce.py} lists them and checks each against its SHA-256)
+> are distributed with this paper; \path{deposit/manifest.csv} lists every file with its
+> SHA-256 and the terms it is distributed under, and gives the SHA-256 of each data file that
+> is not distributed. Files produced in this study are distributed under CC BY 4.0.
+
+A study file of third-party values that is cited, not shipped, is cited with its checksum:
+
+> The table of the records that passed the filters contains values from Author and Author
+> (2006) and is not distributed; its SHA-256 is <the file's SHA-256, written in full>.
+
+The same file when its entry states both terms:
+
+> The table of the records that passed the filters (\path{deposit/data/selected.csv}) is
+> distributed under CC BY 4.0; it contains values from Author and Author (2006), and the
+> authors state that its redistribution is permitted.
+
+A withheld protocol:
+
+> The protocol (versions 1 and 2) and its amendment are not distributed with this paper: the
+> proposal includes a collaborator's unpublished results. \path{deposit/manifest.csv} lists
+> the SHA-256 of each of the three files, so a copy released later can be checked against
+> them.
+
+**Times are recorded times.** Every time in the protocol files and in the Evidence (which
+`record.tex` prints beside each item) was read from a local clock, and nothing witnesses it.
+Write each as a recorded time — "was created at", "recorded at" — never as "time-stamped" or
+"registered" by anyone, and claim no order the recorded times do not show.
+`verify` prints the protocol's times and the earliest Evidence side by side as an advisory.
+
+**Paths, checksums and times in the text.** Put each inside `\path{…}` or `\texttt{…}`; a
+date-time is then one literal, declared as an `identifier` in `numbers.json`. Write each
+checksum in full, 64 hex digits as `\texttt` pieces of 16 joined by `\allowbreak`, never
+elided: an elided prefix such as `1081e637` reads as a number, and a reader cannot check an
+elided value.
 
 ### Write for readers who were not in the room
 
@@ -431,7 +548,8 @@ paper/
 ├── draft.tex        # the main paper (belief narrative)
 ├── si.tex           # Supporting Information, authored (written only with --si si.json)
 ├── figures/         # body-order numbered figure files
-└── references.bib   # bibliography
+├── references.bib   # bibliography
+└── deposit/         # protocol files, declared data, manifest.csv (render owns it; above)
 ```
 
 Both `.tex` files are authored. The deterministic record dump (Evidence record +

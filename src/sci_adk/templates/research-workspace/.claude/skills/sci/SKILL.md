@@ -206,8 +206,8 @@ record — that is the failure this split exists to prevent.
   `si.json` when the paper has an SI), runs
   `sci-adk numbers draft <run> --prose prose.json [--si si.json]` and completes
   `runs/<id>/numbers.json` (every number the paper states, bound to its recorded
-  source), runs `sci-adk render <run> --prose prose.json [--si si.json]`, records the
-  conclusions in `declarations.json`, and runs `sci-adk verify`. Once that passes, Session B — the
+  source), runs `sci-adk render <run> --prose prose.json [--si si.json] [--deposit deposit.json]`,
+  records the conclusions in `declarations.json`, and runs `sci-adk verify`. Once that passes, Session B — the
   session driving `/sci publish` — runs the audit itself (step 5 below): it spawns the
   readers and refuters and writes the audit file, and the writer revises from that
   file. A number with no recorded home comes back to the experiment stage — the paper
@@ -240,8 +240,11 @@ the engine can catch it.
    `paper/references.bib`, and `paper/si.tex` only from an authored `--si si.json` (the
    SI is written like the paper; the record dump is re-deposited at
    `runs/<id>/record.tex`, outside `paper/`)
-   + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`). Pass the frozen
-   `pubreqs.json` path in the spawn prompt. The writer ALSO records the paper's
+   + the F3 reproduction bundle (`paper/reproduce.py`, `paper/code/`) + `paper/deposit/`
+   (the run's protocol files, and the data files the writer declares, with their terms, in
+   `drafts/<spec-id>/paper/deposit.json`, passed to render with `--deposit`; the
+   declaration, the terms and the switch that withholds the protocol are in
+   `science-workflow-publish`). Pass the frozen `pubreqs.json` path in the spawn prompt. The writer ALSO records the paper's
    conclusions in `runs/<id>/declarations.json` — per conclusion, the hypothesis, the
    status it is written to, and the sentence VERBATIM — and declares every number the
    paper states in `runs/<id>/numbers.json` (proposed by `sci-adk numbers draft`). The

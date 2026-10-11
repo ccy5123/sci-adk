@@ -39,6 +39,13 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from sci_adk.core.claim import Claim, ClaimStatus
+from sci_adk.core.deposit import (
+    DEPOSIT_FILE,
+    DeclarationFile,
+    DepositDeclarationError,
+    load_deposit_declaration,
+    read_deposit_declaration,
+)
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
@@ -82,6 +89,23 @@ from sci_adk.render.figures import (
 )
 from sci_adk.render.authored_si import render_authored_si_latex
 from sci_adk.render.bib_latex import paper_bib
+from sci_adk.render.deposit import (
+    MANIFEST_NAME,
+    OWNED_DIRS,
+    DataPlan,
+    DepositWrite,
+    ProtocolPlan,
+    deposit_data_problems,
+    deposit_name_problems,
+    deposit_rows,
+    manifest_text,
+    plan_data,
+    plan_protocol,
+    prepare_deposit_write,
+    protocol_digest,
+    protocol_record_problems,
+    unlisted_paths,
+)
 from sci_adk.render.novelty import (
     NOVELTY_SENTENCES_FILE,
     NoveltySentence,
@@ -185,6 +209,48 @@ class CompileResult:
         return bool(self.checkpoints)
 
 
+@dataclass(frozen=True)
+class DepositSummary:
+    """What the last full render shipped under ``paper/deposit/`` (design/deposit-files.md).
+
+    Attributes:
+        deposit_dir: ``runs/<id>/paper/deposit/``.
+        protocol_digest: the run's protocol digest (D11), withheld or not.
+        shipped: the protocol file names copied into ``paper/deposit/protocol/``.
+        withheld_reason: the persisted declaration's ``protocol_reason`` when the protocol is
+            withheld; ``None`` when it ships.
+        declaration: which declaration the render used (``--deposit <path>``, now persisted,
+            or ``runs/<id>/deposit.json``); ``""`` when the run has none (D2).
+        data_shipped: the declared data files copied, as paths under ``paper/deposit/``.
+        not_shipped: one line per declared data file not shipped: its source and why (D7).
+    """
+
+    deposit_dir: Path
+    protocol_digest: str
+    shipped: Tuple[str, ...]
+    withheld_reason: Optional[str]
+    declaration: str = ""
+    data_shipped: Tuple[str, ...] = ()
+    not_shipped: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _DepositPrep:
+    """A deposit checked before anything under ``paper/`` is written (D13), applied after
+    ``record.tex`` (the manifest's ``sha256_also_in`` searches it).
+
+    ``persist`` holds the bytes of a declaration given with ``--deposit``, written to
+    ``runs/<id>/deposit.json`` when the render completes (D2); ``declaration`` says which
+    declaration the render used."""
+
+    plan: ProtocolPlan
+    write: DepositWrite
+    warnings: Tuple[str, ...]
+    data: DataPlan = DataPlan()
+    persist: Optional[bytes] = None
+    declaration: str = ""
+
+
 def _listing_text(raw: bytes) -> Optional[str]:
     """A shipped script's body as text for the record listing, or None (not UTF-8).
 
@@ -245,6 +311,11 @@ class ResearchCompiler:
         # recorded script; the CLI prints these as warnings.
         self.code_ref_warnings: List[str] = []
         self.code_ref_data_warnings: List[str] = []
+        # The deposit the most recent full render wrote (design/deposit-files.md), and the
+        # lines it could not settle on its own: record-side protocol problems, untrusted
+        # manifest cells, render-written files whose bytes changed. The CLI prints them.
+        self.deposit_summary: Optional[DepositSummary] = None
+        self.deposit_warnings: List[str] = []
 
     def compile(
         self,
@@ -259,6 +330,7 @@ class ResearchCompiler:
         figures: Optional[Sequence[AnyFigure]] = None,
         si_figures: Optional[Sequence[AnyFigure]] = None,
         enforce_prior_work: bool = False,
+        deposit: Optional[DeclarationFile] = None,
     ) -> CompileResult:
         """
         Compile a proposal end to end into ``runs/<spec.id>/``.
@@ -312,6 +384,11 @@ class ResearchCompiler:
             si_figures: optional SUPPLEMENTARY figures rendered ONLY in the SI (default
                 none). The main ``figures`` are never re-rendered in the SI, so a main
                 figure is not duplicated across draft.tex + si.tex (design feedback 5.2).
+            deposit: optional deposit declaration given with ``--deposit``
+                (design/deposit-files.md D2), threaded to :meth:`stage_render` as ``figures``
+                is: validated against the run, and its bytes persisted as
+                ``runs/<id>/deposit.json`` when the render completes. Absent -> the persisted
+                declaration (if any) is used.
 
         Returns:
             A ``CompileResult`` (inspect ``needs_agent`` / ``checkpoints``).
@@ -363,6 +440,7 @@ class ResearchCompiler:
             si=si,
             figures=figures,
             si_figures=si_figures,
+            deposit=deposit,
         )
 
         return CompileResult(
@@ -596,6 +674,7 @@ class ResearchCompiler:
         si: Optional[AuthoredSI] = None,
         figures: Optional[Sequence[AnyFigure]] = None,
         si_figures: Optional[Sequence[AnyFigure]] = None,
+        deposit: Optional[DeclarationFile] = None,
     ) -> tuple[Path, Optional[Path], Optional[Path], Optional[FigureConsistencyReport]]:
         """Render the ``paper/`` belief artifacts (``draft.tex`` + optional authored
         ``si.tex`` + figures + bib) and the deposit's deterministic ``record.tex`` (the
@@ -626,6 +705,13 @@ class ResearchCompiler:
         out); this stage is the composition root that locates the citations + bib and
         co-locates figure/bib sources into ``paper/`` for Overleaf self-containment.
 
+        Deposit files (design/deposit-files.md): the protocol history and the declared data
+        files ship under ``paper/deposit/`` with their manifest. ``deposit`` is a declaration
+        given with ``--deposit``; it is validated before anything is written and persisted as
+        ``runs/<id>/deposit.json`` when the render completes. Without it the persisted
+        declaration is used (D2). The data checks read ``evidence`` -- the list this render
+        is given -- never ``evidence/`` on disk (D5).
+
         Returns ``(paper_path, si_path, record_path, figure_consistency)`` -- ``si_path`` is
         ``None`` when no ``AuthoredSI`` was supplied.
         """
@@ -648,6 +734,15 @@ class ResearchCompiler:
         # in place; the bindings of its novelty sentences are carried into the side file
         # below. Read BEFORE anything is written: an unreadable side file stops the render.
         kept_si_bindings = self._kept_si_bindings(run_dir, spec.id) if si is None else []
+
+        # Deposit files (design/deposit-files.md D1-D3, D13): the protocol history and the
+        # declared data ship under paper/deposit/. Checked here, before anything is written:
+        # an invalid declaration (given or persisted), a missing source, a symbolic link on
+        # the way, a manifest render did not write, or a file render did not write at a
+        # target path stops the render with paper/ and runs/<id>/deposit.json untouched.
+        self.deposit_summary = None
+        self.deposit_warnings = []
+        deposit_prep = self._prepare_deposit(run_dir, spec.id, deposit)
 
         # Citations + bibliography are gathered for the run (renderers stay pure --
         # data in, string out; the compiler is the composition root that locates them).
@@ -758,11 +853,13 @@ class ResearchCompiler:
         repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
 
         # The deposit record.tex (SPEC-SI-AUTHORING-001 M1) -- the SAME writer the
-        # record-only render uses, so the two cannot drift.
+        # record-only render uses, so the two cannot drift. Its Protocol history section
+        # (design/deposit-files.md D11) reads the protocol plan checked above.
         record_path = self._write_record(
             spec, claims_list, evidence_list, run_dir,
             repro_listings=repro_listings, figures=si_figures, prose=si_prose,
             bib_path=bib_path,
+            protocol=deposit_prep.plan if deposit_prep is not None else None,
         )
 
         # Land the bundle (paper/code/ + paper/reproduce.py). paper/code/ is written only when
@@ -771,6 +868,12 @@ class ResearchCompiler:
         # writes nothing (byte-identical paper/). A re-render removes the paper/code/ files
         # the previous render wrote and this one does not. See _emit_reproduction_bundle.
         self._emit_reproduction_bundle(repro_listings, paper_dir, spec.id)
+
+        # paper/deposit/: the protocol copies, the shipped data files and the manifest, whose
+        # sha256_also_in column searches the record.tex just written; then the data checks
+        # against the Evidence this render was given, and the names check.
+        if deposit_prep is not None:
+            self._emit_deposit(deposit_prep, record_path, evidence_list)
 
         # Prose<->figure ref consistency (design/paper-figures-and-si.md D4): scan the
         # RENDERED body for \ref{fig:...}/\label integrity. NON-BLOCKING -- surfaced in
@@ -813,10 +916,15 @@ class ResearchCompiler:
         )
         claims_list = list(claims) if claims is not None else self._load_claims(spec)
         run_dir = self.workspace_dir / "runs" / spec.id
+        # The Protocol history section (design/deposit-files.md D11) reads only the protocol
+        # files, so no declaration is read: the section is the same withheld or not, and
+        # this stage leaves runs/<id>/deposit.json alone (D13).
+        protocol = plan_protocol(run_dir) if (run_dir / "spec.json").is_file() else None
         return self._write_record(
             spec, claims_list, evidence_list, run_dir,
             repro_listings=self._resolve_repro_listings(evidence_list, run_dir),
             figures=None, prose=None, bib_path=self._locate_bib_path(run_dir),
+            protocol=protocol,
         )
 
     def render_texts(
@@ -896,6 +1004,7 @@ class ResearchCompiler:
         figures: Optional[Sequence[AnyFigure]],
         prose: Optional[SIProse],
         bib_path: Optional[str],
+        protocol: Optional[ProtocolPlan] = None,
     ) -> Path:
         """Write the deposit's ``record.tex`` (SPEC-SI-AUTHORING-001 M1) and return its path.
 
@@ -911,12 +1020,14 @@ class ResearchCompiler:
         (the loop persists AFTER compile), so a digest here would cover an incomplete run
         dir; the record's integrity section points to ``sci-adk verify`` instead.
         ``paper_body=None``: the record is standalone, so its figures are numbered in supply
-        order.
+        order. ``protocol`` (the run's protocol plan; ``None`` when the run has no
+        ``spec.json`` on disk) adds the Protocol history section (design/deposit-files.md
+        D11).
         """
         record_tex = render_si_latex(
             spec, claims, evidence, figures=figures, digest=None,
             prose=prose, paper_body=None, bib_path=bib_path,
-            repro_listings=repro_listings,
+            repro_listings=repro_listings, protocol=protocol,
         )
         record_path = deposit_record_path(run_dir)
         record_path.write_text(record_tex, encoding="utf-8")
@@ -1355,6 +1466,116 @@ class ResearchCompiler:
                 )
             )
         return out
+
+    @staticmethod
+    def _prepare_deposit(
+        run_dir: Path, spec_id: str, given: Optional[DeclarationFile] = None
+    ) -> Optional[_DepositPrep]:
+        """Plan ``paper/deposit/`` and check it can be written (design/deposit-files.md D2,
+        D13).
+
+        ``given`` is a declaration passed with ``--deposit`` (validated here, persisted by
+        :meth:`_emit_deposit`); without it the persisted ``runs/<id>/deposit.json`` is read.
+        ``None`` when the run has no ``spec.json`` on disk (a library caller rendering an
+        in-memory Spec): there is no recorded protocol to ship. The record-side protocol
+        problems (receipts, history files, ``prior_version_id`` links) are kept as warnings.
+
+        Raises:
+            DepositDeclarationError: the declaration is invalid, or a declared source is
+                missing, outside the workspace, a protocol file or under ``paper/``.
+            DepositRefused: a symbolic link on the way, a manifest without the marker, or a
+                file no render wrote at a target path.
+        """
+        if not (run_dir / "spec.json").is_file():
+            if given is not None:
+                raise DepositDeclarationError(
+                    f"{given.label}: runs/{spec_id}/ has no spec.json on disk, so there is no "
+                    "run to declare deposit files for"
+                )
+            return None
+        if given is not None:
+            declaration = read_deposit_declaration(
+                given.data, run_dir, spec_id, source=given.label)
+            label = f"{given.label} (copied to runs/{spec_id}/{DEPOSIT_FILE})"
+        else:
+            declaration = load_deposit_declaration(run_dir, spec_id)
+            label = f"runs/{spec_id}/{DEPOSIT_FILE}" if declaration is not None else ""
+        plan = plan_protocol(run_dir, declaration)
+        data = plan_data(run_dir, declaration)
+        write = prepare_deposit_write(run_dir / "paper", {**plan.targets(), **data.targets()})
+        fails, notes = protocol_record_problems(plan)
+        return _DepositPrep(
+            plan=plan, write=write, warnings=tuple(fails + notes), data=data,
+            persist=given.data if given is not None else None, declaration=label,
+        )
+
+    def _emit_deposit(
+        self, prep: _DepositPrep, record_path: Path, evidence: Sequence[EvidenceItem] = ()
+    ) -> None:
+        """Apply a checked deposit: persist a declaration given with ``--deposit``, write the
+        protocol copies and the shipped data files, remove the render-written files this
+        render no longer ships, drop emptied render folders, write the manifest; then run the
+        data checks on ``evidence`` (the list this render was given) and the names check,
+        keeping their failures as warnings (D5).
+
+        Only what :func:`prepare_deposit_write` allowed is touched (D13): new paths and paths
+        a trusted previous manifest listed are written; removals are render-written files
+        whose bytes are unchanged. A path already holding the bytes is left as it is.
+        """
+        write = prep.write
+        deposit_dir = write.deposit_dir
+        paper_dir = deposit_dir.parent
+        if prep.persist is not None:
+            (paper_dir.parent / DEPOSIT_FILE).write_bytes(prep.persist)
+        deposit_dir.mkdir(parents=True, exist_ok=True)
+        for rel, data in write.writes.items():
+            target = deposit_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        for rel in write.removals:
+            (deposit_dir / rel).unlink()
+        for sub in OWNED_DIRS:
+            folder = deposit_dir / sub
+            if folder.is_dir() and not folder.is_symlink() and not any(folder.iterdir()):
+                folder.rmdir()
+        record_text = record_path.read_text(encoding="utf-8")
+        (deposit_dir / MANIFEST_NAME).write_text(
+            manifest_text(deposit_rows(prep.plan, prep.data, record_text)),
+            encoding="utf-8", newline="\n",
+        )
+        bib = paper_dir / "references.bib"
+        data_fails, _ = deposit_data_problems(
+            prep.plan, prep.data, evidence,
+            bib.read_text(encoding="utf-8", errors="replace") if bib.is_file() else None,
+        )
+        docs = {
+            name: (paper_dir / name).read_text(encoding="utf-8", errors="replace")
+            for name in ("draft.tex", "si.tex") if (paper_dir / name).is_file()
+        }
+        name_fails, _ = deposit_name_problems(docs, prep.plan, prep.data)
+        # A file this render neither wrote nor removed stays under paper/deposit/ (a lost or
+        # untrusted manifest, a hand-added file): verify's inventory will fail it, so say so
+        # now. A changed file left in place already has its warning.
+        listed = {**prep.plan.targets(), **prep.data.targets()}
+        stray = [
+            f"paper/deposit/{rel} stays, but the new manifest does not list it (left from an "
+            "earlier render, or added by hand); verify fails until it is moved away"
+            for rel in unlisted_paths(deposit_dir, listed) if rel not in write.left
+        ]
+        self.deposit_warnings = [
+            *prep.warnings, *write.warnings, *stray, *data_fails, *name_fails]
+        self.deposit_summary = DepositSummary(
+            deposit_dir=deposit_dir,
+            protocol_digest=protocol_digest(prep.plan),
+            shipped=tuple(f.name for f in prep.plan.shipped),
+            withheld_reason=prep.plan.withheld_reason,
+            declaration=prep.declaration,
+            data_shipped=tuple(df.path for df in prep.data.shipped),
+            not_shipped=tuple(
+                f"{df.entry.source}: {df.entry.not_shipped_reason()}"
+                for df in prep.data.files if not df.entry.ships
+            ),
+        )
 
     def _emit_reproduction_bundle(
         self,

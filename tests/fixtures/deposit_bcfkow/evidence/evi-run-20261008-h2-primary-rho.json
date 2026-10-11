@@ -1,0 +1,38 @@
+{
+  "id": "evi-run-20261008-h2-primary-rho",
+  "created_at": "2026-10-08T16:54:03.980157Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "experiment_run",
+  "provenance": {
+    "code_ref": "analysis/SPEC-BCFKOW-001/s6_h2_rho.py sha256=3753377b89467880c13de1f10337b77ad5f9c35240df1b276204977e179cc57b (sample from analysis/SPEC-BCFKOW-001/s5_h2_sample.py sha256=617b7eff166ae8ac66580414a3424f695883dc847b5790baf7841e76dc5c0017); no git commit (the workspace repository has no commits)",
+    "data_ref": "Arnot & Gobas 2006 SI (DOI 10.1139/a06-005) decrypted sha256 1081e637f6bd39f9ba86d0e005cf657ea054ad302fd57e5d2e8d6841fd95c461 (original sha256 d5f642bdaf3c69fa1cf5de3679a5f6d5ed920d8ca68cc8bd86aaece87dc7f8f0), obtained 2026-10-08; CompTox QSAR-ready SMILES retrieved 2026-10-08; OPERA LogP_QR.sdf sha256 de50a1eb020ae42f7f89f8cb7dd73987048e80f30ef32eeaf376451cb832e489; sample analysis/SPEC-BCFKOW-001/out/s5_h2_sample.json sha256 ec0458dd20bcefe861769e03a4f828fdf4e45cc3f9f732bb737f3ed1f79e1a0e; chemical table s3_chemicals_final.csv sha256 5e6f3568fd1c7f1beccbb10ef3fef2c2736ef2086f304af3b4986bb9c888b871",
+    "data_source": "measured",
+    "seed": 20261008,
+    "environment": "Python 3.13.11 (Anaconda, run with -I); RDKit 2025.09.4; NumPy 2.4.0; SciPy 1.17.0; Linux 6.6.87.2-microsoft-standard-WSL2",
+    "cost": null,
+    "search_log": null
+  },
+  "result": {
+    "type": "quantitative",
+    "point": 0.6176456469349347,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "H2 primary correlation (approaches [9]-[10]) over the 50 chemicals recorded in evi-obs-20261008-h2-sample. Encoding on the hydrogen-suppressed graph of each CompTox QSAR-ready SMILES (RDKit 2025.09.4; heavy atoms only, bond orders ignored): code = product over heavy atoms of p(Z)^deg, p(Z) the Z-th prime (C 13, N 17, O 19, F 23, P 47, S 53, Cl 59, Br 149, I 241; checked by computing the primes), deg = number of heavy-atom neighbours; the code is an exact Python integer and log10(code) = sum of deg x log10 p(Z). Ranks were taken on the exact integer codes, ties given average ranks; measured log Kow as recorded in approach [5]. Spearman rho = Pearson correlation of the two average-rank vectors = 0.617646, n = 50. Tied code groups: 3 (6 chemicals): 95-94-3 = 634-66-2; 108-38-3 = 100-42-5; 91-20-3 = 91-17-8. Tied log Kow groups: 2. Result.point = rho. Pre-registered bearing: supports if rho >= 0.5, refutes otherwise -> supports. SciPy spearmanr on log10(code) gives the same value. Per chemical (draw order): 79-01-6 log10(code) 10.8823, log Kow 2.42; 95-94-3 log10(code) 24.9065, log Kow 4.64; 114012-04-3 log10(code) 40.3679, log Kow 3.58; 938-86-3 log10(code) 29.6919, log Kow 4.51; 68-12-2 log10(code) 9.4259, log Kow -1.01; 37680-65-2 log10(code) 37.6169, log Kow 5.55; 1634-04-4 log10(code) 11.4691, log Kow 1.0899999999999999; 78-42-2 log10(code) 65.7671, log Kow 4.23; 634-66-2 log10(code) 24.9065, log Kow 4.6; 121-82-4 log10(code) 36.5043, log Kow 0.87; 19666-30-9 log10(code) 53.9618, log Kow 4.8; 17109-49-8 log10(code) 49.7261, log Kow 3.48; 2104-64-5 log10(code) 53.1948, log Kow 4.78; 108-38-3 log10(code) 17.8231, log Kow 3.2; 544-01-4 log10(code) 22.6085, log Kow 4.25; 579-10-2 log10(code) 25.0211, log Kow 1.12; 6639-30-1 log10(code) 24.2496, log Kow 4.56; 75-35-4 log10(code) 7.9975, log Kow 2.13; 126-72-7 log10(code) 52.0716, log Kow 4.29; 108-87-2 log10(code) 15.5952, log Kow 3.605; 2051-24-3 log10(code) 57.8105, log Kow 8.27; 119-93-7 log10(code) 38.1071, log Kow 2.34; 91-20-3 log10(code) 24.5068, log Kow 3.3; 50-29-3 log10(code) 47.8423, log Kow 6.91; 330-55-2 log10(code) 35.8091, log Kow 3.2; 109-69-3 log10(code) 9.5685, log Kow 2.64; 106-46-7 log10(code) 19.1369, log Kow 3.48; 96-96-8 log10(code) 27.8599, log Kow 1.94; 108-90-7 log10(code) 16.2521, log Kow 2.84; 34883-41-5 log10(code) 34.7321, log Kow 5.41; 462-08-8 log10(code) 15.9447, log Kow 0.11; 132-64-9 log10(code) 33.7479, log Kow 4.12; 92-69-3 log10(code) 31.3552, log Kow 3.2; 67-68-5 log10(code) 8.6795, log Kow -1.35; 92-84-2 log10(code) 37.0999, log Kow 4.15; 156-43-4 log10(code) 22.7250, log Kow 1.24; 82-45-1 log10(code) 42.7760, log Kow 3.305; 62-44-2 log10(code) 29.6900, log Kow 1.685; 2104-96-3 log10(code) 41.8511, log Kow 5.21; 88-74-4 log10(code) 23.0745, log Kow 1.85; 32598-13-3 log10(code) 40.5017, log Kow 6.63; 75-65-0 log10(code) 9.0764, log Kow 0.35; 13674-87-8 log10(code) 49.6576, log Kow 3.65; 106-93-4 log10(code) 8.8021, log Kow 2.0300000000000002; 1912-24-9 log10(code) 33.0124, log Kow 2.6799999999999997; 108-67-8 log10(code) 20.0510, log Kow 3.42; 62-56-6 log10(code) 7.5270, log Kow -1.08; 91-17-8 log10(code) 24.5068, log Kow 4.79; 121-75-5 log10(code) 45.8137, log Kow 2.36; 100-42-5 log10(code) 17.8231, log Kow 2.95.",
+    "artifact_ref": "analysis/SPEC-BCFKOW-001/out/s6_h2_rho.json"
+  },
+  "bears_on": [
+    {
+      "target_id": "H2",
+      "direction": "supports",
+      "weight": null
+    }
+  ],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": null,
+  "negative_control": null
+}

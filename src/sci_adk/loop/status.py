@@ -73,6 +73,9 @@ class StatusReport(BaseModel):
         spec_digest: :func:`sci_adk.provenance.spec_digest` of the recorded Spec -- the
             value ``append-evidence`` / ``derive-claim`` check ``--spec-digest`` against
             ("" when no spec). Not the sha256 of the spec.json file.
+        protocol_digest: the run's protocol digest (design/deposit-files.md D11) -- the value
+            to deposit with a third party at freeze and at each amendment ("" when no spec
+            or when the protocol files cannot be read).
         headline: the one-line summary (line 1 of the rendered text).
     """
 
@@ -89,10 +92,22 @@ class StatusReport(BaseModel):
     contested_pending: List[str] = Field(default_factory=list)
     checkpoints_awaiting_verdict: List[str] = Field(default_factory=list)
     spec_digest: str = Field(default="")
+    protocol_digest: str = Field(default="")
     headline: str = Field(default="")
 
 
 _NOTHING_RECORDED = "nothing recorded yet"
+
+
+def _protocol_digest(run_dir: Path) -> str:
+    """The run's protocol digest, or "" when its protocol files cannot be read (never
+    raises: status is a report, not a gate)."""
+    from sci_adk.render.deposit import plan_protocol, protocol_digest
+
+    try:
+        return protocol_digest(plan_protocol(run_dir))
+    except (OSError, ValueError):
+        return ""
 
 
 def session_status(run_dir: Path) -> StatusReport:
@@ -152,6 +167,7 @@ def session_status(run_dir: Path) -> StatusReport:
             n_hypotheses=len(spec.hypotheses),
             checkpoints_awaiting_verdict=awaiting,
             spec_digest=spec_digest(spec),
+            protocol_digest=_protocol_digest(run_dir),
             headline=_headline(run_name, spec_id=spec.id, n_unresolved=0,
                                prior_work_open=False, n_novelty=0,
                                n_awaiting=len(awaiting), has_record=bool(awaiting)),
@@ -198,6 +214,7 @@ def session_status(run_dir: Path) -> StatusReport:
         contested_pending=contested_pending,
         checkpoints_awaiting_verdict=awaiting,
         spec_digest=spec_digest(spec),
+        protocol_digest=_protocol_digest(run_dir),
         headline=headline,
     )
 
@@ -225,6 +242,9 @@ def render_status_text(report: StatusReport) -> str:
     # amend-spec print at freeze (not the sha256 of the spec.json file).
     if report.spec_digest:
         lines.append(f"  spec_digest: {report.spec_digest}")
+    # The protocol digest (design/deposit-files.md D11), on the line verify and render print.
+    if report.protocol_digest:
+        lines.append(f"  protocol digest (sha256): {report.protocol_digest}")
     lines.append(f"  claims: {counts if counts else 'none recorded'}")
 
     if report.unresolved_claim_ids:

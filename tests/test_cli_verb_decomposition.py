@@ -44,8 +44,33 @@ from sci_adk.loop.compiler import ResearchCompiler
 
 # A fixed instant so the injected experiment's EvidenceItem is fully deterministic
 # (id + created_at), making the rendered paper reproducible across compile/verb paths.
+# The Specs below are frozen at the same instant: record.tex prints the SHA-256 of the
+# frozen spec.json (its Protocol history section, design/deposit-files.md D11), and those
+# bytes include the Spec's created_at.
 _FIXED_AT = datetime(2026, 6, 22, 12, 0, 0, tzinfo=timezone.utc)
 _HYP_ID = "hyp-x"
+
+
+def _without_protocol_history(record_tex: str) -> str:
+    """``record.tex`` with its Protocol history section cut out.
+
+    That section prints each workspace's own frozen protocol files (their checksums cover
+    the Spec's ``created_at``, the clock time of that workspace's freeze), so two runs frozen
+    separately differ there and nowhere else.
+    """
+    head, sep, rest = record_tex.partition("\\section{Protocol history}")
+    if not sep:
+        return record_tex
+    nxt = rest.find("\\section{")
+    # The section may be the last one: then cut to the end of the text.
+    return head + (rest[nxt:] if nxt >= 0 else "")
+
+
+def test_without_protocol_history_cuts_a_last_section_to_the_end():
+    tex = "A\\section{Record}B\\section{Protocol history}C"
+    assert _without_protocol_history(tex) == "A\\section{Record}B"
+    middle = "A\\section{Protocol history}C\\section{Record integrity}D"
+    assert _without_protocol_history(middle) == "A\\section{Record integrity}D"
 
 
 def _numeric_spec(spec_id: str) -> Spec:
@@ -82,6 +107,7 @@ def _numeric_spec(spec_id: str) -> Spec:
         target_claims=[
             TargetClaim(id="tc", statement="the metric is zero", answers=_HYP_ID)
         ],
+        created_at=_FIXED_AT,
     )
 
 
@@ -196,6 +222,7 @@ def _multi_hyp_novelty_spec(spec_id: str) -> Spec:
             TargetClaim(id="tc-a", statement="A is zero", answers="hyp-a"),
             TargetClaim(id="tc-b", statement="B is zero", answers="hyp-b"),
         ],
+        created_at=_FIXED_AT,
     )
 
 
@@ -377,7 +404,10 @@ def test_run_t1_demo_byte_identical_to_verb_chain_via_cli(tmp_path):
     run_si = deposit_record_path(run_b).read_text(encoding="utf-8")  # the deposit record (M1)
 
     assert run_draft == verb_draft, "run --t1-demo draft.tex != verb-chain draft.tex"
-    assert run_si == verb_si, "run --t1-demo record.tex != verb-chain record.tex"
+    # The two workspaces froze their Specs at different clock times, so only the Protocol
+    # history section (each record's own protocol files) may differ.
+    assert _without_protocol_history(run_si) == _without_protocol_history(verb_si), (
+        "run --t1-demo record.tex != verb-chain record.tex")
 
 
 # --------------------------------------------------------------------------- #

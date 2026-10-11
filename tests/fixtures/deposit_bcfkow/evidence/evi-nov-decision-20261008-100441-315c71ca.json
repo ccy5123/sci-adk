@@ -1,0 +1,1050 @@
+{
+  "id": "evi-nov-decision-20261008-100441-315c71ca",
+  "created_at": "2026-10-08T10:04:41.500918Z",
+  "spec_id": "SPEC-BCFKOW-001",
+  "kind": "novelty_decision",
+  "provenance": {
+    "code_ref": "novelty:result:found_nothing",
+    "data_ref": "literature_evidence=evi-lit-20261008-100441-c4eb4a94; manifest=runs/SPEC-BCFKOW-001/literature",
+    "data_source": null,
+    "seed": null,
+    "environment": "novelty decision (High trigger, result-novelty); see referenced LITERATURE item for the acquired corpus",
+    "cost": null,
+    "search_log": {
+      "searched_at": [
+        "2026-10-08T09:41:13Z",
+        "2026-10-08T09:41:25Z"
+      ],
+      "queries": [
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"Gödel number\" molecule",
+          "status": "ok",
+          "n_results": 2,
+          "detail": "Both unrelated (biosystems origin-of-life essay; book chapter on combinatorialism)."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"Gödel numbering\" chemical",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "Zenodo artificial-life case study; unrelated."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime number\" \"molecular descriptor\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" molecular graph code",
+          "status": "ok",
+          "n_results": 3,
+          "detail": "Three versions of one Authorea preprint on pi and DNA; unrelated."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime factorization\" chemical structure",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "1998 Trends Cogn Sci reply letter; unrelated."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" molecular descriptor",
+          "status": "ok",
+          "n_results": 4,
+          "detail": "Hosoya polynomials / Zagreb indices of algebraic (group/ring) graphs; nanotopology review; no molecular prime code."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" \"topological index\"",
+          "status": "ok",
+          "n_results": 7,
+          "detail": "Topological indices of zero-divisor / power graphs of rings and groups; not molecules."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" canonical molecular structure",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime number\" octanol water partition",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429: keyless daily budget for this IP exhausted (retryAfter ~51,000 s). Retried after 20 s via curl and via WebFetch: both HTTP 429."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted); retried once at end of session, HTTP 429 again."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" QSAR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)."
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" QSPR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:molecular AND abs:descriptor",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:molecule AND abs:encoding",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:Gödel AND abs:molecule",
+          "status": "ok",
+          "n_results": 4,
+          "detail": "Fullerenes in Gödel spacetimes (x2), DNA coding and Gödel numbering (1909.13574), 'Mathematics is physical'; none on molecular graphs or partitioning."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:Godel AND abs:molecular",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime factorization\" AND abs:molecular",
+          "status": "ok",
+          "n_results": 3,
+          "detail": "Shor/hidden-subgroup symmetry (2605.04343, abstract read), tensor-train optimisation, Wigner-symbol library; unrelated."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:lipophilicity",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime\" AND abs:\"octanol-water\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:prime AND abs:\"molecular graph\"",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "'Singular graphs' (1806.07786); unrelated."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"number-theoretic\" AND abs:molecular",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:chemical",
+          "status": "ok",
+          "n_results": 2,
+          "detail": "Primon gas cosmology; bacterial gene-network computing; unrelated."
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\" AND abs:\"partition coefficient\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:Matula AND abs:alkanes",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:\"molecular graphs\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime number molecular graph code octanol-water partition coefficient",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Loose ranking (total-results 5,045,427); top 25 are generic log Kow measurement/estimation works; none uses a prime-number code."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Gödel numbering molecular structure",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Neto 2013 (Matula numbers, Gödel numbering and Fock space) and Nicolaidis & Psomopoulos 2022 (DNA Gödel numbering); rest unrelated."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime numbers unique code chemical structure",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Top 25 are number-theory works; no chemistry."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Matula numbers prime numbers alkanes rooted trees chemical",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), first attempt."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime numbers canonical numbering atoms molecular graph",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Canonical-numbering papers (Jochum-Gasteiger 1977, HOC procedures 1985, Shelley-Munk 1981) plus number-theory books; no property correlation."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=topological index based on prime numbers molecular graph",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Prime/coprime graphs of rings and groups; no molecular prime code."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=number theory molecular descriptor QSPR lipophilicity",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Carbó-Dorca & Saliner 2009 (number of atoms as descriptor) and Malik & Noureen 2026 (augmented Sombor index); no prime code."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Matula numbers prime numbers alkanes rooted trees chemical",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), second attempt; replaced by the rephrased Matula query below."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime factorization encoding molecules integer representation",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), first attempt."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=molecular connectivity relationship to partition coefficients",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Murray, Hall & Kier 1975 and Šoškić & Plavšić 2005 (connectivity indices vs log P / log Kow)."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Gödel number molecular descriptor QSAR",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Generic QSAR descriptor papers and Gödel philosophy; no Gödel-based molecular descriptor."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Matula numbers coding chemical structures alkanes",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Surfaced Elk 1995 (heteroatoms/rings), Gutman & Ivić 1996, Deutsch 2012, Dossou-Olory & Mojeed 2025 review."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Expansion of Matula numbers to heteroatoms and to ring compounds",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Title lookup: 10.1021/ci00024a012 confirmed."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime factorization encoding molecules integer representation",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException), second attempt."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=Elk Gutman 1994 properties derivable Matula numbers alkane",
+          "status": "ok",
+          "n_results": 8,
+          "detail": "Title lookup: 10.1021/ci00018a017 confirmed."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime factorization encoding molecules integer representation",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Third attempt answered; top 25 are integer factorisation / RSA works; no molecular encoding."
+        },
+        {
+          "index": "crossref",
+          "query": "query.bibliographic=prime numbers atomic number vertex degree molecular graph lipophilicity",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "Top 25 are number-theory works; no chemistry."
+        },
+        {
+          "index": "semantic_scholar",
+          "query": "prime number molecular code octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (keyless request refused); retried once at end of session, HTTP 429 again."
+        },
+        {
+          "index": "semantic_scholar",
+          "query": "Gödel numbering molecular graph descriptor",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429."
+        },
+        {
+          "index": "semantic_scholar",
+          "query": "prime numbers molecular descriptor lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429."
+        },
+        {
+          "index": "websearch",
+          "query": "prime number molecular graph code octanol-water partition coefficient log P correlation",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No prime-code vs log P work. Nearest: Persona et al. 2007 Acta Pol Pharm 64:311 (information-theoretic graph index for log P of thiobenzanilides; no DOI, PubMed 18536156; not prime-based)."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Gödel numbering\" molecule chemical structure encoding descriptor",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Surfaced Weininger 1989 CANON (prime products of neighbour ranks) and Krotko 2020; Gödel encodings of DNA / genetic code."
+        },
+        {
+          "index": "websearch",
+          "query": "\"prime numbers\" molecular descriptor QSPR lipophilicity \"log P\"",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No prime-based log P descriptor. Surfaced Mannhold et al. 2009 (log P from carbon and heteroatom counts)."
+        },
+        {
+          "index": "websearch",
+          "query": "molecule encoded as product of primes atomic number \"prime\" integer code molecular graph descriptor",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No whole-molecule prime-power descriptor found; CANON/Krotko and DNA Gödel numbering again."
+        },
+        {
+          "index": "websearch",
+          "query": "Matula numbers prime numbers chemical trees alkanes canonical nomenclature",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Matula/Elk/Gutman line of work: prime-factorisation codes of alkanes, polybenzenes, polymantanes, heteroatoms; uses are nomenclature and graph statistics."
+        },
+        {
+          "index": "websearch",
+          "query": "\"prime number\" topological index molecular graph \"partition coefficient\" OR \"log Kow\" OR \"logP\" atoms weighted by primes",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No prime-weighted index for log P / log Kow; nearest are E-state, ETA, connectivity and optimised-correlation-weight indices."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Further Properties Derivable from the Matula Number of an Alkane\" Elk Gutman abstract",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Citation confirmed (J Chem Inf Comput Sci 1994, 34, 331-334); abstract not found; citing works (Deutsch 2012) describe it as deriving tree statistics from Matula numbers."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Expansion of Matula Numbers to Heteroatoms and to Ring Compounds\" Elk 1995 abstract",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Citation confirmed (35(2):233-236); abstract not shown; ACS page returned HTTP 403 to WebFetch."
+        },
+        {
+          "index": "websearch",
+          "query": "Gödel encoding molecules prime power atomic number vertex degree integer representation chemistry preprint",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Only molecular-graph hit is the GitHub repository ccy5123/sci-adk (software test of an injective Gödel-style molecule key; no log Kow; not a publication, no DOI). Rest: Gödel encodings of DNA / genetic code."
+        },
+        {
+          "index": "websearch",
+          "query": "\"number-theoretic\" molecular descriptor octanol-water partition coefficient prime",
+          "status": "ok",
+          "n_results": null,
+          "detail": "No number-theoretic descriptor of log P found."
+        },
+        {
+          "index": "websearch",
+          "query": "\"Matula numbers, Gödel numbering and Fock space\" Journal of Mathematical Chemistry 2013 abstract",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Abstract confirmed: bijection rooted trees <-> Fock-space vectors; no physicochemical property."
+        },
+        {
+          "index": "websearch",
+          "query": "Malik Noureen 2026 \"A novel descriptor of molecular graphs and its implications in QSPR studies of antiviral drugs\"",
+          "status": "ok",
+          "n_results": null,
+          "detail": "Confirmed descriptor is the augmented Sombor index (degree-based), not a prime code."
+        },
+        {
+          "index": "crossref",
+          "query": "multiplicative topological index octanol-water partition coefficient",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "query.bibliographic, rows=25; total-results 3219891; top 25 are generic log Kow method/standard papers, none relevant"
+        },
+        {
+          "index": "crossref",
+          "query": "prime number molecular graph code octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException); retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "multiplicative Zagreb index lipophilicity log P QSPR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException); retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel number molecular structure code prime factorization chemical compounds",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 7818500; number-theory texts only"
+        },
+        {
+          "index": "crossref",
+          "query": "number theory molecular descriptor QSPR prime numbers",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 4783880; number-theory texts only"
+        },
+        {
+          "index": "crossref",
+          "query": "atom-weighted vertex degree descriptor lipophilicity octanol water",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2187625; surfaced 10.5772/31647 and 10.1002/jps.2600840120"
+        },
+        {
+          "index": "crossref",
+          "query": "multiplicative Zagreb index lipophilicity log P QSPR",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 1264942; multiplicative Zagreb bound/QSPR papers; examined 10.3390/math11102245 (pi-electron energy, no log P)"
+        },
+        {
+          "index": "crossref",
+          "query": "prime number molecular graph code octanol-water partition coefficient",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 5045428; generic log Kow papers, no prime/graph-code work"
+        },
+        {
+          "index": "crossref",
+          "query": "molecular identification numbers prime numbers chemical structures",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 6624773; number-theory texts only"
+        },
+        {
+          "index": "crossref",
+          "query": "product-type graph invariant logP drugs QSPR",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2306275; degree-based index QSPR of drug sets, none with a prime or element-weighted product code"
+        },
+        {
+          "index": "crossref",
+          "query": "Narumi-Katayama index product of vertex degrees physicochemical properties",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException); retried once, HTTP 500 again"
+        },
+        {
+          "index": "crossref",
+          "query": "molecular ID numbers Randic",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2513550; surfaced Randic ID-number papers 10.1021/ci00043a009, 10.1021/ci00051a009"
+        },
+        {
+          "index": "crossref",
+          "query": "prime numbers canonical numbering atoms molecular graph unique code",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 3182362; surfaced 10.1021/ci60002a007 and a Godel-number flow-cytometry identifier 10.3389/fimmu.2025.1481412"
+        },
+        {
+          "index": "crossref",
+          "query": "integer code molecular graph log Kow bioconcentration",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2840993; surfaced 10.1080/10629369508233995"
+        },
+        {
+          "index": "crossref",
+          "query": "arithmetic encoding molecular graph property prediction",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 3629056; graph-neural-network papers only"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel numbering chemistry molecular graph",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500 (CancellationException)"
+        },
+        {
+          "index": "crossref",
+          "query": "prime number based topological index molecular descriptor",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 10530707; no molecular prime-code work"
+        },
+        {
+          "index": "crossref",
+          "query": "SMILES algorithm for generation of unique SMILES notation",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "known-item lookup; confirmed 10.1021/ci00062a008"
+        },
+        {
+          "index": "crossref",
+          "query": "Molecular hashkeys novel method molecular characterization predicting pharmaceutical properties",
+          "status": "ok",
+          "n_results": 5,
+          "detail": "known-item lookup; confirmed 10.1021/jm980527a"
+        },
+        {
+          "index": "crossref",
+          "query": "quantitative structure-property relationship analysis physicochemical properties anti-hepatitis prescription drugs linear regression model",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; DOI 10.1016/j.heliyon.2024.e25908 confirmed instead via PMC10877299"
+        },
+        {
+          "index": "crossref",
+          "query": "Estimating the Octanol/Water Partition Coefficient for Aliphatic Organic Compounds Using Semi-Empirical Electrotopological Index",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; DOI 10.3390/ijms12107250 confirmed instead via api.crossref.org/works/{doi}"
+        },
+        {
+          "index": "crossref",
+          "query": "Narumi Katayama index",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel numbering molecular graph",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; retried below"
+        },
+        {
+          "index": "crossref",
+          "query": "product of primes molecular descriptor lipophilicity",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "total-results 2740848; nothing relevant"
+        },
+        {
+          "index": "crossref",
+          "query": "bond additive topological descriptor element weights octanol water",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; retried once, HTTP 500 again"
+        },
+        {
+          "index": "crossref",
+          "query": "Narumi Katayama index",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 1217460; graph-theoretic NK-index papers, none relating NK to log P"
+        },
+        {
+          "index": "crossref",
+          "query": "Godel numbering molecular graph",
+          "status": "ok",
+          "n_results": 25,
+          "detail": "retry; total-results 2568110; nothing on molecular Godel codes"
+        },
+        {
+          "index": "crossref",
+          "query": "optimization of correlation weights of local graph invariants octanol water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500; DOI 10.1021/ci034200g found via WebSearch and confirmed via api.crossref.org/works/{doi}"
+        },
+        {
+          "index": "crossref",
+          "query": "flexible topological descriptors octanol/water partition coefficient alcohols",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 500"
+        },
+        {
+          "index": "crossref",
+          "query": "Multiplicative Topological Indices of Molecular Structure in Anticancer Drugs Shao Jahanbani",
+          "status": "ok",
+          "n_results": 3,
+          "detail": "known-item lookup; 10.1080/10406638.2020.1743329 (no abstract deposited; not assessed further)"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"multiplicative\" AND abs:\"topological index\" AND abs:\"partition coefficient\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime numbers\" AND abs:\"molecular\" AND abs:\"descriptor\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"Godel\" AND abs:\"molecule\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\" AND abs:\"logP\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\"",
+          "status": "ok",
+          "n_results": 387,
+          "detail": "syntax check that phrase queries return hits; not a topical search"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"topological index\" AND abs:lipophilicity",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime\" AND abs:\"molecular graph\"",
+          "status": "ok",
+          "n_results": 1,
+          "detail": "1806.07786 Singular graphs (spectral graph theory, unrelated)"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"octanol\" AND abs:\"graph\" AND abs:\"degree\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"multiplicative\" AND abs:\"Zagreb\" AND abs:\"QSPR\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"prime factorization\" AND abs:\"molecule\"",
+          "status": "ok",
+          "n_results": 2,
+          "detail": "NMR quantum-factoring experiments (quant-ph/0205193, quant-ph/0112176), unrelated"
+        },
+        {
+          "index": "arxiv",
+          "query": "abs:\"Godel numbering\" AND abs:\"chemical\"",
+          "status": "ok",
+          "n_results": 0,
+          "detail": null
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"multiplicative\" \"topological index\" \"partition coefficient\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429: keyless daily budget for this IP exhausted (resets midnight UTC); retried once later, HTTP 429 again"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"weighted vertex degree\" lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"number theory\" \"molecular descriptor\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"prime numbers\" \"QSPR\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted); retried once later, HTTP 429 again"
+        },
+        {
+          "index": "openalex",
+          "query": "filter=title_and_abstract.search:\"molecular code\" \"partition coefficient\"",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 (daily budget exhausted)"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "multiplicative topological index octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "prime number molecular code lipophilicity",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429"
+        },
+        {
+          "index": "semanticscholar",
+          "query": "weighted vertex degree descriptor octanol-water partition coefficient",
+          "status": "failed",
+          "n_results": null,
+          "detail": "HTTP 429 on retry later in session"
+        },
+        {
+          "index": "websearch",
+          "query": "prime number molecular descriptor Gödel encoding molecule logP octanol-water correlation",
+          "status": "ok",
+          "n_results": 19,
+          "detail": "Godel encodings found only for DNA / genetic code / clustering; no molecular prime code tied to log P"
+        },
+        {
+          "index": "websearch",
+          "query": "multiplicative Zagreb index Narumi-Katayama logP QSPR drugs correlation",
+          "status": "ok",
+          "n_results": 19,
+          "detail": "multiplicative-index drug QSPR papers model BP/MP/MR, not log P; additive degree indices vs LogP in 10.1016/j.heliyon.2024.e25908"
+        },
+        {
+          "index": "websearch",
+          "query": "\"prime numbers\" molecular graph code atoms atomic number prime product chemical structure identifier",
+          "status": "ok",
+          "n_results": 10,
+          "detail": "prime products in canonical numbering (Weininger CANON; Krotko 2020); patent US 6,757,618 prime-array structure identifier; no property link"
+        },
+        {
+          "index": "websearch",
+          "query": "\"Gödel number\" OR \"Gödel numbering\" chemical structure molecule encoding descriptor property",
+          "status": "ok",
+          "n_results": 18,
+          "detail": "only molecule-level Godel encoding found is github.com/ccy5123/sci-adk (this workspace's own toolkit: injectivity test, no property, no DOI); hypermap patent US 10,985,775 (non-chemical)"
+        },
+        {
+          "index": "websearch",
+          "query": "atomic number weighted vertex degree topological index log Kow octanol-water partition coefficient correlation",
+          "status": "ok",
+          "n_results": 27,
+          "detail": "vertex-edge-weighted (atomic-property) degree indices (10.1021/acs.jcim.4c02013) tested on BP/MR/MV, not log Kow; electrotopological log P index 10.3390/ijms12107250"
+        },
+        {
+          "index": "websearch",
+          "query": "number-theoretic molecular descriptor primes assigned to elements molecule lipophilicity bioconcentration QSAR",
+          "status": "failed",
+          "n_results": null,
+          "detail": "tool returned an API safeguard error; no results received"
+        },
+        {
+          "index": "websearch",
+          "query": "molecular hash prime factorization atoms bonds integer code cheminformatics partition coefficient",
+          "status": "ok",
+          "n_results": 19,
+          "detail": "molecular hashkeys (10.1021/jm980527a) predict log P from 3D surface similarity, not a prime graph code; Limeade arXiv 2411.16623 integer encoding for optimization"
+        },
+        {
+          "index": "websearch",
+          "query": "Toropov optimization of correlation weights of local graph invariants octanol/water partition coefficient alcohols",
+          "status": "ok",
+          "n_results": 18,
+          "detail": "atom-type and vertex-degree correlation weights fitted to log P (10.1021/ci034200g; Duchowicz et al. 2003 J. Argent. Chem. Soc., no DOI found)"
+        },
+        {
+          "index": "websearch",
+          "query": "multiplicative topological indices logP correlation \"multiplicative\" Randić Sombor lipophilicity drugs",
+          "status": "ok",
+          "n_results": 18,
+          "detail": "no multiplicative index tested against log P; additive Gutman/Randic indices vs lipophilicity in 10.3390/molecules28155822 and 10.3390/ph18091255"
+        }
+      ],
+      "candidates": [
+        {
+          "doi": "10.1021/ci00062a008",
+          "title": "SMILES. 2. Algorithm for generation of unique SMILES notation",
+          "relevance": "related",
+          "basis": "Weininger et al. 1989: replaces each atom rank by a prime and takes products over neighbours to refine canonical ranks; prime codes used for canonical naming only, no partitioning property."
+        },
+        {
+          "doi": "10.1186/s13321-020-00453-4",
+          "title": "Atomic ring invariant and Modified CANON extended connectivity algorithm for symmetry perception in molecular graphs and rigorous canonicalization of SMILES",
+          "relevance": "related",
+          "basis": "Krotko 2020 (abstract read): product of primes for ring sizes as an atom invariant for canonicalisation; no log P / log Kow."
+        },
+        {
+          "doi": "10.1007/BF01170004",
+          "title": "A canonical ordering of polybenzenes and polymantanes using a prime number factorization technique",
+          "relevance": "related",
+          "basis": "Elk 1990: prime-factorisation code used to give canonical names to polybenzenes/polymantanes; nomenclature only."
+        },
+        {
+          "doi": "10.1021/ci00024a012",
+          "title": "Expansion of Matula Numbers to Heteroatoms and to Ring Compounds",
+          "relevance": "related",
+          "basis": "Elk 1995: extends prime-factorisation (Matula) codes to heteroatoms and rings; title and citing works place it in nomenclature; abstract not readable (ACS HTTP 403), so heteroatom weighting scheme and any property use unverified."
+        },
+        {
+          "doi": "10.1021/ci00018a017",
+          "title": "Further Properties Derivable from the Matula Number of an Alkane",
+          "relevance": "related",
+          "basis": "Elk & Gutman 1994: per citing work (Deutsch 2012), the 'properties' are graph statistics of the alkane tree read from its Matula number, not physicochemical data; abstract not read."
+        },
+        {
+          "doi": "10.1016/0012-365x(95)00182-v",
+          "title": "On Matula numbers",
+          "relevance": "related",
+          "basis": "Gutman & Ivić 1996: mathematical properties of the prime-based tree code motivated by alkane coding; no partitioning."
+        },
+        {
+          "doi": "10.5772/intechopen.1006120",
+          "title": "Matula Numbers and their Applications",
+          "relevance": "related",
+          "basis": "Dossou-Olory & Mojeed 2025 review (chapter read): chemistry applications listed are nomenclature and information retrieval only; no log P, boiling point or QSPR."
+        },
+        {
+          "doi": "10.1007/s10910-013-0178-z",
+          "title": "Matula numbers, Gödel numbering and Fock space",
+          "relevance": "related",
+          "basis": "Neto 2013 (abstract read): Gödel-type relabelling links rooted-tree codes to Fock space; no physicochemical property."
+        },
+        {
+          "doi": "10.1002/jps.2600641216",
+          "title": "Molecular Connectivity III: Relationship to Partition Coefficients",
+          "relevance": "related",
+          "basis": "Murray, Hall & Kier 1975: degree-based connectivity index correlated with partition coefficients; nearest descriptor-vs-log P work, but not a prime code."
+        },
+        {
+          "doi": "10.1021/ci050024v",
+          "title": "Modeling the Octanol−Water Partition Coefficients by an Optimized Molecular Connectivity Index",
+          "relevance": "related",
+          "basis": "Šoškić & Plavšić 2005: connectivity index with optimised atom weights fitted to log Kow; fitted weights, not fixed prime weights."
+        },
+        {
+          "doi": "10.1002/jps.21494",
+          "title": "Calculation of Molecular Lipophilicity: State-of-the-Art and Comparison of LogP Methods on more than 96,000 Compounds",
+          "relevance": "related",
+          "basis": "Mannhold et al. 2009: log P from carbon and heteroatom counts alone; an element-count size baseline close to what log10(code) measures, no prime code."
+        },
+        {
+          "doi": "10.1002/jcc.21208",
+          "title": "Notes on quantitative structure-properties relationships (QSPR) part 2: The role of the number of atoms as a molecular descriptor",
+          "relevance": "related",
+          "basis": "Carbó-Dorca & Saliner 2009 (abstract read): atom count as QSPR descriptor; size-type descriptor, no prime code, log Kow not the stated focus."
+        },
+        {
+          "doi": "10.1016/j.physa.2022.127053",
+          "title": "DNA coding and Gödel numbering",
+          "relevance": "unrelated",
+          "basis": "Nicolaidis & Psomopoulos 2022: Gödel number of a nucleotide sequence, not an atom-level molecular graph; no partitioning."
+        },
+        {
+          "doi": "10.3390/molecules27186081",
+          "title": "Hosoya Polynomials of Power Graphs of Certain Finite Groups",
+          "relevance": "unrelated",
+          "basis": "Primes index group orders of algebraic graphs; no molecules or log P."
+        },
+        {
+          "doi": "10.1016/j.jmgm.2026.109483",
+          "title": "A novel descriptor of molecular graphs and its implications in QSPR studies of antiviral drugs",
+          "relevance": "unrelated",
+          "basis": "Malik & Noureen 2026: augmented Sombor (degree-based) index vs drug properties; no prime code, log Kow not reported in the abstract seen."
+        },
+        {
+          "doi": "10.1021/ci00062a008",
+          "title": "SMILES. 2. Algorithm for generation of unique SMILES notation (Weininger, Weininger, Weininger 1989)",
+          "relevance": "related",
+          "basis": "CANON multiplies primes of neighbour ranks to refine atom invariants: a prime-product molecular graph code used for canonical ordering, not related to partitioning"
+        },
+        {
+          "doi": "10.1186/s13321-020-00453-4",
+          "title": "Atomic ring invariant and Modified CANON extended connectivity algorithm for symmetry perception in molecular graphs and rigorous canonicalization of SMILES (Krotko 2020)",
+          "relevance": "related",
+          "basis": "prime products for neighbour ranks and ring sizes in canonicalization; paper relates the encoding to no physicochemical property (checked on PMC7439248)"
+        },
+        {
+          "doi": "10.1021/ci034200g",
+          "title": "QSPR Modeling of Lipid-Water Partition Coefficient by Optimization of Correlation Weights of Local Graph Invariants (Toropov, Roy 2003)",
+          "relevance": "related",
+          "basis": "nearest mathematical form: atom-additive descriptor built from element-type and vertex-degree weights correlated with log P, but the weights are fitted to the property, not fixed prime logarithms"
+        },
+        {
+          "doi": "10.1080/10629369508233995",
+          "title": "Evaluation of Molecular Connectivity Indices as a Predictive Method of log Kow for Different Classes of Chemicals (Finizio, Sicbaldi, Vighi 1995)",
+          "relevance": "related",
+          "basis": "degree-based indices with element-specific valence deltas regressed on measured log Kow across chemical classes; different functional form, no prime code"
+        },
+        {
+          "doi": "10.1016/j.heliyon.2024.e25908",
+          "title": "On quantitative structure-property relationship (QSPR) analysis of physicochemical properties and anti-hepatitis prescription drugs using a linear regression model (Mahboob et al. 2024)",
+          "relevance": "related",
+          "basis": "14 element-blind degree-based indices vs LogP for 16 drugs (r 0.68-0.91); no element weighting, no prime code"
+        },
+        {
+          "doi": "10.5772/31647",
+          "title": "Structural Relationship Study of Octanol-Water Partitioning Coefficients and Total Biodegradation of Barbiturate Medicines by Randic Descriptor (Taherpour et al. 2012)",
+          "relevance": "related",
+          "basis": "single degree-based index (Randic) related to log Kow within one drug class; not a prime or element-weighted code"
+        },
+        {
+          "doi": "10.3390/ijms12107250",
+          "title": "Estimating the Octanol/Water Partition Coefficient for Aliphatic Organic Compounds Using Semi-Empirical Electrotopological Index (Souza et al. 2011)",
+          "relevance": "related",
+          "basis": "one graph-derived index regressed on log P of 131 aliphatics; index built from semi-empirical atomic charges, not a prime-power code"
+        },
+        {
+          "doi": "10.3390/molecules28155822",
+          "title": "Evaluation of the Usefulness of Topological Indices for Predicting Selected Physicochemical Properties of Bioactive Substances with Anti-Androgenic and Hypouricemic Activity (Wardecki et al. 2023)",
+          "relevance": "related",
+          "basis": "Gutman M/Mv, Randic and Wiener indices vs lipophilicity of a small drug set; additive degree indices, no prime code"
+        },
+        {
+          "doi": "10.3390/ph18091255",
+          "title": "Use of TLC and Computational Methods to Determine Lipophilicity Parameters of Selected Neuroleptics (Klimoszek et al. 2025)",
+          "relevance": "related",
+          "basis": "Gutman M and connectivity indices correlated with calculated logP of five neuroleptics; additive degree indices, no prime code"
+        },
+        {
+          "doi": "10.1021/acs.jcim.4c02013",
+          "title": "Vertex-Edge-Weighted Molecular Graphs: A Study on Topological Indices and Their Relevance to Physicochemical Properties of Drugs Used in Cancer Treatment (Sorgun, Birgin 2025)",
+          "relevance": "related",
+          "basis": "degree-based indices with vertex/edge weights from atomic properties (closest element-weighted degree form); log P not among the properties named in the abstract or search excerpts"
+        },
+        {
+          "doi": "10.1038/s41598-025-33532-3",
+          "title": "Leveraging topological indices and machine learning for advanced prediction of antidepressant drug properties (Zhang et al. 2026)",
+          "relevance": "unrelated",
+          "basis": "eight multiplicative degree indices, but properties modelled are BP, MP, Tc, Vc and MR; log P not modelled (checked on PMC12848129)"
+        },
+        {
+          "doi": "10.3390/math11102245",
+          "title": "Sharp Bounds on the Generalized Multiplicative First Zagreb Index of Graphs with Application to QSPR Modeling (Hayat, Asmat 2023)",
+          "relevance": "unrelated",
+          "basis": "multiplicative index applied only to pi-electron energy of benzenoid hydrocarbons (Crossref abstract)"
+        },
+        {
+          "doi": "10.1021/jm980527a",
+          "title": "Molecular Hashkeys: A Novel Method for Molecular Characterization and Its Application for Predicting Important Pharmaceutical Properties of Molecules (Ghuloum, Sage, Jain 1999)",
+          "relevance": "unrelated",
+          "basis": "predicts log P from a 3D surface-similarity vector called a hashkey; not an integer code of the molecular graph"
+        },
+        {
+          "doi": "10.1002/jps.2600840120",
+          "title": "Atom/Fragment Contribution Method for Estimating Octanol-Water Partition Coefficients (Meylan, Howard 1995)",
+          "relevance": "unrelated",
+          "basis": "atom-additive like the code's logarithm, but constants are fitted fragment values; no fixed graph code"
+        },
+        {
+          "doi": "10.1021/ci00043a009",
+          "title": "On molecular identification numbers (Randic 1984)",
+          "relevance": "unrelated",
+          "basis": "path-weighted numeric graph identifiers for discrimination; not prime-based, no partitioning"
+        },
+        {
+          "doi": "10.1021/ci00051a009",
+          "title": "Molecular ID numbers: by design (Randic 1986)",
+          "relevance": "unrelated",
+          "basis": "numeric graph identifiers; not prime-based, no partitioning"
+        },
+        {
+          "doi": "10.1021/ci60002a007",
+          "title": "On Unique Numbering of Atoms and Unique Codes for Molecular Graphs (Randic 1975)",
+          "relevance": "unrelated",
+          "basis": "adjacency-matrix code for canonical numbering; not prime-based, no property"
+        },
+        {
+          "doi": "10.3389/fimmu.2025.1481412",
+          "title": "Unique gating strategy identifier based on the Prime Population System and Godel Numbers (2025)",
+          "relevance": "unrelated",
+          "basis": "Godel numbers for flow-cytometry gating strategies, not molecules"
+        }
+      ]
+    }
+  },
+  "result": {
+    "type": "qualitative",
+    "point": null,
+    "effect_size": null,
+    "ci": null,
+    "p_value": null,
+    "posterior": null,
+    "residual": null,
+    "predictive_error": null,
+    "finding": "result-novelty found_nothing: DOIs=['10.1021/ci00062a008 10.1186/s13321-020-00453-4 10.1007/BF01170004 10.1021/ci00024a012 10.1021/ci00018a017 10.1016/0012-365x(95)00182-v 10.5772/intechopen.1006120 10.1007/s10910-013-0178-z 10.1002/jps.2600641216 10.1021/ci050024v 10.1002/jps.21494 10.1002/jcc.21208 10.1021/ci034200g 10.1080/10629369508233995 10.1016/j.heliyon.2024.e25908 10.5772/31647 10.3390/ijms12107250 10.3390/molecules28155822 10.3390/ph18091255 10.1021/acs.jcim.4c02013']",
+    "artifact_ref": null
+  },
+  "bears_on": [],
+  "supersedes": null,
+  "digitized": null,
+  "literature_decision": {
+    "outcome": "found_nothing",
+    "hypothesis_id": "H2",
+    "kind": "result",
+    "reason": null,
+    "literature_evidence_id": "evi-lit-20261008-100441-c4eb4a94"
+  },
+  "negative_control": null
+}
