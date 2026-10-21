@@ -48,7 +48,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Mapping, Optional, Tuple
 
 from sci_adk.core.claim import Claim, ClaimStatus
 from sci_adk.core.declarations import load_declarations, load_review
@@ -83,7 +83,7 @@ from sci_adk.loop.code_ref import (
     resolve_code_ref_data_files,
     resolve_code_ref_scripts,
 )
-from sci_adk.loop.compiler import ResearchCompiler, deposit_record_path
+from sci_adk.loop.compiler import ResearchCompiler, code_readme_sources, deposit_record_path
 from sci_adk.loop.decision_engine import DecisionEngine, EvidenceForHypothesis
 from sci_adk.loop.prior_work import prior_work_open
 from sci_adk.loop.recorded_judge import RecordedJudge
@@ -118,10 +118,15 @@ from sci_adk.render.declaration_checks import (
     review_note_lines,
 )
 from sci_adk.render.novelty import (
+    FAILED_QUERY_TERM,
     NOVELTY_SENTENCES_FILE,
+    backing_decisions,
+    failed_query_counts,
     find_unbacked_novelty_sentences,
     find_unsupported_novelty,
+    mask_novelty_scope_counts,
     parse_novelty_sentences,
+    search_log_groups,
 )
 from sci_adk.render.number_audit import (
     RecordedValuePool,
@@ -164,6 +169,13 @@ from sci_adk.render.pubreqs_checks import (
     reference_style_problems,
     required_sections_problems,
     section_order_problems,
+)
+from sci_adk.render.code_readme import (
+    CODE_README_NAME,
+    ReadmeScript,
+    render_code_readme,
+    strip_figure_lines,
+    written_by_render,
 )
 from sci_adk.render.reproduction import bundle_file_names, listed_scripts
 
@@ -700,6 +712,10 @@ def verify_run(
     # READ-ONLY, no LLM. Record side: it judges the null a novelty claim stands on.
     search_log_problems, search_log_notes = _check_search_logs(novelty_decisions, spec)
     search_log_clean = not search_log_problems
+    # The failed queries behind each SUPPORTED novelty claim: advisory only, never gated.
+    search_log_notes = search_log_notes + _failed_query_advisory(
+        recorded_claims, novelty_decisions
+    )
 
     if claims_only:
         # The record side alone (claims_passed): no paper-side file is read.
@@ -757,7 +773,7 @@ def verify_run(
     # literal by literal against its declared sources -- INSTEAD of the pattern-based number
     # audit, which _check_paper_requirements then skips. Coverage + resolution gate; stale
     # entries and the identifier listing are advisory. READ-ONLY, no LLM.
-    number_problems, number_notes = _check_numbers(run_dir, evidence)
+    number_problems, number_notes = _check_numbers(run_dir, evidence, spec)
     numbers_clean = not number_problems
 
     # Conclusion review (design §11.4): an independent BLIND reading of what each conclusion
@@ -1415,8 +1431,20 @@ def load_number_record(
     return NumberRecord(spec_json=spec_json, evidence=evidence, bib_years=bib_years)
 
 
+def _number_text(text: str, spec: Optional[Spec], evidence: List[EvidenceItem]) -> str:
+    """A paper document as the number checks read it: the query counts render wrote into
+    each novelty scope that matches the record are blanked
+    (:func:`sci_adk.render.novelty.mask_novelty_scope_counts`). The novelty check compares
+    that scope with the record; the counts are not numbers an author declares. Without a
+    Spec there is nothing to re-derive, and the text is read as it is."""
+    if spec is None:
+        return text
+    decisions = [ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION]
+    return mask_novelty_scope_counts(text, spec, decisions, escape=_latex_sanitize)
+
+
 def _check_numbers(
-    run_dir: Path, evidence: List[EvidenceItem]
+    run_dir: Path, evidence: List[EvidenceItem], spec: Optional[Spec] = None
 ) -> Tuple[List[str], List[str]]:
     """Run the declared-number checks (design/declared-numbers.md §4.3): ``(problems, advisory)``.
 
@@ -1439,7 +1467,9 @@ def _check_numbers(
     if numbers is None:
         return [], []
     documents = {
-        name: (run_dir / "paper" / name).read_text(encoding="utf-8")
+        name: _number_text(
+            (run_dir / "paper" / name).read_text(encoding="utf-8"), spec, evidence
+        )
         for name in _PAPER_DOCS
         if (run_dir / "paper" / name).is_file()
     }
@@ -1623,6 +1653,49 @@ def _append_search_log_finding(
             f"frozen ({frozen_at.isoformat() if frozen_at else '?'}) -- a novelty null "
             "must come from a search run before the freeze."
         )
+
+
+def _failed_query_advisory(
+    claims: Mapping[str, Claim], novelty_decisions: List[EvidenceItem]
+) -> List[str]:
+    """ADVISORY (never gated): each distinct search log behind a SUPPORTED novelty claim
+    that holds failed queries (queries the index returned an error or no response to).
+
+    One line per distinct log (decisions recording the same searches -- the same times and
+    queries -- share one line, the rule the paper's novelty scope counts by), naming the
+    claim, every decision that records the log, how many of its queries failed out of how
+    many, and the failed queries per index (spellings of one index merged, most failures
+    first). The two-index soundness rule (:func:`_check_search_logs`) is not changed: an
+    index that failed some queries and answered others still counts as searched, so the
+    failures are reported here for the author to judge. READ-ONLY, PURE.
+    """
+    lines: List[str] = []
+    for claim_id, claim in sorted(claims.items()):
+        if not _is_novelty_claim(claim) or claim.status != ClaimStatus.SUPPORTED:
+            continue
+        kind = _novelty_kind_or_none(claim)
+        if kind is None:
+            continue
+        backing = backing_decisions(kind, claim.answers, novelty_decisions)
+        for _log, members in search_log_groups(backing):
+            counts = failed_query_counts(members)
+            if not counts.failed:
+                continue
+            per_index = ", ".join(
+                f"{name.removeprefix('the ')} {n}" for name, n in counts.failed_by_index.items()
+            )
+            ids = [ev.id for ev in members]
+            which = (f"found_nothing decision {ids[0]}; in its search log" if len(ids) == 1
+                     else "found_nothing decisions " + ", ".join(ids[:-1]) + f" and {ids[-1]}"
+                     ", which record the same searches; in that search log")
+            lines.append(
+                f"search log: the {kind}-novelty claim for hypothesis '{claim.answers}' "
+                f"({claim_id}) rests on {which}, {counts.failed} of {counts.total} queries "
+                f"{FAILED_QUERY_TERM} ({per_index}); the paper's novelty scope states the "
+                "count and the record lists every query -- check that these queries do not "
+                "include the ones closest to the claim."
+            )
+    return lines
 
 
 def _check_paper_tool_vocab(run_dir: Path) -> Dict[str, List[str]]:
@@ -1811,9 +1884,8 @@ def _check_paper_requirements(
         for name in _PAPER_DOCS:
             doc = run_dir / "paper" / name
             if doc.is_file():
-                problems.extend(
-                    number_audit_problems(doc.read_text(encoding="utf-8"), pool, source=name)
-                )
+                text = _number_text(doc.read_text(encoding="utf-8"), spec, evidence)
+                problems.extend(number_audit_problems(text, pool, source=name))
         warnings.append(_NUMBER_LIST_ADVICE)
 
     if pubreqs.required_sections:
@@ -2049,7 +2121,64 @@ def _reproduction_bundle_problems(
         problems
         + _shipped_copy_problems(run_dir / "paper" / "code", named)
         + _script_list_problems(driver, _expected_bundle_scripts(named), named)
+        + _code_readme_problems(run_dir, evidence, named)
     )
+
+
+def _readme_scripts(named: List[Tuple[str, NamedScript]]) -> List[ReadmeScript]:
+    """The shipped scripts and the results naming each, as the compiler builds them for the
+    code README: one per distinct content, in first-named order, named by
+    :func:`bundle_file_names`, with the results whose code reference names another shipped
+    script first. Read-only (hashes the named files)."""
+    contents: Dict[str, Tuple[str, List[str]]] = {}
+    first: Dict[str, str] = {}  # result id -> the first shipped script its code_ref names
+    for ev_id, ns in named:
+        script = ns.resolution.script
+        if script is None:
+            continue
+        try:
+            sha = hashlib.sha256(script.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        first.setdefault(ev_id, sha)
+        ids = contents.setdefault(sha, (script.name, []))[1]
+        if ev_id not in ids:
+            ids.append(ev_id)
+    names = bundle_file_names([(sha, name) for sha, (name, _ids) in contents.items()])
+    return [
+        ReadmeScript(names[sha], sha, tuple(ids),
+                     also_named_ids=tuple(i for i in ids if first[i] != sha))
+        for sha, (_n, ids) in contents.items()
+    ]
+
+
+def _code_readme_problems(
+    run_dir: Path, evidence: List[EvidenceItem], named: List[Tuple[str, NamedScript]]
+) -> List[str]:
+    """``paper/code/README.md`` against the README render writes for the current record
+    (render/code_readme.py), its figure lines aside: the figure specs are given to render,
+    not recorded. Missing, not written by render, or different -> one FAIL line asking for a
+    re-render. Nothing is required when no script ships. Read-only."""
+    scripts = _readme_scripts(named)
+    if not scripts:
+        return []
+    rerender = " -- re-run sci-adk render to refresh paper/"
+    path = run_dir / "paper" / "code" / CODE_README_NAME
+    where = f"reproduction bundle: paper/code/{CODE_README_NAME}"
+    if not path.is_file():
+        return [f"{where} is missing; render writes it beside the shipped scripts" + rerender]
+    actual = path.read_text(encoding="utf-8", errors="replace")
+    if not written_by_render(actual):
+        return [f"{where} was not written by render (its first line is not the one render "
+                "writes); move it aside" + rerender]
+    deposited, numbers, dois, _error = code_readme_sources(run_dir)
+    expected = render_code_readme(
+        scripts, evidence, deposited=deposited, numbers=numbers, dois=dois
+    )
+    if strip_figure_lines(actual) != strip_figure_lines(expected):
+        return [f"{where} is not the README render writes for the current record (a script, "
+                "an input, an output or a number it lists has changed since render)" + rerender]
+    return []
 
 
 def _named_data_files(

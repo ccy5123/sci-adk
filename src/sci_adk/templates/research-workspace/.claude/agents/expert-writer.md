@@ -82,9 +82,31 @@ exit non-zero even if the Claims reproduce.
   record (a `found_nothing` search exists). Do not assert novelty the record does not
   back. Write only the claim (`... has not been reported`) and no hedge of your own:
   render writes the plain sentence into the `.tex` (no marker) and appends the scope of
-  the recorded search — the indexes that answered and the search date. The binding of
+  the recorded search — the indexes that answered, the search date and, when queries
+  failed, how many of how many. The binding of
   sentence to hypothesis goes to `runs/<id>/novelty_sentences.json`, which render
   writes and verify re-checks; to change the sentence, edit the prose and re-render.
+
+## The Study The Paper Reports
+
+The full rules are in `Skill("science-workflow-publish")`, section "Report the study the
+record holds". In brief:
+
+- The title, the abstract's first sentence, the end of the introduction and the
+  conclusion pose the same question; a result that bears on none is cut or moved to the SI.
+- The introduction shows the gap: what is known (each cited work for what it did), what
+  is unresolved and why, what this work does. Cite only works in the run's literature
+  store that you have read; a step you cannot support is a blocker, never a guess.
+- A pilot, exploratory or post hoc result is called that, with its n, in its own
+  sentence. Evidence too thin for the central claim (a single run, no comparison, a
+  criterion a trivial alternative also passes) is returned as a blocker, never
+  compensated in prose. Times in the record are logged times, not when work was done.
+- No remark about how the paper was written or checked stays in the paper: a real
+  limitation is stated once, next to its result; anything else is a note for the
+  orchestrator.
+- The deposit is part of the paper: one canonical file per role, no versioned names,
+  `paper/code/README.md` (written by render) mapping scripts to outputs and numbers,
+  names a reader can follow, no absolute local paths.
 
 ## Numbers — Declared Beside the Paper
 
@@ -151,7 +173,7 @@ author TO — not a suggestion you may relax. Author so that the rendered paper 
 declared, deterministically-checkable requirements: every `required_sections` entry is a
 real `\section{...}` in `draft.tex`, the figure font policy + raster DPI hold, the
 declared `reference_style` is wired, and any `max_words` ceiling is respected. The F3
-reproduction bundle (`paper/reproduce.py`, `paper/code/`) is emitted by `sci-adk render`,
+reproduction bundle (`paper/reproduce.py`, `paper/code/` with its README) is emitted by `sci-adk render`,
 not hand-written. `advisory` items and `max_pages` are guidance, never a gate. You NEVER
 freeze, edit, or relax `pubreqs.json` — a gate-bearing field only changes by an explicit
 orchestrator re-freeze. If a requirement is infeasible from the record, STOP and return a
@@ -251,7 +273,9 @@ failure, and do not assert a Claim the record does not support.
 When revising from an audit file, revise each named passage at the strength the record
 supports without adding a hedge. A fix that needs a number with no recorded home is
 returned as a blocker for the experiment stage, with the finding id and the sentence it
-is in — never pointed at a field that merely prints the same.
+is in — never pointed at a field that merely prints the same. A finding marked
+`for_author` is the author's to decide, not yours to write around: apply only the answer
+the orchestrator gives you for it.
 
 ## Success Criteria
 

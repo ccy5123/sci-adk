@@ -47,6 +47,7 @@ from sci_adk.core.deposit import (
     read_deposit_declaration,
 )
 from sci_adk.core.evidence import EvidenceItem, EvidenceKind
+from sci_adk.core.numbers import NumberList, load_numbers
 from sci_adk.core.parser import ProposalParser
 from sci_adk.core.spec import DecisionRuleKind, Spec
 from sci_adk.core.spec_science import ScienceFinding, audit_spec_science
@@ -94,6 +95,17 @@ from sci_adk.render.authored_si import (
     render_authored_si_latex,
 )
 from sci_adk.render.bib_latex import canonical_bib, paper_bib
+from sci_adk.render.code_readme import (
+    CODE_README_NAME,
+    DepositedFile,
+    FigureLink,
+    ReadmeScript,
+    bib_dois,
+    deposited_files,
+    local_path_warnings,
+    render_code_readme,
+    written_by_render,
+)
 from sci_adk.render.deposit import (
     MANIFEST_NAME,
     OWNED_DIRS,
@@ -105,6 +117,7 @@ from sci_adk.render.deposit import (
     deposit_data_problems,
     deposit_name_problems,
     deposit_rows,
+    manifest_records,
     manifest_text,
     plan_data,
     plan_protocol,
@@ -293,6 +306,36 @@ def _output_name(output_ref: str) -> str:
     token = (output_ref or "").split(None, 1)[0] if (output_ref or "").strip() else ""
     token = token.rstrip(";,")
     return token.replace("\\", "/").rsplit("/", 1)[-1] if token else ""
+
+
+def code_readme_sources(
+    run_dir: Path,
+) -> Tuple[List[DepositedFile], Optional[NumberList], Dict[str, str], Optional[str]]:
+    """What the code README is built from besides the record and the shipped scripts:
+    the data rows of ``paper/deposit/manifest.csv``, the run's ``numbers.json``, and the
+    DOIs of ``paper/references.bib`` -- plus why the number list could not be read
+    (``None`` when it could, or when the run has none). Render (after writing the manifest)
+    and verify read them with this one function, so they build the same README. Read-only.
+    """
+    paper_dir = Path(run_dir) / "paper"
+    manifest = paper_dir / "deposit" / MANIFEST_NAME
+    try:
+        records = manifest_records(manifest.read_text(encoding="utf-8")) \
+            if manifest.is_file() else None
+    except (OSError, UnicodeDecodeError):
+        records = None
+    numbers: Optional[NumberList] = None
+    numbers_error: Optional[str] = None
+    try:
+        numbers = load_numbers(Path(run_dir))
+    except ValueError as exc:
+        numbers_error = str(exc).split("\n", 1)[0]
+    bib = paper_dir / "references.bib"
+    try:
+        bib_text = bib.read_text(encoding="utf-8", errors="replace") if bib.is_file() else None
+    except OSError:
+        bib_text = None
+    return deposited_files(records), numbers, bib_dois(bib_text), numbers_error
 
 
 def _plain_file_name(name: str) -> bool:
@@ -783,6 +826,8 @@ class ResearchCompiler:
             + authored_si_lint_warnings(si)
         )
         self.reference_warnings = []
+        # The code README and the absolute local paths in shipped text files (below).
+        self.bundle_warnings = []
 
         # The record (record.tex) is rendered here, before anything is written, so its bytes
         # are known to the deposit check below: paper/deposit/record.tex is its byte copy.
@@ -976,6 +1021,27 @@ class ResearchCompiler:
         # names check.
         if deposit_prep is not None:
             self._emit_deposit(deposit_prep, record_path, evidence_list)
+
+        # paper/code/README.md: each shipped script mapped to its inputs (and whether the
+        # paper distributes them -- read from the manifest just written), its outputs, the
+        # paper's numbers and figures that come from its results. Then the shipped text files
+        # are searched for absolute local paths. Both only warn.
+        readme = self._emit_code_readme(
+            repro_listings, evidence_list, run_dir, paper_dir,
+            self._figure_links(figures, paper_tex, si, si_path),
+        )
+        shipped = {
+            f"paper/code/{script.filename}": script.data
+            for script in bundle_scripts(repro_listings)
+        }
+        if readme is not None:
+            shipped[f"paper/code/{CODE_README_NAME}"] = readme.encode("utf-8")
+        if deposit_prep is not None:
+            shipped.update({
+                f"paper/deposit/{df.path}": df.data
+                for df in deposit_prep.data.shipped if df.data is not None
+            })
+        self.bundle_warnings += local_path_warnings(shipped, home=str(Path.home()))
 
         # Prose<->figure ref consistency (design/paper-figures-and-si.md D4): scan the
         # RENDERED body for \ref{fig:...}/\label integrity. NON-BLOCKING -- surfaced in
@@ -1896,6 +1962,93 @@ class ResearchCompiler:
             driver_path.write_text(render_reproduce_driver(listings, spec_id), encoding="utf-8")
         elif previous_driver and written_by_sci_adk(previous_driver):
             driver_path.unlink()
+
+    @staticmethod
+    def _figure_links(
+        figures: Sequence[AnyFigure],
+        paper_tex: str,
+        si: Optional[AuthoredSI],
+        si_path: Optional[Path],
+    ) -> List[FigureLink]:
+        """The native figures of the draft (``Figure N``) and of the authored SI
+        (``Figure SN``), each with the recorded results its points cite, numbered as their
+        documents number them. Image figures cite no recorded result."""
+        links: List[FigureLink] = []
+        si_tex = si_path.read_text(encoding="utf-8") if si_path is not None else ""
+        documents = [("Figure ", figures, paper_tex)]
+        if si is not None:
+            documents.append(("Figure S", si.figures, si_tex))
+        for prefix, specs, body in documents:
+            for number, fig in order_figures_by_reference(list(specs or []), body):
+                if fig.kind != "native":
+                    continue
+                ids = tuple(dict.fromkeys(
+                    point.evidence_id for series in fig.plot.series for point in series.points
+                ))
+                links.append(FigureLink(f"{prefix}{number}", f"fig:{fig.id}", ids))
+        return links
+
+    def _emit_code_readme(
+        self,
+        listings: Sequence[ReproListing],
+        evidence: Sequence[EvidenceItem],
+        run_dir: Path,
+        paper_dir: Path,
+        figure_links: Sequence[FigureLink],
+    ) -> Optional[str]:
+        """Write ``paper/code/README.md`` (render/code_readme.py) when scripts ship; return
+        its text (``None`` when none is written).
+
+        Read from what this render wrote or was given: the shipped scripts and the results
+        naming each, the record, the deposit manifest (``paper/deposit/manifest.csv``), the
+        run's ``numbers.json`` and the paper's ``references.bib`` -- the same files verify
+        rebuilds it from. A README render did not write (no marker line) is left as it is and
+        named in ``self.bundle_warnings``; when nothing ships, a README render wrote is
+        removed, and so is the emptied ``paper/code/``.
+        """
+        code_dir = paper_dir / "code"
+        path = code_dir / CODE_README_NAME
+        existing = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else None
+        def naming(script: ReproScript) -> List[ReproListing]:
+            return [item for item in listings if item.is_script and any(
+                s.filename == script.filename for s in item.all_scripts)]
+
+        # A result is listed under the first shipped script its code reference names.
+        scripts = [
+            ReadmeScript(
+                script.filename, script.sha256,
+                tuple(item.evidence_id for item in naming(script)),
+                also_named_ids=tuple(
+                    item.evidence_id for item in naming(script)
+                    if item.all_scripts[0].filename != script.filename
+                ),
+            )
+            for script in bundle_scripts(listings)
+        ]
+        if not scripts:
+            if existing is not None and written_by_render(existing):
+                path.unlink()
+            if code_dir.is_dir() and not any(code_dir.iterdir()):
+                code_dir.rmdir()
+            return None
+        deposited, numbers, dois, numbers_error = code_readme_sources(run_dir)
+        if numbers_error is not None:
+            self.bundle_warnings.append(
+                f"paper/code/{CODE_README_NAME} lists no numbers: {numbers_error}"
+            )
+        text = render_code_readme(
+            scripts, evidence, deposited=deposited, numbers=numbers, dois=dois,
+            figures=figure_links,
+        )
+        if existing is not None and not written_by_render(existing):
+            self.bundle_warnings.append(
+                f"paper/code/{CODE_README_NAME} was not written by render and is left as it "
+                "is; move it aside and render again to ship the code README (verify fails "
+                "until then)"
+            )
+            return None
+        path.write_text(text, encoding="utf-8", newline="\n")
+        return text
 
     def _collect_contested_checkpoints(
         self, spec: Spec, claims: Sequence[Claim]

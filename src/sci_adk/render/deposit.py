@@ -941,6 +941,12 @@ def _manifest_records(text: str) -> Optional[List[Dict[str, str]]]:
     return out
 
 
+def manifest_records(text: str) -> Optional[List[Dict[str, str]]]:
+    """The rows of a per-run ``manifest.csv`` text as column -> cell dicts, or ``None`` when
+    its header is not the D4 header (the code README reads the data rows from it). PURE."""
+    return _manifest_records(text)
+
+
 def _starts_with_marker(raw: bytes) -> bool:
     return raw.split(b"\n", 1)[0].rstrip(b"\r") == MANIFEST_MARKER.encode("utf-8")
 

@@ -21,6 +21,11 @@
 > conflicts with one goes to the orchestrator, not into the paper; the blind conclusions
 > reviewer runs after the final audit-driven revision, with one writer pass on its notes.
 >
+> §16 (v1.3) carries the rule's third part, the study the paper reports: one question
+> throughout, a gap shown with the works the run's searches acquired, evidence size and
+> thin evidence, logged times, and the deposited code; a seventh audit lens, findings sent
+> to the author, and the code README render writes.
+>
 > v0.2 supersedes v0.1's framing. v0.1 diagnosed "the protocol specifies no reader" and
 > proposed readability remedies. That was one level too shallow: the missing reader is a
 > symptom. The root is a **genre error** (§2), and correcting it re-ranks every direction
@@ -843,8 +848,51 @@ sees the disagreements, the reviewer still never sees `declarations.json`.
 The persona's guard note and the reviewer's own description state the same order.
 `tests/test_publish_review_order.py` pins both fixes.
 
+## 16. The study the paper reports (2026-10-21)
+
+§12 governs the words, §14 the claims. The third failure is prose that papers over what
+the study did not do: a paper whose title, abstract and conclusion pose different
+questions; an introduction that asserts a gap without the works that show it, while the
+run's own searches acquired works the paper never cites; an exploratory result reported
+without saying so; a central claim resting on one run or on a criterion a trivial
+alternative also passes, compensated by careful wording; a statement about when work was
+done that the record's logged times do not show; deposited code with no map from scripts
+to numbers. The author's writing standard was extended with a third part on this; the kit
+carries it in its own words (it does not read any personal file).
+
+**Where each rule lives.**
+
+| Rule | Author (`science-workflow-publish`, `expert-writer`) | Read by (`evaluator-paper` lens) | Machine |
+|---|---|---|---|
+| One question, from title to conclusion | "Report the study the record holds"; order of work, step 7 | `study-and-question` | none |
+| The gap is shown, not asserted | same section; step 8; never invent a citation, an unsupported step is a blocker | `study-and-question`, against `literature/references.bib` and the recorded searches; acquired works the paper never cites are listed with `for_author` | the novelty scope (render) names the search behind a novelty sentence, failed queries included; verify re-derives it |
+| Pilot, exploratory, post hoc results named, with n | same section; step 9 | `study-and-question`, against each hypothesis's `mode` | none |
+| Thin evidence goes to the author | a blocker, never prose | `study-and-question`, `for_author` | none |
+| Times are logged times | same section | `study-and-question` | the record prints each logged time with the note that local clocks wrote it |
+| Remarks about how the paper was written or checked | same section | `reader-vocabulary` (a real limitation, or `for_author`) | none |
+| Deposited code and data are part of the paper | same section; the experiment stage names inputs in `data_ref` and outputs in `artifact_ref` | `study-and-question` (one file per role, versioned names, names, local paths) | render writes `paper/code/README.md`; verify fails a missing or stale README under a reproduction-bundle contract; render warns about absolute local paths in shipped text files |
+
+**Findings for the author.** A finding a rewrite cannot fix carries `for_author: true`.
+The orchestrator writes those in their own section of the audit file and puts each to the
+user with `AskUserQuestion`; the writer applies only the answer. Sending them to the
+writer would produce exactly the compensation the rule forbids: a stronger verb, a softer
+one, or a longer limitations section.
+
+**Why no gate for the rest.** Whether two sentences pose the same question, whether a
+cited work shows what the introduction says, or whether a result is thin for its claim
+depends on meaning, not on tokens; the argument of §12.1 and §14 holds. Only the parts
+that are properties of files are machine-checked: the README's content against the
+record, and local paths in shipped text.
+
+**Not carried.** The rule's last step for deposits -- run the code from a clean copy and
+confirm its outputs match the paper -- cannot be done from the record: it holds no command
+lines or arguments, and some inputs cannot be redistributed. `reproduce.py` checks hashes
+and runs nothing, and the README says why.
+
+`tests/test_study_and_question_lens.py` pins the lens, the routing and this table.
+
 ---
 
-Version: 1.2 (§15: author instructions reach the audit; the reviewer runs last with one turn)
+Version: 1.3 (§16: the study the paper reports -- a seventh audit lens, findings for the author, the code README)
 Source: author reading report + framing correction + the submission-boundary objection +
 the definition-over-enumeration correction, 2026-08-31.

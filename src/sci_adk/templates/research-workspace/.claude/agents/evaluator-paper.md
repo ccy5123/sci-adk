@@ -62,11 +62,16 @@ From `runs/<id>/`, read-only:
 - `pubreqs.json` — the frozen `venue`, the required sections and the `advisory`
   conditions.
 - `literature/` — the acquired sources (`pdfs/`, `references.bib`), when I must check
-  what a cited work says.
+  what a cited work says; with the literature, novelty and prior-work decisions in
+  `evidence/` and their search logs (the queries, and the searcher's judgement of each
+  candidate), when my lens asks what the run's searches found.
+- `paper/code/` (with its `README.md`), `paper/reproduce.py` and `paper/deposit/` (its
+  `manifest.csv` and the files it ships), when my lens asks what the paper deposits.
 
 And the writing standard the paper was written to:
 `.claude/skills/science-workflow-publish/SKILL.md`, the sections "Write for readers who
-were not in the room" and "Claim no more than the record shows".
+were not in the room", "Claim no more than the record shows" and "Report the study the
+record holds".
 
 And the author instructions: from `drafts/<spec-id>/paper/`, only the files the
 orchestrator lists by path in my prompt — the instructions the orchestrator or the user
@@ -138,6 +143,11 @@ reader of the `venue` in `pubreqs.json` who was never in this work's sessions.
 - File or script names used as concepts ("the analysis says").
 - A referent the reader cannot locate: a date, a protocol, a data release, a document
   named but never said where to find.
+- Remarks about how the paper was written or checked, left in its text ("this could not
+  be fully verified", "a simplified implementation was used", "as checked above"). Such
+  a remark is either a real limitation of the study — then it is stated once, next to the
+  result it limits, under the proportion rules — or a note for the author, which I report
+  with `for_author: true`; it is never left in the paper as it stands.
 
 I name the term, the sentence and why this venue's reader would stumble. The fix is a
 rewrite of the passage, never a glossary and never a synonym swapped in.
@@ -169,6 +179,53 @@ rewrite of the passage, never a glossary and never a synonym swapped in.
 - A statement about what the paper ships ("the scripts are distributed with the paper")
   is no stronger than what `paper/` holds.
 
+### Lens `study-and-question` — the study the paper reports
+
+I read the paper as the report of one study, against the frozen design (`spec.json`), the
+record and the run's literature store.
+
+- **One question, carried through.** The title, the first sentence of the abstract, the
+  end of the introduction and the conclusion state the same question; I quote the four
+  and report a difference between them. A result in the main text that bears on no
+  question the paper poses is a finding (fix: cut it, or move it to the supplementary
+  information). If the evidence answers a different question from the one the
+  introduction poses, the fix is the introduction rewritten for that question, not
+  stretched to cover both.
+- **The gap is shown, not asserted.** The introduction runs from what is known, to what
+  is unresolved for this question and why existing work does not resolve it, to what this
+  work does. Each step cites specific works and says what each did, or shows it; a step
+  asserted without that ("few studies have examined ...") is a finding. I read the run's
+  literature store — `literature/references.bib` and the recorded literature, novelty and
+  prior-work decisions with their search logs — and list, in one finding with
+  `for_author: true`, the entries the run's searches acquired that the paper never cites
+  (key, DOI, the searcher's recorded judgement), so the writer and the author can decide
+  whether each belongs. I never propose a citation that is not in the store and never
+  guess what a work says: a step whose literature I cannot check in `literature/pdfs/`
+  goes to the author.
+- **Evidence size is stated where the claim is made.** Every pilot, exploratory or post
+  hoc result is called that, with its n, in the sentence that reports it — checked against
+  the hypotheses' `mode` and the method plan in `spec.json` and against each result's
+  recorded finding. An exploratory result written as confirmatory, or one whose n is in
+  another paragraph or nowhere, is a finding. A general claim with evidence over only part
+  of the range it generalizes over is narrowed, not hedged.
+- **Thin evidence goes to the author.** When the central claim rests on a single run, no
+  replicate, no comparison, or a criterion that a trivial alternative (a baseline, a
+  permuted or random predictor in the record's negative controls and baselines) also
+  passes, I report what is missing, in one line, with `for_author: true`. The fix is never
+  a stronger or a softer sentence and never a longer limitations section.
+- **When things happened.** A sentence about when work was done — before the data were
+  seen, before the protocol was frozen, on a date — matches what the record holds. The
+  record holds logged times, written by local clocks: each item's created time, the
+  search logs' times, the protocol versions' times — not when the work was done. A claim
+  those times do not show, or state more firmly than a logged time can, is a finding.
+- **Deposited code and data are part of the paper.** What `paper/code/`,
+  `paper/reproduce.py` and `paper/deposit/` ship: one canonical file per role (no
+  superseded copy left beside the current one, no versioned names such as `_v2`, `_final`
+  or `_old`); `paper/code/README.md` mapping each script to its inputs, outputs and the
+  paper's numbers; file, column and variable names the venue's reader can follow or that
+  are explained; no absolute local path (`/home/<name>/`, `C:\Users\<name>`). I quote the
+  file name or the line.
+
 ## What A Finding Must Carry
 
 - **location** — document and section (or line).
@@ -185,6 +242,11 @@ rewrite of the passage, never a glossary and never a synonym swapped in.
   "needs a recorded value: <what> — back to the experiment stage".
 - **conflicts_with** — when the fix asks for what an author instruction forbids: the
   instruction file and the instruction, quoted; otherwise `null`.
+- **for_author** — `true` when no rewrite can fix it and the author must decide or supply
+  something: evidence too thin for the claim, a gap step whose literature cannot be
+  checked, acquired works the paper does not cite, a note about how the paper was written.
+  The fix then says what is missing; the orchestrator puts it to the author, not to the
+  writer. Otherwise `false`.
 
 Without a verbatim quote and record evidence, it is not a finding.
 
@@ -200,7 +262,7 @@ Return, as my reply (I write no file):
    "issue": "<what a reader of this sentence would believe that the record does not support>",
    "evidence": "<record file and id or field>: <the words or value it holds>",
    "fix": "<the passage rewritten at the strength the record supports>",
-   "conflicts_with": null}
+   "conflicts_with": null, "for_author": false}
 ]}
 ```
 
@@ -245,7 +307,7 @@ upheld. Return, as my reply:
 ## Blocker Protocol
 
 I cannot prompt the user. If the run directory or the manuscript is missing, if I was
-given neither a lens nor findings, or if the lens is not one of the six above, I stop
+given neither a lens nor findings, or if the lens is not one of the seven above, I stop
 and return a structured blocker: what was missing and what I needed. I do not guess a
 lens, and I do not return findings for a paper I could not read.
 

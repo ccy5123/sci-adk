@@ -274,6 +274,46 @@ Amendment (2026-10-10, second pass). Reviewing the first amendment on the same r
   the `paper/code/` files the previous render had written. It now removes them, and removes
   the previous `reproduce.py` when a sci-adk render wrote it; a hand-written one stays.
 
+Amendment (2026-10-21): the code README. A real run shipped seventeen scripts with nothing
+telling the paper's reader which script produced which number or read which input, and
+`reproduce.py` lists results by summary only.
+
+- *`paper/code/README.md`* (render/code_readme.py, English and ASCII) is written whenever a
+  script ships. Its header says what `reproduce.py` does (checks hashes, runs nothing) and
+  why (no command lines or arguments are recorded, and some inputs cannot be redistributed),
+  and explains once that `evi-...` ids point into `deposit/record.tex`. Then, per script in
+  the order its first result was recorded: its SHA-256; the hashed input files its results
+  name (in their data description, or as data in the code reference), each marked as
+  distributed (its path under `deposit/`, from the manifest) or not (with the cited
+  references.bib entry and its DOI), and "written by" when another shipped script's result
+  wrote it; the files its results wrote (`artifact_ref`); the numbers of `numbers.json`
+  sourced from its results (field names, derived ones under each operand's result; each
+  text and field once per result and document); and the native figures whose points cite
+  its results. Tables are not linked: no table spec names a recorded result.
+- *Who wrote a file* (second pass, 2026-10-21; the trial's README listed two inputs of
+  one script as its outputs and gave one file four writers). A file has one writer when the
+  record identifies one: the script a data description names right after it ("`<file>
+  sha256=... (written by <script> sha256=...)`"); otherwise the one script every result
+  naming it in `artifact_ref` names (results that also name it as data left out), else the
+  first such result's first script. A file another script wrote is an input of the results
+  naming it, also where they name it in `artifact_ref`; a result naming the same bytes as
+  both data and output, with no other writer on record, is printed as "recorded as both an
+  input and an output"; a script whose data descriptions name hashed files never says "none
+  recorded". A result whose code reference names several shipped scripts is listed (its
+  inputs, outputs, numbers, figures) under the first one; each other script gets one line
+  naming the result and the script it is listed under. Each file is printed under the
+  fullest path the record gives it anywhere (the longest name recorded with its hash, or
+  the one recorded path ending with a shorter name), never by hash alone when a name exists.
+- *Gate.* With `reproduction_bundle` declared, verify rebuilds the README from the record,
+  the manifest, `numbers.json` and `paper/references.bib` with the same function and fails a
+  missing, hand-written or different one, asking for a re-render. The figure lines are left
+  out of the comparison: the figure specs are given to render, not recorded. A README render
+  did not write is left in place and named at render.
+- *Local paths.* Render warns (never fails) when a shipped text file -- `paper/code/*`,
+  including the README, or a shipped deposit data file -- holds an absolute local path
+  (`/home/<name>/`, `/Users/<name>/`, `C:\Users\<name>`, `/mnt/<drive>/Users/<name>`, a WSL
+  share, or the author's home directory), naming the file and the number of lines.
+
 ---
 
 ## 4. File touch-list (rough, for the build that follows AGREED)

@@ -63,6 +63,7 @@ from sci_adk.render.paper import (
     break_long_lines,
     text_font_lines,
 )
+from sci_adk.render.novelty import FAILED_QUERY_TERM, search_log_groups
 from sci_adk.render.prose import SIProse
 from sci_adk.render.reproduction import (
     ReproListing,
@@ -136,6 +137,102 @@ def record_label_warnings(
                 "the record shows it whole in the item"
             )
     return lines
+
+
+# A run of characters in a recorded query longer than this gets a break point every this
+# many characters: field-filter syntax and URLs are long words TeX cannot break.
+_QUERY_CHUNK = 30
+
+# How the record names the kind of a decision that carries a search log.
+_SEARCH_KIND_LABELS = {
+    "prior_work_decision": "Prior-work decision",
+    "novelty_decision": "Novelty decision",
+    "contested_record": "Contested record",
+    "inquiry_decision": "Inquiry decision",
+}
+
+
+def _breakable_text(text: str) -> str:
+    """``text`` on one line, sanitized, with a break point inside every word longer than
+    :data:`_QUERY_CHUNK` characters, for a ``\\texttt`` argument. Each piece is sanitized on
+    its own, so no escape is split."""
+    words: List[str] = []
+    for word in _one_line(text).split():
+        pieces = [word[k : k + _QUERY_CHUNK] for k in range(0, len(word), _QUERY_CHUNK)]
+        words.append(r"\allowbreak{}".join(_latex_sanitize(p) for p in pieces))
+    return " ".join(words)
+
+
+def _search_heading(ev: EvidenceItem) -> str:
+    """The plain-text heading of a recorded search: the decision's kind and, when it is bound
+    to a hypothesis, that hypothesis, the novelty kind and the outcome."""
+    label = _SEARCH_KIND_LABELS.get(_kind_str(ev), _kind_str(ev).replace("_", " "))
+    decision = ev.literature_decision
+    if decision is None:
+        return label
+    parts = [f"hypothesis {decision.hypothesis_id}"]
+    if decision.kind:
+        parts.append(decision.kind)
+    parts.append(decision.outcome.replace("_", " "))
+    return f"{label}: " + ", ".join(parts)
+
+
+def _literature_searches_section(evidence: Sequence[EvidenceItem]) -> str:
+    """The record's "Literature searches" section, or ``""`` when no item carries a search
+    log (the record is then byte-identical to one rendered before the section existed).
+
+    For each recorded decision with a search log (``Provenance.search_log``), in record
+    order: the decision id, the time(s) the searcher's notes state, the number of queries
+    and how many failed (printed as :data:`~sci_adk.render.novelty.FAILED_QUERY_TERM`, the
+    words the paper's novelty scope and verify use), and every query as recorded -- its
+    index, whether the index answered, the number of results when the notes give one, and
+    the query text. Decisions
+    whose logs record the same searches (the same times and queries) are listed together,
+    once. Every recorded string is sanitized; long words get break points.
+    """
+    groups = search_log_groups(evidence)
+    if not groups:
+        return ""
+    lines = [
+        r"\section{Literature searches}",
+        "Every literature search recorded in this run, under the decision it was recorded "
+        "with: the times stated in the searcher's notes, then each query in the order "
+        "recorded, with the index it was sent to, whether the index answered or the query "
+        f"{FAILED_QUERY_TERM}, and the number of results where the notes give one. "
+        "Decisions that recorded the same searches are listed together. The times come "
+        "from local clocks; nothing witnesses them.",
+    ]
+    for log, items in groups:
+        lines.append("")
+        lines.append(f"\\subsection{{{_latex_sanitize(_one_line(_search_heading(items[0])))}}}")
+        ids = ", ".join(f"\\texttt{{{_breakable_id(ev.id)}}}" for ev in items)
+        noun = "Decision" if len(items) == 1 else "Decisions recording the same searches"
+        lines.append(f"\\noindent {noun}: {ids}.\\\\")
+        times = ", ".join(_time_box(t) for t in log.searched_at)
+        lines.append(f"Searched: {times}.\\\\")
+        total = len(log.queries)
+        failed = sum(1 for q in log.queries if q.status == "failed")
+        summary = f"{total} {'query' if total == 1 else 'queries'}, {failed} {FAILED_QUERY_TERM}"
+        if log.candidates:
+            summary += f"; {len(log.candidates)} candidate papers judged"
+        lines.append(_latex_sanitize(summary) + ".")
+        # Ragged right, in a group: a typewriter space does not stretch, so a justified
+        # line of query text would overrun the margin wherever it cannot break evenly.
+        lines.append(r"{\raggedright")
+        lines.append(r"\begin{enumerate}")
+        for query in log.queries:
+            parts = [
+                f"\\texttt{{{_breakable_text(query.index)}}}",
+                "answered" if query.status == "ok" else FAILED_QUERY_TERM,
+            ]
+            if query.n_results is not None:
+                parts.append(f"{query.n_results} result{'' if query.n_results == 1 else 's'}")
+            lines.append(
+                "  \\item " + ", ".join(parts) + f": \\texttt{{{_breakable_text(query.query)}}}"
+            )
+        lines.append(r"\end{enumerate}")
+        lines.append("}")
+    return "\n".join(lines)
 
 
 def _protocol_history_section(protocol: ProtocolPlan) -> str:
@@ -666,6 +763,14 @@ def render_si_latex(
     repro_section = render_reproduction_section(repro_listings)
     if repro_section:
         lines.append(repro_section)
+        lines.append("")
+
+    # -- Section: Literature searches (OPTIONAL) ------------------------------------
+    # Every query of every recorded search log (the novelty scope in the paper counts the
+    # failed ones and points here). No item with a search log -> no section.
+    searches = _literature_searches_section(evidence)
+    if searches:
+        lines.append(searches)
         lines.append("")
 
     # -- Section: Protocol history (OPTIONAL; design/deposit-files.md D11) ----------

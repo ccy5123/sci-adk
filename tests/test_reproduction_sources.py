@@ -136,7 +136,8 @@ def test_the_hashed_data_paths_are_data_references():
 
 def test_data_files_are_not_copied_into_paper_code(tmp_path):
     run_dir = _data_run(tmp_path)
-    assert sorted(p.name for p in (run_dir / "paper" / "code").iterdir()) == ["a.py"]
+    assert sorted(p.name for p in (run_dir / "paper" / "code").iterdir()) == [
+        "README.md", "a.py"]
 
 
 def test_reproduce_lists_data_files_with_their_hash_not_as_scripts(tmp_path):

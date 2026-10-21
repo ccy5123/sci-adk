@@ -329,7 +329,8 @@ def test_resolve_a_bare_name_beside_the_script_with_another_hash_is_not_that_fil
 def test_each_distinct_script_is_shipped_once_under_its_own_name(tmp_path):
     run_dir = _trial(tmp_path)
     code = run_dir / "paper" / "code"
-    assert sorted(p.name for p in code.iterdir()) == sorted(_BODIES)
+    # The code README ships beside the scripts (tests/test_code_readme.py).
+    assert sorted(p.name for p in code.iterdir()) == sorted([*_BODIES, "README.md"])
 
 
 def test_shipped_copies_are_byte_identical_to_the_recorded_scripts(tmp_path):
@@ -357,7 +358,7 @@ def test_a_name_shared_by_different_contents_gets_a_deterministic_hash_suffix(tm
     run_dir = _seed(tmp_path, "rb-collide", evidence + [fit])
     _render(tmp_path, run_dir)
     names = sorted(p.name for p in (run_dir / "paper" / "code").iterdir())
-    assert names == sorted([f"run_{ha[:8]}.py", f"run_{hb[:8]}.py"])
+    assert names == sorted([f"run_{ha[:8]}.py", f"run_{hb[:8]}.py", "README.md"])
     first = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
     _render(tmp_path, run_dir)
     assert (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8") == first
@@ -513,7 +514,8 @@ def test_rerender_removes_stale_duplicates_from_an_old_render_only(tmp_path):
     (code / "notes.txt").write_text("the author's own file\n", encoding="utf-8")
 
     _render(tmp_path, run_dir)
-    assert sorted(p.name for p in code.iterdir()) == sorted([*_BODIES, "notes.txt"])
+    assert sorted(p.name for p in code.iterdir()) == sorted(
+        [*_BODIES, "notes.txt", "README.md"])
 
 
 def test_rerender_removes_a_file_its_previous_render_wrote_that_is_no_longer_named(tmp_path):
@@ -528,7 +530,8 @@ def test_rerender_removes_a_file_its_previous_render_wrote_that_is_no_longer_nam
     (code / "old_helper.py").write_text("print('old')\n", encoding="utf-8")
     _render(tmp_path, run_dir)
     assert not (code / "old_helper.py").exists()
-    assert sorted(p.name for p in code.iterdir()) == sorted(_BODIES)
+    # The code README ships beside the scripts (tests/test_code_readme.py).
+    assert sorted(p.name for p in code.iterdir()) == sorted([*_BODIES, "README.md"])
 
 
 def test_rerender_never_follows_a_listed_name_outside_paper_code(tmp_path):

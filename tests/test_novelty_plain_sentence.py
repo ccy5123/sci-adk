@@ -88,9 +88,12 @@ _TRIAL_TEXT = (
     "A test of whether such a code ranks chemicals by measured log Kow has not been "
     "reported"
 )
+# Four of the fixture log's eight queries failed, so the scope says so (and where the
+# queries are listed): tests/test_novelty_failed_queries.py.
 _TRIAL_SCOPE = (
     " (no such report was found in searches of OpenAlex, arXiv, Crossref and the web "
-    "on 2026-10-08)"
+    "on 2026-10-08; 4 of 8 queries returned an error or no response; all queries are listed in the analysis record "
+    "distributed with the paper)"
 )
 _INTRO = (
     "We define an integer code that uses prime factorisation but, unlike Matula numbers, "
@@ -244,7 +247,10 @@ class TestScopeFromSearchLog:
             queries=[_q("openalex", "failed"), _q("semantic_scholar", "failed")],
         )
         suffix = novelty_scope_suffix("result", "H2", _spec(), [_found_nothing(log=log)])
-        assert suffix == " (as of 2026-10-08)"
+        assert suffix == (
+            " (as of 2026-10-08; 2 of 2 queries returned an error or no response; all queries are listed in the "
+            "analysis record distributed with the paper)"
+        )
 
     def test_search_of_the_other_kind_is_not_used(self):
         spec = _spec(novelty_method=True)

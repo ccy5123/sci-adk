@@ -482,10 +482,56 @@ a retraction on top. Downgrade the claim to what the design supports, or delete 
 5. Tie every limitation, implication and future-work sentence to a specific result;
    delete the rest.
 6. Strip narrated standard procedures and default settings from the methods.
-7. Run `verify` — it re-checks every number and every declared conclusion against the
-   record.
-8. Read the opening and the closing cold. In both, every sentence is either the question
-   or a finding; delete the rest.
+7. Check that the title, the abstract's first sentence, the end of the introduction and
+   the conclusion pose the same question; cut or move the results that answer another.
+8. Walk the introduction from what is known to the gap to this work: every step cites or
+   shows, and a step you cannot support goes back to the orchestrator as a blocker.
+9. Check that every pilot, exploratory or post hoc result says so, with its n, in its own
+   sentence. If the central claim rests on such a result, return that before polishing.
+10. Run `verify` — it re-checks every number and every declared conclusion against the
+    record.
+11. Read the opening and the closing cold. In both, every sentence is either the question
+    or a finding; delete the rest.
+
+### Report the study the record holds
+
+The third way a paper fails its reader is prose that papers over what the study did not
+do. A well-made sentence cannot make up for a missing comparison, and must not hide one.
+
+- **One question, carried through.** The title, the first sentence of the abstract, the
+  end of the introduction and the conclusion pose the same question. A result that bears
+  on no question the paper poses is cut or moved to the SI. If the evidence answers a
+  different question from the one the work set out with, report the question the evidence
+  answers and rewrite the introduction for it, rather than stretching it to cover both.
+- **The gap is shown, not asserted.** The introduction runs from what is known (each work
+  cited for what it did), to what is unresolved for this question and why existing work
+  does not resolve it, to what this work does. "Few studies have examined X" needs the
+  studies that did, and what they missed. Cite only works in the run's literature store
+  whose content you have read; never invent or guess a citation. A step that needs
+  literature the store does not hold, or that you cannot check, goes back to the
+  orchestrator as a blocker instead of being written anyway.
+- **Evidence size is stated where the claim is made.** A pilot, exploratory or post hoc
+  result is called that, with its n, in the sentence that reports it, and an exploratory
+  analysis is never presented as confirmatory (each hypothesis's `mode` in `spec.json`
+  says which it is). A general claim needs evidence across the range it generalizes over;
+  without it, narrow the claim.
+- **Thin evidence goes to the author.** When the central claim rests on a single run, no
+  replicate, no comparison, or a criterion a trivial alternative also passes, stop and
+  return it as a blocker saying what is missing. Writing cannot fix the study: no stronger
+  verbs, and no longer limitations section.
+- **Times are logged times.** The record holds the times local clocks wrote when items
+  were recorded, not when the work was done. Say "recorded at", and claim an order of
+  events ("before the data were seen") only where the logged times show it.
+- **No remarks about how the paper was written or checked.** "This could not be fully
+  verified", "a simplified implementation was used": such a remark is either a real
+  limitation of the study — stated once, next to the result it limits, under the
+  proportion rules — or a note for the orchestrator. It never stays in the paper.
+- **Deposited code and data are part of the paper.** One canonical file per role: no
+  versioned names (`_v2`, `_final`) and no superseded copies in the deposit. Render writes
+  `paper/code/README.md`, mapping each script to its inputs, outputs and the paper's
+  numbers; where it lists an input as not distributed, the data availability statement
+  says where that input comes from. File, column and variable names a reader can follow,
+  and no absolute local paths (render warns about them).
 
 ### After verify passes: the independent paper audit
 
@@ -528,7 +574,8 @@ the instruction file, so a later reader weighs the instruction as it now stands.
 
 1. **Read.** Spawn `Agent(subagent_type: "evaluator-paper")` once per lens, in
    parallel: `number-sources`, `claims-vs-design`, `position-and-proportion`,
-   `reader-vocabulary`, `result-fidelity`, `structure-and-methods`. Each prompt names the
+   `reader-vocabulary`, `result-fidelity`, `structure-and-methods`,
+   `study-and-question`. Each prompt names the
    run and its one lens, and never another reader's findings. When `numbers.json` is long
    (more than about 25 entries), split `number-sources` into index ranges of about 25
    entries each, one reader per range, and give each range reader its range and an id
@@ -546,7 +593,13 @@ the instruction file, so a later reader weighs the instruction as it now stands.
    `YYYY-MM-DD`): major first, each with its location, quote, issue, record evidence, fix
    and how many refuters upheld it, merged where several lenses saw the same problem; the
    refuted findings follow, one line each. The file sits outside `runs/`: it is working
-   material for the writer, not record.
+   material for the writer, not record. Surviving findings marked `for_author` (evidence
+   too thin for the claim, a gap step whose literature cannot be checked, acquired works
+   the paper does not cite, a note about how the paper was written) go in their own
+   section, For the author: the orchestrator puts each to the user with `AskUserQuestion`
+   and records the answer there. They do not go to the writer as passages to rewrite —
+   writing cannot fix the study. The user's answer decides: new evidence goes to the
+   experiment stage, a narrowed claim or a citation the user supplies goes to the writer.
 4. **Revise.** Rewrite each passage the audit names at the strength the record supports —
    never by adding a hedge — then run `sci-adk numbers draft`, `sci-adk render`, update
    the declarations and run `sci-adk verify` again. A number a fix needs that has no
@@ -687,8 +740,11 @@ failure except by an explicit re-freeze (anti-moving-the-goalposts).
   record (a `found_nothing` search exists). Do not assert novelty the record does not
   back. The marker never reaches the `.tex`: render writes the plain sentence and appends
   the scope of the recorded search — "(no such report was found in searches of OpenAlex,
-  arXiv and Crossref on 2026-10-08)", or "(as of <date>)" when no search log was recorded
-  — so write the claim without a hedge of your own. Render records the sentence's binding
+  arXiv and Crossref on 2026-10-08)", or "(as of <date>)" when no search log was recorded;
+  when queries of that search failed, the scope also says how many of how many and that the
+  record lists every query — so write the claim without a hedge of your own, and do not
+  declare the counts in the scope in numbers.json (verify reads them from the record).
+  Render records the sentence's binding
   to its hypothesis in `runs/<id>/novelty_sentences.json` (never submitted, never
   hand-edited) and `verify` re-checks it: the sentence must still be in the paper and end
   with the scope the record gives now, so a search recorded after render needs a

@@ -391,6 +391,35 @@ Follow-up (2026-10-10, review of the amendment):
   each run's sentences are checked only by that run's `sci-adk verify` (see
   `design/near-submission-package.md` §3, "Novelty sentences").
 
+Follow-up (2026-10-21, a real run): the scope named only the indexes that answered, so a
+search in which 31 of 115 queries failed -- among them the queries closest to the claim --
+read like a complete one, and the record held none of the queries.
+
+- *Failed queries in the scope.* When the backing logs hold failed queries, the scope ends
+  `...; 31 of 115 queries returned an error or no response; all queries are listed in the
+  analysis record distributed with the paper)` (the `(as of <date>)` form gains the same
+  clause). "Failed" is said as what it means -- the index sent back an error or nothing,
+  not "found nothing" -- in the same words in the scope, the record and verify
+  (`render/novelty.py FAILED_QUERY_TERM`). Queries
+  are counted over distinct logs: two decisions whose logs have the same times and queries
+  count once, other logs add up. With no failed query the scope is unchanged. Index
+  spellings that differ only in case, spaces, `_` or `-` (`semantic_scholar`,
+  `SemanticScholar`) are one index, for naming and counting.
+- *The counts are not declared numbers.* The novelty check already compares the bound
+  sentence's scope with the record, so the number list and the pattern audit read each
+  scope that matches the record with its two counts blanked
+  (`render/novelty.py mask_novelty_scope_counts`; `sci-adk numbers draft` too). The date in
+  the scope is a literal as before (declared as an identifier in a run with a number list).
+- *Queries in the record.* `record.tex` (and its copy `paper/deposit/record.tex`) has a
+  "Literature searches" section: for each decision that carries a search log -- novelty,
+  prior work, contested, inquiry -- the searcher's times and every query with its index,
+  whether it was answered and the result count when given. Identical logs are listed once,
+  under every decision that carries them.
+- *Advisory.* `verify` names each distinct search log behind a SUPPORTED novelty claim that
+  has failed queries, one line per log by the scope's counting rule: the claim, every
+  `found_nothing` decision recording that log, failed of total, failed per index. It never
+  fails a run; the two-index rule is unchanged.
+
 The 2-kind migration this gate depends on is now implemented (N1, v0.6), so the markup +
 gate (N2/N3) remain to be built on top of the now-live `claim-novelty-{kind}-{hyp}`
 primitives (markup carries `kind`; the gate keys on `claim-novelty-{kind}-{hyp}`).

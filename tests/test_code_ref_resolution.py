@@ -257,7 +257,8 @@ def test_real_world_code_ref_ships_every_script_it_names(tmp_path):
     assert (code_dir / "s6_h2_rho.py").read_text(encoding="utf-8") == _S6
     # The second script, named with its hash in the free text, is shipped too.
     assert (code_dir / "s5_h2_sample.py").read_text(encoding="utf-8") == _S5
-    assert sorted(p.name for p in code_dir.iterdir()) == ["s5_h2_sample.py", "s6_h2_rho.py"]
+    assert sorted(p.name for p in code_dir.iterdir()) == [
+        "README.md", "s5_h2_sample.py", "s6_h2_rho.py"]
     driver = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
     scripts_block = driver.split("SCRIPTS = [", 1)[1].split("]", 1)[0]
     assert "s6_h2_rho.py" in scripts_block and "s5_h2_sample.py" in scripts_block
@@ -276,7 +277,8 @@ def test_hash_mismatch_is_not_shipped_and_is_warned(tmp_path, capsys):
     assert main(["render", str(run_dir)]) == 0
     err = capsys.readouterr().err
     # The changed script is not shipped; the matching second script is.
-    assert sorted(p.name for p in (run_dir / "paper" / "code").iterdir()) == ["s5_h2_sample.py"]
+    assert sorted(p.name for p in (run_dir / "paper" / "code").iterdir()) == [
+        "README.md", "s5_h2_sample.py"]
     driver = (run_dir / "paper" / "reproduce.py").read_text(encoding="utf-8")
     results_block = driver.split("RESULTS = [", 1)[1]
     assert repr(ref) in results_block

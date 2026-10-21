@@ -44,6 +44,7 @@ _LENSES = [
     "reader-vocabulary",
     "result-fidelity",
     "structure-and-methods",
+    "study-and-question",
 ]
 
 
@@ -130,7 +131,7 @@ def test_the_paper_auditor_can_read_but_cannot_change_anything():
     assert not granted & {"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"}
 
 
-def test_the_auditor_reads_through_exactly_the_six_lenses():
+def test_the_auditor_reads_through_exactly_the_seven_lenses():
     assert _lenses(_read(_AGENT)) == _LENSES
 
 

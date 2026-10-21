@@ -92,7 +92,12 @@ file, separated by `; `. At publish time a table ships with the paper as a check
 only when an Evidence item holds its checksum; a table no item names can only be declared
 `derived`, which carries no integrity claim. Name a third-party input file the same way,
 and each copy you made in order to read it (decrypted, decompressed, converted) with its
-own checksum.
+own checksum. Name the files the script wrote in `result.artifact_ref` the same way: the
+README shipped with the code (`paper/code/README.md`) lists a script's outputs from
+`artifact_ref` and its inputs from `data_ref`. A file another script wrote is an input:
+name it in `data_ref` followed by `(written by <script path> sha256=<hash>)`, and leave it
+out of `artifact_ref`. Write every path relative to the workspace, never as an absolute
+path on your machine.
 
 ## Record The Numbers A Paper Will State — As Values
 

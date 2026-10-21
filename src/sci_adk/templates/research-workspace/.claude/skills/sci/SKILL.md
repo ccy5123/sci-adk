@@ -294,7 +294,8 @@ the engine can catch it.
      noted in the instruction file.
    - Spawn `Agent(subagent_type: "evaluator-paper")` once per lens, in parallel:
      `number-sources`, `claims-vs-design`, `position-and-proportion`,
-     `reader-vocabulary`, `result-fidelity`, `structure-and-methods`. Each prompt names
+     `reader-vocabulary`, `result-fidelity`, `structure-and-methods`,
+     `study-and-question`. Each prompt names
      the run and its one lens, never another reader's findings. With a long
      `numbers.json` (more than about 25 entries), split `number-sources` into index
      ranges of about 25 entries each, one reader per range, and give each range reader
@@ -318,6 +319,13 @@ the engine can catch it.
      (`/sci experiment`) first, never into `numbers.json`. When the writer returns, mark
      each upheld finding it did not fix as open, with its reason: upheld-but-unfixed
      findings stay listed in the audit file as open, never deleted.
+   - Surviving findings marked `for_author` (evidence too thin for the claim, a gap step
+     whose literature cannot be checked, acquired works the paper does not cite, a note
+     about how the paper was written) go in the audit file's own section, For the author,
+     and to the user with `AskUserQuestion`, the answer recorded there — not to the writer
+     as passages to rewrite: writing cannot fix the study. New evidence the user asks for
+     goes to `/sci experiment`; a narrowed claim or a citation the user supplies goes to
+     the writer.
    - The full audit runs once per publish session. After the revision passes `verify`
      again, re-run only the lenses whose findings were fixed, through the same read,
      refute and write steps, to check the fixes; the other lenses are not read again.
