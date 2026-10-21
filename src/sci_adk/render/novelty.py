@@ -33,8 +33,10 @@ recorded claim):
     indexes that ANSWERED in the backing ``found_nothing`` decisions' search logs and the
     date(s) of those searches (an absence claim is intrinsically bounded by the search that
     produced it). With no search log on record the scope is ``(as of <date>)``, the date of
-    the latest backing decision. When the logs hold failed queries, either form says how
-    many of how many failed and that the record lists every query. Never a stock softener.
+    the latest backing decision. When the logs hold failed queries, either form ends with a
+    pointer to the analysis record, which lists the queries and their outcomes; how many
+    failed is record content, stated there and in ``verify``'s advisory, not in the paper.
+    Never a stock softener.
   - **NOT SUPPORTED / unknown hyp / bad kind** -> HARD fail: ``ValueError`` at render time
     (naming {hyp, kind} + the remedy), and a non-zero ``sci-adk verify``.
 
@@ -222,15 +224,17 @@ def _index_identity(index: str) -> str:
     return _index_key(_index_display_name(index))
 
 
-# What the scope adds after its counts when the backing search logs hold failed queries: the
-# record render writes beside the paper lists every query (render/si.py, "Literature
-# searches").
+# What the scope adds when the backing search logs hold failed queries: a pointer to the
+# record render writes beside the paper, which lists every query with its outcome
+# (render/si.py, "Literature searches"). How many failed is record content
+# (design/reader-facing-prose.md §16): the record and verify's advisory state the counts;
+# the paper's sentence does not.
 FAILED_QUERIES_LISTED = (
-    "all queries are listed in the analysis record distributed with the paper"
+    "the queries and their outcomes are listed in the analysis record distributed with "
+    "the paper"
 )
-# What a query recorded ``failed`` means, in the words the paper, the record and verify all
-# print: the index sent back an error or nothing (not "it found nothing", which is an
-# answer).
+# What a query recorded ``failed`` means, in the words the record and verify both print: the
+# index sent back an error or nothing (not "it found nothing", which is an answer).
 FAILED_QUERY_TERM = "returned an error or no response"
 
 
@@ -273,22 +277,11 @@ def failed_query_counts(decisions: Sequence[EvidenceItem]) -> QueryCounts:
     return QueryCounts(total, failed, {name: n for name, n in ordered})
 
 
-def _failure_clause(counts: QueryCounts) -> str:
-    """``"; 31 of 115 queries returned an error or no response; all queries are listed
-    ..."``, or ``""`` when no query failed (the scope is then what render wrote before
-    failures were counted)."""
-    if not counts.failed:
-        return ""
-    noun = "query" if counts.total == 1 else "queries"
-    return (f"; {counts.failed} of {counts.total} {noun} {FAILED_QUERY_TERM}; "
-            f"{FAILED_QUERIES_LISTED}")
-
-
-# The counts of a failure clause, located inside a scope that matches the record.
-_FAILURE_COUNTS_RE = re.compile(
-    r";\s+(\d+)\s+of\s+(\d+)\s+quer(?:y|ies)\s+"
-    + r"\s+".join(re.escape(word) for word in FAILED_QUERY_TERM.split()) + ";"
-)
+def _record_pointer(decisions: Sequence[EvidenceItem]) -> str:
+    """``"; the queries and their outcomes are listed ..."`` when the distinct logs of
+    ``decisions`` hold a failed query, else ``""`` (the scope is then byte-identical to what
+    render wrote before failures were looked at). States no count."""
+    return f"; {FAILED_QUERIES_LISTED}" if failed_query_counts(decisions).failed else ""
 
 
 def search_log_groups(decisions: Sequence[EvidenceItem]) -> List[Tuple[Any, List[EvidenceItem]]]:
@@ -329,10 +322,10 @@ def _search_scope(decisions: Sequence[EvidenceItem]) -> Optional[str]:
     once (spellings that differ only in case, spaces, ``_`` or ``-`` are one index, named
     as first spelled), in order of first appearance -- the web last -- and the date(s) of
     the searches that produced those answers. When the logs hold failed queries, the scope
-    says how many of how many (:func:`failed_query_counts`) and that the record lists them
-    all; with none it is exactly what it was before failures were counted. ``None`` when no
-    decision carries a log in which an index answered (the caller then falls back to the
-    decision date).
+    ends with a pointer to the record, which lists the queries and their outcomes
+    (:func:`_record_pointer`; no count); with none it is exactly what it was before failures
+    were looked at. ``None`` when no decision carries a log in which an index answered (the
+    caller then falls back to the decision date).
     """
     names: List[str] = []
     seen: set[str] = set()  # index keys: "InspireHEP" and "inspire_hep" are one index
@@ -356,8 +349,8 @@ def _search_scope(decisions: Sequence[EvidenceItem]) -> Optional[str]:
     names = [n for n in names if n != _WEB] + [n for n in names if n == _WEB]
     first, last = min(dates), max(dates)
     when = f"on {first}" if first == last else f"between {first} and {last}"
-    clause = _failure_clause(failed_query_counts(decisions))
-    return f" (no such report was found in searches of {_join_names(names)} {when}{clause})"
+    pointer = _record_pointer(decisions)
+    return f" (no such report was found in searches of {_join_names(names)} {when}{pointer})"
 
 
 # @MX:ANCHOR: [AUTO] the one novelty re-derivation shared by the render gate
@@ -417,11 +410,10 @@ def novelty_scope_suffix(
         decisions' search logs, and the date (or ``between <first> and <last>``) of those
         searches. When no backing decision has a log in which an index answered:
         `` (as of <YYYY-MM-DD>)``, the date of the LATEST backing decision. Either form
-        gains ``; <failed> of <total> queries returned an error or no response; all
-        queries are listed in the analysis record distributed with the paper`` (the term
-        is :data:`FAILED_QUERY_TERM`) before its closing parenthesis when
-        the backing logs hold failed queries (counted over distinct logs,
-        :func:`failed_query_counts`).
+        gains ``; the queries and their outcomes are listed in the analysis record
+        distributed with the paper`` (:data:`FAILED_QUERIES_LISTED`) before its closing
+        parenthesis when the backing logs hold failed queries; it states no count (the
+        record and ``verify``'s advisory do).
       - anything else (unsupported / unknown hyp / bad kind) -> raises ``ValueError``
         naming {hyp, kind} + the remedy (the HARD fail; the engine never softens).
 
@@ -437,8 +429,8 @@ def novelty_scope_suffix(
         return scope
     # SUPPORTED <=> backing is non-empty (same predicate as derive_novelty_status). The
     # decision's created_at is the timestamp of the recorded search.
-    clause = _failure_clause(failed_query_counts(backing))
-    return f" (as of {backing[-1].created_at.strftime('%Y-%m-%d')}{clause})"
+    pointer = _record_pointer(backing)
+    return f" (as of {backing[-1].created_at.strftime('%Y-%m-%d')}{pointer})"
 
 
 def backing_decisions(
@@ -447,54 +439,6 @@ def backing_decisions(
     """The ``found_nothing`` decisions a {hyp, kind} novelty claim stands on, oldest first
     (the predicate :func:`derive_novelty_status` supports it by). PURE."""
     return _found_nothing_decisions(hyp_id, kind, novelty_decisions)
-
-
-def mask_novelty_scope_counts(
-    text: str,
-    spec: Spec,
-    novelty_decisions: Sequence[EvidenceItem],
-    *,
-    escape: Callable[[str], str],
-) -> str:
-    """``text`` with the query counts of every novelty scope that matches the record blanked.
-
-    The counts render writes into a scope (``; 31 of 115 queries returned an error or no
-    response; ...``) come from
-    the search logs on record, and ``verify`` already requires each bound sentence to end
-    with the scope the record gives now; they are not numbers an author declares. For every
-    {hypothesis, kind} that re-derives SUPPORTED with failed queries behind it, each
-    occurrence of its escaped scope (``escape`` -- the renderer's LaTeX escaper; whitespace
-    runs may differ) has the digits of its two counts replaced by spaces, so the number
-    checks never see them. Everything else -- the date, the same words written elsewhere,
-    a scope with other counts -- is left as it is. Same length as ``text``. PURE.
-    """
-    spans: List[tuple] = []
-    for hypothesis in spec.hypotheses:
-        for kind in _VALID_KINDS:
-            try:
-                suffix = novelty_scope_suffix(kind, hypothesis.id, spec, novelty_decisions)
-            except ValueError:
-                continue
-            if not _failure_clause(
-                failed_query_counts(backing_decisions(kind, hypothesis.id, novelty_decisions))
-            ):
-                continue
-            chunks = escape(suffix).split()
-            pattern = r"\s+".join(re.escape(chunk) for chunk in chunks)
-            for match in re.finditer(pattern, text):
-                counts = list(_FAILURE_COUNTS_RE.finditer(match.group(0)))
-                if counts:
-                    last = counts[-1]
-                    for group in (1, 2):
-                        spans.append(
-                            (match.start() + last.start(group), match.start() + last.end(group))
-                        )
-    if not spans:
-        return text
-    chars = list(text)
-    for start, end in spans:
-        chars[start:end] = " " * (end - start)
-    return "".join(chars)
 
 
 def require_novelty_text(kind: str, hyp_id: str, text: str) -> None:
@@ -694,7 +638,6 @@ __all__ = [
     "failed_query_counts",
     "search_log_groups",
     "has_novelty_markup",
-    "mask_novelty_scope_counts",
     "novelty_scope_suffix",
     "require_novelty_text",
     "find_unsupported_novelty",

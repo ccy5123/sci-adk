@@ -88,11 +88,11 @@ _TRIAL_TEXT = (
     "A test of whether such a code ranks chemicals by measured log Kow has not been "
     "reported"
 )
-# Four of the fixture log's eight queries failed, so the scope says so (and where the
-# queries are listed): tests/test_novelty_failed_queries.py.
+# Four of the fixture log's eight queries failed, so the scope points to the record, which
+# lists the queries and their outcomes: tests/test_novelty_failed_queries.py.
 _TRIAL_SCOPE = (
     " (no such report was found in searches of OpenAlex, arXiv, Crossref and the web "
-    "on 2026-10-08; 4 of 8 queries returned an error or no response; all queries are listed in the analysis record "
+    "on 2026-10-08; the queries and their outcomes are listed in the analysis record "
     "distributed with the paper)"
 )
 _INTRO = (
@@ -248,7 +248,7 @@ class TestScopeFromSearchLog:
         )
         suffix = novelty_scope_suffix("result", "H2", _spec(), [_found_nothing(log=log)])
         assert suffix == (
-            " (as of 2026-10-08; 2 of 2 queries returned an error or no response; all queries are listed in the "
+            " (as of 2026-10-08; the queries and their outcomes are listed in the "
             "analysis record distributed with the paper)"
         )
 

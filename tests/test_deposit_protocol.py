@@ -757,8 +757,8 @@ def test_verify_on_a_withheld_bundle_passes_with_one_advisory_naming_the_reason(
     notes = [n for n in report.paper_advisory if n.startswith("protocol withheld")]
     assert notes == [
         f"protocol withheld ({_REASON}): readers cannot check the protocol or what the paper "
-        "says about it, such as when it was written; the manifest lists the SHA-256 of each "
-        "withheld file"
+        "says about it, such as which choices it fixed in advance; the manifest lists the "
+        "SHA-256 of each withheld file"
     ]
 
 

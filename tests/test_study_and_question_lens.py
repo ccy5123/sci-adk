@@ -71,7 +71,9 @@ def test_the_study_lens_reads_evidence_size_thin_evidence_times_and_deposits():
     assert "single run" in lens and "no comparison" in lens
     assert "trivial alternative" in lens
     assert "for_author: true" in lens
-    assert "logged times" in lens and "not when the work was done" in lens
+    # times are the record's: the lens checks "pre-specified" against the frozen protocol
+    # and reads timestamps in the paper as a leak (tests/test_timing_is_record_content.py)
+    assert "pre-specified" in lens and "machinery leak" in lens
     for word in ("one canonical file per role", "versioned names", "paper/code/readme.md",
                  "absolute local path"):
         assert word in lens, word
@@ -118,7 +120,7 @@ def test_the_writer_knows_the_study_rules():
     section = _flat(_read(_WRITER).split("## The Study The Paper Reports", 1)[1]
                     .split("\n## ", 1)[0])
     for phrase in ("same question", "known", "pilot", "exploratory", "with its n",
-                   "thin", "logged times"):
+                   "thin", "pre-specified"):
         assert phrase in section, phrase
     assert "how the paper was written or checked" in section
     assert "paper/code/readme.md" in section and "versioned" in section
@@ -130,7 +132,7 @@ def test_the_publish_standard_carries_the_study_rules_in_order_of_work():
     section = _flat(text.split("### Report the study the record holds", 1)[1]
                     .split("\n### ", 1)[0])
     for phrase in ("one question", "the gap is shown", "pilot", "thin evidence",
-                   "logged times", "deposited code and data"):
+                   "pre-specified", "deposited code and data"):
         assert phrase in section, phrase
     order = _flat(text.split("**Order of work before render:**", 1)[1].split("\n### ", 1)[0])
     assert "same question" in order and "known" in order and "with its n" in order

@@ -23,8 +23,10 @@
 >
 > §16 (v1.3) carries the rule's third part, the study the paper reports: one question
 > throughout, a gap shown with the works the run's searches acquired, evidence size and
-> thin evidence, logged times, and the deposited code; a seventh audit lens, findings sent
-> to the author, and the code README render writes.
+> thin evidence, and the deposited code; a seventh audit lens, findings sent to the
+> author, and the code README render writes. v1.4 adds the line between paper content and
+> record content: times, "logged at" lists, when-steps-were-done accounts and tool-run
+> details stay in the deposited record; "pre-specified" is backed by the frozen protocol.
 >
 > v0.2 supersedes v0.1's framing. v0.1 diagnosed "the protocol specifies no reader" and
 > proposed readability remedies. That was one level too shallow: the missing reader is a
@@ -855,20 +857,38 @@ the study did not do: a paper whose title, abstract and conclusion pose differen
 questions; an introduction that asserts a gap without the works that show it, while the
 run's own searches acquired works the paper never cites; an exploratory result reported
 without saying so; a central claim resting on one run or on a criterion a trivial
-alternative also passes, compensated by careful wording; a statement about when work was
-done that the record's logged times do not show; deposited code with no map from scripts
-to numbers. The author's writing standard was extended with a third part on this; the kit
-carries it in its own words (it does not read any personal file).
+alternative also passes, compensated by careful wording; a narrative of when each step
+was done; deposited code with no map from scripts to numbers. The author's writing
+standard was extended with a third part on this; the kit carries it in its own words (it
+does not read any personal file).
+
+**Paper content and record content (user decision, 2026-10-21).** Every sentence sci-adk
+puts into a manuscript is judged by one question: would a real paper in this venue
+contain it, and does it help the reader? Timestamps, "logged at" lists, statements of
+when each step was done or in what order, and details of how the tools ran (how many
+search queries failed, run times) are record content: the deposited record
+(`deposit/record.tex`) carries them, and in the paper they are a machinery leak. What a
+real paper says instead is three things, each next to what it qualifies: a
+pre-registration in one sentence plus the deviations from the protocol, where the venue
+has that norm; an exploratory or post hoc result labelled as such next to the result,
+with its n ("added after the results were known, n = 12"); and "pre-specified" only for
+what the frozen protocol holds, which the `study-and-question` lens checks against
+`spec.json` and the protocol versions (anything else is labelled post hoc). The record
+keeps every time it holds; the novelty scope points to the record when queries failed
+instead of printing the counts (`design/literature-acquisition.md`). The earlier
+instruction to state each time as a logged time ("recorded at") is withdrawn: it invited
+the very sentences a real paper does not contain.
 
 **Where each rule lives.**
 
 | Rule | Author (`science-workflow-publish`, `expert-writer`) | Read by (`evaluator-paper` lens) | Machine |
 |---|---|---|---|
 | One question, from title to conclusion | "Report the study the record holds"; order of work, step 7 | `study-and-question` | none |
-| The gap is shown, not asserted | same section; step 8; never invent a citation, an unsupported step is a blocker | `study-and-question`, against `literature/references.bib` and the recorded searches; acquired works the paper never cites are listed with `for_author` | the novelty scope (render) names the search behind a novelty sentence, failed queries included; verify re-derives it |
-| Pilot, exploratory, post hoc results named, with n | same section; step 9 | `study-and-question`, against each hypothesis's `mode` | none |
+| The gap is shown, not asserted | same section; step 8; never invent a citation, an unsupported step is a blocker | `study-and-question`, against `literature/references.bib` and the recorded searches; acquired works the paper never cites are listed with `for_author` | the novelty scope (render) names the search behind a novelty sentence and, when queries failed, points to the record that lists them (no count); verify re-derives it |
+| Pilot, exploratory, post hoc results named next to the result, with n ("added after the results were known") | same section; step 9 | `study-and-question`, against each hypothesis's `mode` | none |
 | Thin evidence goes to the author | a blocker, never prose | `study-and-question`, `for_author` | none |
-| Times are logged times | same section | `study-and-question` | the record prints each logged time with the note that local clocks wrote it |
+| Timestamps, "logged at" lists, when-steps-were-done accounts and tool-run details stay in the record | same section; step 9; the deposit guidance points to `deposit/record.tex` | `study-and-question` and `reader-vocabulary` (a machinery leak) | the record prints each logged time with the note that local clocks wrote it |
+| "Pre-specified" only for what the frozen protocol holds; a pre-registration statement is one sentence plus each deviation | same section; step 9 | `study-and-question`, against `spec.json` and `paper/deposit/protocol/` | verify's times advisory prints the protocol's times beside the earliest Evidence and flags a result recorded before the protocol version its hypothesis depends on |
 | Remarks about how the paper was written or checked | same section | `reader-vocabulary` (a real limitation, or `for_author`) | none |
 | Deposited code and data are part of the paper | same section; the experiment stage names inputs in `data_ref` and outputs in `artifact_ref` | `study-and-question` (one file per role, versioned names, names, local paths) | render writes `paper/code/README.md`; verify fails a missing or stale README under a reproduction-bundle contract; render warns about absolute local paths in shipped text files |
 
@@ -893,6 +913,7 @@ and runs nothing, and the README says why.
 
 ---
 
-Version: 1.3 (§16: the study the paper reports -- a seventh audit lens, findings for the author, the code README)
+Version: 1.4 (§16: paper content vs record content -- times and tool runs stay in the deposited record; "pre-specified" backed by the frozen protocol)
+Previous: 1.3 (§16: the study the paper reports -- a seventh audit lens, findings for the author, the code README)
 Source: author reading report + framing correction + the submission-boundary objection +
 the definition-over-enumeration correction, 2026-08-31.

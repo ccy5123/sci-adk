@@ -161,17 +161,17 @@ gated): `body_word_range`, free-prose numbers not
 behind `\evval`, and the §4 evaluator qualities. A gate-bearing field cannot be relaxed
 after a failure except by an explicit re-freeze (anti-moving-the-goalposts).
 
-### Naming files, checksums and times in the merged manuscript
+### Naming files and checksums in the merged manuscript
 
 The package number audit reads `main.tex` and `si.tex` exact-only, and it strips
 `\texttt{…}`, `\path{…}` and `\url{…}` before it reads. Outside them, the digit groups of a
-path, a checksum or a time are numbers the record does not hold.
+path or a checksum are numbers the record does not hold.
 
-- Put every path, checksum and date-time inside `\texttt{…}` or `\path{…}`. Bare,
-  `06\_provenance/protocol/<run>/protocol-v1.json` reads as 6 and 1, and
-  `2026-10-08T10:03:39Z` as −10, 8, 3 and 39. `\path{…}` needs no `\_`. It comes from the
-  `url` package, which the preambles of both skeletons (`main.tex`, `si.tex`) load with
-  `\usepackage{url}`; keep that line when you replace a preamble with a venue's.
+- Put every path and checksum inside `\texttt{…}` or `\path{…}`. Bare,
+  `06\_provenance/protocol/<run>/protocol-v1.json` reads as 6 and 1. `\path{…}` needs no
+  `\_`. It comes from the `url` package, which the preambles of both skeletons (`main.tex`,
+  `si.tex`) load with `\usepackage{url}`; keep that line when you replace a preamble with a
+  venue's.
 - Name a run's protocol files by their package paths
   (`\path{06_provenance/protocol/<run>/protocol-v1.json}`, `…/amendment-v2.json`) and point
   to `\path{06_provenance/deposit.csv}` for their checksums.
@@ -186,9 +186,12 @@ path, a checksum or a time are numbers the record does not hold.
   `deposit.csv`.
 - For a run that withholds its protocol, name no protocol file: say the protocol is
   withheld, give the reason, and point to the checksums in `deposit.csv`.
-- State every time as a recorded time: each was read from a local clock and nothing
-  witnesses it. Write "was created at", "recorded at", never "time-stamped", and claim no
-  order the recorded times do not show.
+- The merged manuscript states no times: no timestamps, no "logged at" lists, no account
+  of when each step was done. They are record content, printed for every run in
+  `\path{06_provenance/record.tex}`; point the reader there. A criterion is called
+  pre-specified only when the run's frozen protocol holds it, and a run's deviations from
+  its protocol are stated as in the per-run paper (one sentence plus each deviation, where
+  the venue expects it).
 
 ### The HARD constraints (the discipline this obeys)
 

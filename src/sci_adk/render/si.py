@@ -184,7 +184,8 @@ def _literature_searches_section(evidence: Sequence[EvidenceItem]) -> str:
     For each recorded decision with a search log (``Provenance.search_log``), in record
     order: the decision id, the time(s) the searcher's notes state, the number of queries
     and how many failed (printed as :data:`~sci_adk.render.novelty.FAILED_QUERY_TERM`, the
-    words the paper's novelty scope and verify use), and every query as recorded -- its
+    words verify's advisory uses; the paper's novelty scope points here), and every query
+    as recorded -- its
     index, whether the index answered, the number of results when the notes give one, and
     the query text. Decisions
     whose logs record the same searches (the same times and queries) are listed together,

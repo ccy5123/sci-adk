@@ -395,30 +395,37 @@ Follow-up (2026-10-21, a real run): the scope named only the indexes that answer
 search in which 31 of 115 queries failed -- among them the queries closest to the claim --
 read like a complete one, and the record held none of the queries.
 
-- *Failed queries in the scope.* When the backing logs hold failed queries, the scope ends
-  `...; 31 of 115 queries returned an error or no response; all queries are listed in the
-  analysis record distributed with the paper)` (the `(as of <date>)` form gains the same
-  clause). "Failed" is said as what it means -- the index sent back an error or nothing,
-  not "found nothing" -- in the same words in the scope, the record and verify
-  (`render/novelty.py FAILED_QUERY_TERM`). Queries
-  are counted over distinct logs: two decisions whose logs have the same times and queries
-  count once, other logs add up. With no failed query the scope is unchanged. Index
-  spellings that differ only in case, spaces, `_` or `-` (`semantic_scholar`,
-  `SemanticScholar`) are one index, for naming and counting.
-- *The counts are not declared numbers.* The novelty check already compares the bound
-  sentence's scope with the record, so the number list and the pattern audit read each
-  scope that matches the record with its two counts blanked
-  (`render/novelty.py mask_novelty_scope_counts`; `sci-adk numbers draft` too). The date in
-  the scope is a literal as before (declared as an identifier in a run with a number list).
+- *Failed queries: the scope points to the record.* When the backing logs hold failed
+  queries, the scope ends `...; the queries and their outcomes are listed in the analysis
+  record distributed with the paper)` (the `(as of <date>)` form gains the same clause,
+  `render/novelty.py FAILED_QUERIES_LISTED`); it states no count. With no failed query the
+  scope is byte-identical to before (no pointer). A first version, the same day, printed
+  the counts in the sentence (`...; 31 of 115 queries returned an error or no response;
+  all queries are listed ...`). How many queries a search sent and how many failed is
+  record content, not paper content (`design/reader-facing-prose.md` §16, the user's
+  decision of 2026-10-21): the counts are in the record's "Literature searches" section and
+  in verify's advisory, and the paper's sentence says where the queries are listed.
+  "Failed" is said as what it means -- the index sent back an error or nothing, not "found
+  nothing" -- in the same words in the record and verify (`render/novelty.py
+  FAILED_QUERY_TERM`). Queries are counted over distinct logs: two decisions whose logs
+  have the same times and queries count once, other logs add up. Index spellings that
+  differ only in case, spaces, `_` or `-` (`semantic_scholar`, `SemanticScholar`) are one
+  index, for naming and counting.
+- *No exemption from the number checks.* The scope holds no number but its date, which is
+  a literal as before (declared as an identifier in a run with a number list). The first
+  version blanked its two counts before the number list, the pattern audit and `sci-adk
+  numbers draft` read the paper; that exemption went with the counts. A paper rendered
+  with the counts fails verify's novelty check until it is rendered again.
 - *Queries in the record.* `record.tex` (and its copy `paper/deposit/record.tex`) has a
   "Literature searches" section: for each decision that carries a search log -- novelty,
   prior work, contested, inquiry -- the searcher's times and every query with its index,
   whether it was answered and the result count when given. Identical logs are listed once,
   under every decision that carries them.
 - *Advisory.* `verify` names each distinct search log behind a SUPPORTED novelty claim that
-  has failed queries, one line per log by the scope's counting rule: the claim, every
-  `found_nothing` decision recording that log, failed of total, failed per index. It never
-  fails a run; the two-index rule is unchanged.
+  has failed queries, one line per log by the distinct-log counting rule: the claim, every
+  `found_nothing` decision recording that log, failed of total, failed per index, and that
+  the paper's scope points to the record. It never fails a run; the two-index rule is
+  unchanged.
 
 The 2-kind migration this gate depends on is now implemented (N1, v0.6), so the markup +
 gate (N2/N3) remain to be built on top of the now-live `claim-novelty-{kind}-{hyp}`
@@ -519,6 +526,6 @@ old SUPPORTS-only gate was an artifact of the A-design and is removed in B-repla
 
 ---
 
-Version: 0.7.0
-Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18); 2-kind Novelty core (N1) implemented — hard migration, no back-compat (2026-06-18); article-number advisory, numbers added by hand (2026-10-11)
-Last Updated: 2026-10-11
+Version: 0.7.1
+Source: paperforge tool integration (2026-06-16); discovery trigger model decision (2026-06-16, design-only); novelty (High) + contested (Medium) triggers implemented (2026-06-17); novelty B-replace (decoupled claim, non-HALT) + code map corrections (2026-06-18); 2-kind Novelty core (N1) implemented — hard migration, no back-compat (2026-06-18); article-number advisory, numbers added by hand (2026-10-11); failed queries listed in the record, the novelty scope points there without counts (2026-10-21)
+Last Updated: 2026-10-21

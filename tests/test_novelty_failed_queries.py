@@ -1,5 +1,5 @@
 """
-The novelty scope names failed queries; the record lists every recorded query.
+The novelty scope points to the record when queries failed; the record lists every query.
 
 On the trial run (SPEC-BCFKOW-001) the two ``found_nothing`` decisions behind the paper's
 result-novelty sentence carried the same search log: 115 queries, 31 of which failed (rate
@@ -8,19 +8,24 @@ claim. The rendered sentence read "(no such report was found in searches of Open
 Crossref and the web on 2026-10-08)": the failures were invisible to the reader, and the
 record held no query at all.
 
+A first fix put the counts into the paper's sentence ("31 of 115 queries returned an error
+or no response"). How many queries a tool sent and how many failed is record content, not
+paper content (design/reader-facing-prose.md §16): the counts now live in the record and in
+``verify``'s advisory, and the paper's sentence points to the record.
+
 The contract tested here:
 
-  - when the backing search logs hold failed queries, the scope says how many, out of how
-    many, and where the queries are listed; the counts are taken over DISTINCT logs (two
-    decisions carrying the same log count once); with no failed query the scope is
-    byte-identical to what render wrote before;
+  - when the backing search logs hold failed queries, the scope ends with a pointer to the
+    analysis record, which lists the queries and their outcomes; it states no count; with no
+    failed query the scope is byte-identical to what render wrote before (no pointer);
   - index spellings that differ only in case, spaces, ``_`` or ``-`` are one index;
-  - the numbers render writes into a scope that matches the record are not literals the
-    author must declare (the number list and the pattern audit both skip them);
+  - the scope holds no number but its date, so nothing in it is exempt from the number
+    checks;
   - the record (``record.tex``) lists every recorded search: per decision with a log, its
     time(s) and each query with its index and status; identical logs once;
   - ``verify`` names each found_nothing decision behind a SUPPORTED novelty claim whose log
-    has failed queries, in an advisory line (never a failure).
+    has failed queries, with the counts, in an advisory line (never a failure); the counts
+    are taken over DISTINCT logs (two decisions carrying the same log count once).
 """
 
 from __future__ import annotations
@@ -45,13 +50,10 @@ from sci_adk.core.search_log import SearchLogRecord, SearchQuery
 from sci_adk.loop.checkpoint_loop import run_checkpoint_loop
 from sci_adk.loop.compiler import ResearchCompiler
 from sci_adk.loop.verify import verify_run
+from sci_adk.render import novelty
 from sci_adk.render.figures import ImageFigureSpec
-from sci_adk.render.novelty import (
-    failed_query_counts,
-    mask_novelty_scope_counts,
-    novelty_scope_suffix,
-)
-from sci_adk.render.paper import _latex_sanitize, render_paper_latex
+from sci_adk.render.novelty import failed_query_counts, novelty_scope_suffix
+from sci_adk.render.paper import render_paper_latex
 from sci_adk.render.prose import PaperProse
 from sci_adk.render.si import render_si_latex
 from tests.test_bib_latex_copy import needs_tex
@@ -68,7 +70,10 @@ from tests.test_novelty_plain_sentence import (
 from tests.test_novelty_render import _freeze_minimal_pubreqs
 
 BS = chr(92)
-_LISTED = "all queries are listed in the analysis record distributed with the paper"
+_LISTED = (
+    "the queries and their outcomes are listed in the analysis record distributed with "
+    "the paper"
+)
 _NAMES = "OpenAlex, arXiv, Crossref and the web on 2026-10-08"
 
 
@@ -99,18 +104,25 @@ def _second(log: SearchLogRecord) -> EvidenceItem:
 # the scope states the failed queries                                          #
 # =========================================================================== #
 
-class TestScopeStatesFailedQueries:
-    def test_failed_queries_are_counted_in_the_scope(self):
+class TestScopePointsToTheRecord:
+    def test_failed_queries_add_a_pointer_to_the_record(self):
         suffix = novelty_scope_suffix("result", "H2", _spec(), [_found_nothing(log=_trial_log())])
-        assert suffix == f" (no such report was found in searches of {_NAMES}; 4 of 8 queries returned an error or no response; {_LISTED})"
+        assert suffix == f" (no such report was found in searches of {_NAMES}; {_LISTED})"
 
-    def test_trial_counts_31_of_115(self):
+    def test_the_trial_scope_states_no_count(self):
         log = _trial_shaped_log()
         suffix = novelty_scope_suffix(
             "result", "H2", _spec(), [_found_nothing(log=log), _second(log)]
         )
-        assert suffix.endswith(f"; 31 of 115 queries returned an error or no response; {_LISTED})")
-        assert suffix.startswith(f" (no such report was found in searches of {_NAMES};")
+        assert suffix == f" (no such report was found in searches of {_NAMES}; {_LISTED})"
+        assert "31" not in suffix and "115" not in suffix
+        assert novelty.FAILED_QUERY_TERM not in suffix
+
+    def test_the_scope_holds_no_number_but_its_date(self):
+        suffix = novelty_scope_suffix(
+            "result", "H2", _spec(), [_found_nothing(log=_trial_shaped_log())]
+        )
+        assert re.findall(r"\d+", suffix.replace("2026-10-08", "")) == []
 
     def test_two_decisions_with_the_same_log_count_it_once(self):
         log = _trial_log()
@@ -158,60 +170,39 @@ class TestScopeStatesFailedQueries:
             "on 2026-10-08)"
         )
 
-    def test_all_queries_failed_falls_back_to_the_date_and_says_so(self):
+    def test_all_queries_failed_falls_back_to_the_date_with_the_pointer(self):
         log = SearchLogRecord(
             searched_at=["2026-10-07T09:00:00Z"],
             queries=[_q("openalex", "failed"), _q("semantic_scholar", "failed", "q2")],
         )
         suffix = novelty_scope_suffix("result", "H2", _spec(), [_found_nothing(log=log)])
-        assert suffix == f" (as of 2026-10-08; 2 of 2 queries returned an error or no response; {_LISTED})"
+        assert suffix == f" (as of 2026-10-08; {_LISTED})"
 
-    def test_one_query_is_singular(self):
+    def test_one_failed_query_gets_the_same_pointer(self):
         log = SearchLogRecord(
             searched_at=["2026-10-07T09:00:00Z"], queries=[_q("openalex", "failed")],
         )
         suffix = novelty_scope_suffix("result", "H2", _spec(), [_found_nothing(log=log)])
-        assert "; 1 of 1 query returned an error or no response;" in suffix
+        assert suffix == f" (as of 2026-10-08; {_LISTED})"
 
-    def test_the_sentence_in_the_draft_carries_the_count(self):
+    def test_the_sentence_in_the_draft_carries_the_pointer(self):
         tex = render_paper_latex(
             _spec(), [], evidence=[_found_nothing(log=_trial_log())],
             prose=PaperProse(introduction=_INTRO),
         )
-        assert _TRIAL_TEXT + f" (no such report was found in searches of {_NAMES}; 4 of 8 " in tex
+        flat = " ".join(tex.split())
+        assert _TRIAL_TEXT + f" (no such report was found in searches of {_NAMES}; {_LISTED})" in flat
+        assert novelty.FAILED_QUERY_TERM not in flat
 
 
 # =========================================================================== #
-# the counts render writes are not literals the author declares                #
+# the scope holds no count, so nothing in it is exempt from the number checks  #
 # =========================================================================== #
 
-class TestScopeCountsAreNotDeclared:
-    def _tex(self) -> str:
-        return render_paper_latex(
-            _spec(), [], evidence=[_found_nothing(log=_trial_log())],
-            prose=PaperProse(introduction=_INTRO + " We saw 4 of 8 queries returned an error or no response by hand."),
-        )
-
-    def test_mask_blanks_the_counts_of_a_scope_that_matches_the_record(self):
-        tex = self._tex()
-        masked = mask_novelty_scope_counts(
-            tex, _spec(), [_found_nothing(log=_trial_log())], escape=_latex_sanitize
-        )
-        assert len(masked) == len(tex)
-        assert "on 2026-10-08;   of   queries returned an error or no response; all queries" in masked
-        # The same words written by the author outside the scope stay literals.
-        assert "We saw 4 of 8 queries returned an error or no response by hand." in masked
-
-    def test_a_scope_the_record_does_not_give_is_left_alone(self):
-        tex = self._tex().replace("4 of 8 queries returned an error or no response; all", "5 of 9 queries returned an error or no response; all")
-        masked = mask_novelty_scope_counts(
-            tex, _spec(), [_found_nothing(log=_trial_log())], escape=_latex_sanitize
-        )
-        assert masked == tex
-
-    def test_unbacked_novelty_masks_nothing(self):
-        tex = self._tex()
-        assert mask_novelty_scope_counts(tex, _spec(), [], escape=_latex_sanitize) == tex
+def test_no_scope_count_exemption_is_left():
+    # The counts were blanked before the number checks read a paper; with no count in the
+    # scope there is nothing to blank, and the exemption is gone with it.
+    assert not hasattr(novelty, "mask_novelty_scope_counts")
 
 
 def _decision(spec_id: str, ev_id: str, log: SearchLogRecord) -> EvidenceItem:
@@ -276,11 +267,12 @@ def _failed_three_of_seven() -> SearchLogRecord:
     )
 
 
-class TestVerifySkipsTheScopeCounts:
-    def test_number_list_needs_no_entry_for_the_counts(self, tmp_path):
+class TestVerifyReadsTheScope:
+    def test_number_list_needs_only_the_date(self, tmp_path):
         run_dir = _seeded_run(tmp_path, _failed_three_of_seven())
-        draft = (run_dir / "paper" / "draft.tex").read_text(encoding="utf-8")
-        assert "; 3 of 7 queries returned an error or no response;" in draft
+        draft = " ".join((run_dir / "paper" / "draft.tex").read_text(encoding="utf-8").split())
+        assert f"on 2026-10-08; {_LISTED})" in draft
+        assert "3 of 7" not in draft
         (run_dir / "numbers.json").write_text(json.dumps({
             "spec_id": run_dir.name,
             "numbers": [{"text": "2026-10-08", "role": "identifier"}],
@@ -300,6 +292,18 @@ class TestVerifySkipsTheScopeCounts:
         run_dir = _seeded_run(tmp_path, _failed_three_of_seven())
         assert verify_run(run_dir).paper_novelty_problems == {}
 
+    def test_a_scope_rendered_with_the_old_counts_fails_until_rendered_again(self, tmp_path):
+        run_dir = _seeded_run(tmp_path, _failed_three_of_seven())
+        old = ("3 of 7 queries returned an error or no response; all queries are listed in "
+               "the analysis record distributed with the paper")
+        pointer = r"\s+".join(re.escape(w) for w in _LISTED.split())
+        for path in (run_dir / "paper" / "draft.tex", run_dir / "novelty_sentences.json"):
+            text = path.read_text(encoding="utf-8")
+            changed = re.sub(pointer, old, text)
+            assert changed != text, path.name
+            path.write_text(changed, encoding="utf-8")
+        assert verify_run(run_dir).paper_novelty_problems != {}
+
 
 # =========================================================================== #
 # verify names the failed queries behind a supported novelty claim (advisory)  #
@@ -316,6 +320,9 @@ class TestVerifyAdvisory:
         assert "evi-nov-decision-20261008-100441-315c71ca" in line
         assert "3 of 7 queries returned an error or no response" in line
         assert "Semantic Scholar 2, Crossref 1" in line
+        # The paper's sentence no longer states the count: the line says where it is.
+        assert "states the count" not in line
+        assert "the paper's novelty scope points to the record, which lists every query" in line
         assert not any("queries returned an error or no response" in p for p in report.search_log_problems)
         assert report.search_log_clean
 

@@ -10,7 +10,7 @@ Two parts:
     ``data_ref`` for every output table a paper may ship; the publish stage writes
     ``drafts/<spec-id>/paper/deposit.json`` with its terms, declares a copy made of a
     third-party file as its own external entry, names deposited files by their bundle paths,
-    states times as recorded times and follows the D8 guidance; the package skill follows
+    leaves times to the deposited record and follows the D8 guidance; the package skill follows
     the same for package paths; the hub and the publish command mention ``--deposit``; the
     protocol-withhold switch and its consequence are explained once.
 """
@@ -301,11 +301,13 @@ def test_the_publish_skill_names_deposited_files_by_their_bundle_paths():
     assert "spec.json" in flat and "checkpoints/" in flat
 
 
-def test_the_publish_skill_states_times_as_recorded_times():
+def test_the_publish_skill_leaves_the_times_to_the_record():
+    # Times are record content (design/reader-facing-prose.md §16): the paper states none
+    # and points to deposit/record.tex, which prints each one with its local-clock note.
     flat = _flat(_deposit_section())
-    assert "recorded time" in flat
+    assert "states no times" in flat
+    assert "deposit/record.tex" in flat
     assert "local clock" in flat
-    assert "time-stamped" in flat  # named as the wording not to use
 
 
 def test_the_publish_skill_follows_the_naming_and_checksum_guidance():
@@ -478,17 +480,18 @@ def test_the_package_skill_names_the_data_namespaces_in_its_layout():
 
 def test_the_package_skill_names_data_files_by_their_package_paths():
     section = _flat(_section(_read(_PACKAGE),
-                             "### Naming files, checksums and times in the merged manuscript"))
+                             "### Naming files and checksums in the merged manuscript"))
     assert r"\path{02_data/<run>/<name>}" in section
     assert r"\path{05_inputs/<run>/<name>}" in section
     assert "deposit/" in section and "fails" in section  # a per-run path fails in the package
     assert "cited, not shipped" in section
-    assert "recorded time" in section and "local clock" in section
+    # times stay in the record (design/reader-facing-prose.md §16)
+    assert "states no times" in section and "06_provenance/record.tex" in section
 
 
 def test_the_package_skill_says_path_needs_the_url_package_the_skeletons_load():
     section = _flat(_section(_read(_PACKAGE),
-                             "### Naming files, checksums and times in the merged manuscript"))
+                             "### Naming files and checksums in the merged manuscript"))
     assert r"\usepackage{url}" in section
     assert "skeleton" in section and "preamble" in section
 

@@ -82,8 +82,9 @@ exit non-zero even if the Claims reproduce.
   record (a `found_nothing` search exists). Do not assert novelty the record does not
   back. Write only the claim (`... has not been reported`) and no hedge of your own:
   render writes the plain sentence into the `.tex` (no marker) and appends the scope of
-  the recorded search — the indexes that answered, the search date and, when queries
-  failed, how many of how many. The binding of
+  the recorded search — the indexes that answered and the search date and, when queries
+  failed, a pointer to the analysis record, where the queries and their outcomes are
+  listed (the paper states no count). The binding of
   sentence to hypothesis goes to `runs/<id>/novelty_sentences.json`, which render
   writes and verify re-checks; to change the sentence, edit the prose and re-render.
 
@@ -100,7 +101,15 @@ record holds". In brief:
 - A pilot, exploratory or post hoc result is called that, with its n, in its own
   sentence. Evidence too thin for the central claim (a single run, no comparison, a
   criterion a trivial alternative also passes) is returned as a blocker, never
-  compensated in prose. Times in the record are logged times, not when work was done.
+  compensated in prose.
+- Times and the order of work stay in the deposited record (`deposit/record.tex`): no
+  timestamps, no "logged at" lists, no account of when each step was done, no details of
+  how the tools ran (failed queries, run times). Where it changes how a result should be
+  read, label the result exploratory or post hoc next to it, with its n ("added after the
+  results were known, n = 12"). Write that a criterion or choice was pre-specified only
+  when the frozen protocol holds it; otherwise it is post hoc. Where the venue expects a
+  pre-registration statement: one sentence naming the protocol, plus each deviation from
+  it with what changed, and nothing more.
 - No remark about how the paper was written or checked stays in the paper: a real
   limitation is stated once, next to its result; anything else is a note for the
   orchestrator.
@@ -150,8 +159,9 @@ ships data files, or must withhold its protocol, write the declaration
 its entry states both `license` and `redistribution`), the protocol switch and the example sentences are in
 `Skill("science-workflow-publish")`, section "Deposit files". In the SI and the
 availability statement, name each deposited file by its bundle path
-(`deposit/protocol/protocol-v1.json`, `deposit/manifest.csv`), and state every time as a
-recorded time, read from a local clock.
+(`deposit/protocol/protocol-v1.json`, `deposit/manifest.csv`). The paper states no times:
+the recorded time of each protocol version and each analysis step is in
+`deposit/record.tex`, and the availability statement points there.
 
 [HARD] You never add a value to the record. A number with no recorded home — `unresolved`
 and not an identifier — is a BLOCKER: return it to the orchestrator with the sentence it

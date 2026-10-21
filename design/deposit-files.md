@@ -392,7 +392,7 @@ says the loop persists after compile. The rule above holds under either order.
 | current protocol | `protocol-v<V>.json` bytes equal `runs/<id>/spec.json`; V equals the Spec's version. With the protocol withheld (D1) there is no copy; the row's `sha256` is checked by `plan` | fail | the protocol shipped is the one the results were judged against; its content is covered by the record digest |
 | earlier protocols | the SHA-256 of `protocol-v<N>.json` equals `prior_spec_sha256` in `amendment-v<N+1>.json` and the SHA-256 of `spec_history/spec.v<N>.json`; version N's `created_at`, as `str(created_at.timestamp())`, equals version N+1's `prior_version_id`; versions 1…V present. With the protocol withheld, the comparisons among the record's own files (history file, receipt, `created_at` link) still run and those against copies are skipped | fail; a version not kept (D1) is advisory | the history files, the receipts and the copies agree with one another — nothing more. They are outside the record digest (D11): a rewrite of an earlier version that keeps its `created_at`, made together with its receipt's `prior_spec_sha256`, passes. The one link inside the digest is the current `spec.json`'s `prior_version_id` (set by `Spec.amend`), and it fixes a time, not content |
 | amendments | `amendment-v<N>.json` bytes equal the checkpoint file; its `rationale` equals version N's `amendment_rationale`. With the protocol withheld, only the `rationale` comparison runs | fail | copy fidelity; for the latest amendment, its rationale matches the digest-covered `spec.json` |
-| withheld | the persisted declaration withholds the protocol (D1); prints `protocol withheld (<reason>): readers cannot check the protocol or what the paper says about it, such as when it was written; the manifest lists the SHA-256 of each withheld file` | advisory, never a failure | — |
+| withheld | the persisted declaration withholds the protocol (D1); prints `protocol withheld (<reason>): readers cannot check the protocol or what the paper says about it, such as which choices it fixed in advance; the manifest lists the SHA-256 of each withheld file` | advisory, never a failure | — |
 | protocol digest | computed and printed for every run (D11), withheld or not | printed | — |
 | recorded | the file's SHA-256 occurs as a 64-hex token in the named Evidence item (its serialized JSON, any case); shipped or not | fail; the message names any other items that hold it | the record, which the record digest covers, names these exact bytes |
 | derived | listed as unchecked; a named `evidence` item exists; if the file's hash does occur in the record, advise declaring it `recorded` | listing advisory; fail only for a missing item | nothing about the bytes |
@@ -610,6 +610,14 @@ Guidance that follows, for both modes (Phase 3 puts it in the publish and packag
 - `\path{…}` keeps a path out of both tokenizers and needs no `\_`.
 
 ### D9 — What the SI and the availability statement say
+
+> Superseded in part (2026-10-21, the user's decision; `design/reader-facing-prose.md` §16):
+> the paper and SI state no times. The time clauses in the examples below ("was created at
+> ...", "recorded at ...", the "logged at" sentence) are record content, which
+> `deposit/record.tex` carries; the SI and the availability statement point there. The
+> publish skill's protocol example is now one sentence naming the protocol the results
+> were judged against plus each deviation. The file-naming, checksum and terms rules of
+> this section are unchanged.
 
 The SI names the files instead of describing them. From the trial SI (`si.tex:21,24,33`),
 rewritten (the checksum is elided here; the paper writes it in full, D8):
@@ -1765,6 +1773,16 @@ their numbers so that references to them stay valid.
     writes and in the publish command's description. The output style's "outside the
     submission" for `runs/<id>/record.tex` now reads "outside `paper/`", since a copy ships
     in the bundle.
+- **Times are record content** (2026-10-21, the user's decision; `design/reader-facing-prose.md`
+  §16). The paper and SI state no times: the publish skill's "Times are recorded times"
+  rule and its protocol example with creation times are replaced by "The paper states no
+  times" and a one-sentence protocol statement with its deviations; the package skill's
+  naming section (now "Naming files and checksums in the merged manuscript") points to
+  `06_provenance/record.tex`; D9 carries a note. The record keeps every time it prints
+  (D10, Phase 3), and the D12 advisory is unchanged: it serves the check that a criterion
+  called pre-specified was in the protocol before the results it bears on. The D5
+  withheld advisory now reads "such as which choices it fixed in advance" instead of
+  "such as when it was written".
 
 ## Review of v0.1: where each point is resolved
 

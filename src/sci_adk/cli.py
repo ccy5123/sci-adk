@@ -2122,19 +2122,7 @@ def _cmd_numbers_draft(args: argparse.Namespace) -> int:
             return 2
         read_from = "paper/" + " + paper/".join(documents)
 
-    record = load_number_record(run_dir)
-    # Read as verify reads them: the query counts render writes into a novelty scope that
-    # matches the record are not numbers the author declares (render/novelty.py).
-    from sci_adk.core.evidence import EvidenceKind
-    from sci_adk.render.novelty import mask_novelty_scope_counts
-    from sci_adk.render.paper import _latex_sanitize
-
-    decisions = [ev for ev in record.evidence if ev.kind == EvidenceKind.NOVELTY_DECISION]
-    documents = {
-        name: mask_novelty_scope_counts(text, spec, decisions, escape=_latex_sanitize)
-        for name, text in documents.items()
-    }
-    draft, summary = propose_numbers(documents, record, spec.id)
+    draft, summary = propose_numbers(documents, load_number_record(run_dir), spec.id)
     out_path = run_dir / NUMBERS_DRAFT_FILE
     out_path.write_text(json.dumps(draft, indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8")

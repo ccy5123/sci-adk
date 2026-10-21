@@ -143,6 +143,11 @@ reader of the `venue` in `pubreqs.json` who was never in this work's sessions.
 - File or script names used as concepts ("the analysis says").
 - A referent the reader cannot locate: a date, a protocol, a data release, a document
   named but never said where to find.
+- Record content in the paper: timestamps, "logged at" lists, accounts of when each step
+  was done or in what order, and details of how the tools ran (failed or repeated queries,
+  run times, a command's output). A real paper in this venue does not print them; the
+  deposited record (`deposit/record.tex`) does. The fix deletes them, or points the
+  reader to that file where the reader needs it.
 - Remarks about how the paper was written or checked, left in its text ("this could not
   be fully verified", "a simplified implementation was used", "as checked above"). Such
   a remark is either a real limitation of the study — then it is stated once, next to the
@@ -206,18 +211,31 @@ record and the run's literature store.
   hoc result is called that, with its n, in the sentence that reports it — checked against
   the hypotheses' `mode` and the method plan in `spec.json` and against each result's
   recorded finding. An exploratory result written as confirmatory, or one whose n is in
-  another paragraph or nowhere, is a finding. A general claim with evidence over only part
-  of the range it generalizes over is narrowed, not hedged.
+  another paragraph or nowhere, is a finding; where the label changes how the result
+  reads, the fix labels it next to the result with its n ("added after the results were
+  known, n = 12"). A general claim with evidence over only part of the range it
+  generalizes over is narrowed, not hedged.
 - **Thin evidence goes to the author.** When the central claim rests on a single run, no
   replicate, no comparison, or a criterion that a trivial alternative (a baseline, a
   permuted or random predictor in the record's negative controls and baselines) also
   passes, I report what is missing, in one line, with `for_author: true`. The fix is never
   a stronger or a softer sentence and never a longer limitations section.
-- **When things happened.** A sentence about when work was done — before the data were
-  seen, before the protocol was frozen, on a date — matches what the record holds. The
-  record holds logged times, written by local clocks: each item's created time, the
-  search logs' times, the protocol versions' times — not when the work was done. A claim
-  those times do not show, or state more firmly than a logged time can, is a finding.
+- **Pre-specified means in the frozen protocol.** A sentence saying a criterion, a
+  threshold or an analysis choice was pre-specified (fixed in advance, pre-registered,
+  chosen before the data were seen) is backed only by the frozen protocol: I find the
+  criterion in `spec.json` and in the protocol versions under `paper/deposit/protocol/`.
+  One the protocol does not hold, or one an amendment added after a result bearing on it
+  was recorded (`record.tex` gives each protocol version and each result with its
+  recorded time), is a finding whose fix labels it post hoc, next to its result, with its
+  n.
+- **Times and tool runs are the record's, not the paper's.** Timestamps, "logged at"
+  lists, accounts of when each step was done or in what order, and details of how the
+  tools ran (failed or repeated queries, run times, a command's output) are record
+  content: the deposited record (`paper/deposit/record.tex`) carries them, and in the
+  paper they are a machinery leak. Each is a finding; the fix deletes it, or points the
+  reader to `deposit/record.tex` where the reader needs it. Where the venue expects a
+  pre-registration statement, it is one sentence naming the protocol, plus each deviation
+  from it with what changed; anything longer is a finding.
 - **Deposited code and data are part of the paper.** What `paper/code/`,
   `paper/reproduce.py` and `paper/deposit/` ship: one canonical file per role (no
   superseded copy left beside the current one, no versioned names such as `_v2`, `_final`

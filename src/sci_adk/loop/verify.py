@@ -124,7 +124,6 @@ from sci_adk.render.novelty import (
     failed_query_counts,
     find_unbacked_novelty_sentences,
     find_unsupported_novelty,
-    mask_novelty_scope_counts,
     parse_novelty_sentences,
     search_log_groups,
 )
@@ -773,7 +772,7 @@ def verify_run(
     # literal by literal against its declared sources -- INSTEAD of the pattern-based number
     # audit, which _check_paper_requirements then skips. Coverage + resolution gate; stale
     # entries and the identifier listing are advisory. READ-ONLY, no LLM.
-    number_problems, number_notes = _check_numbers(run_dir, evidence, spec)
+    number_problems, number_notes = _check_numbers(run_dir, evidence)
     numbers_clean = not number_problems
 
     # Conclusion review (design §11.4): an independent BLIND reading of what each conclusion
@@ -1431,20 +1430,8 @@ def load_number_record(
     return NumberRecord(spec_json=spec_json, evidence=evidence, bib_years=bib_years)
 
 
-def _number_text(text: str, spec: Optional[Spec], evidence: List[EvidenceItem]) -> str:
-    """A paper document as the number checks read it: the query counts render wrote into
-    each novelty scope that matches the record are blanked
-    (:func:`sci_adk.render.novelty.mask_novelty_scope_counts`). The novelty check compares
-    that scope with the record; the counts are not numbers an author declares. Without a
-    Spec there is nothing to re-derive, and the text is read as it is."""
-    if spec is None:
-        return text
-    decisions = [ev for ev in evidence if ev.kind == EvidenceKind.NOVELTY_DECISION]
-    return mask_novelty_scope_counts(text, spec, decisions, escape=_latex_sanitize)
-
-
 def _check_numbers(
-    run_dir: Path, evidence: List[EvidenceItem], spec: Optional[Spec] = None
+    run_dir: Path, evidence: List[EvidenceItem]
 ) -> Tuple[List[str], List[str]]:
     """Run the declared-number checks (design/declared-numbers.md §4.3): ``(problems, advisory)``.
 
@@ -1467,9 +1454,7 @@ def _check_numbers(
     if numbers is None:
         return [], []
     documents = {
-        name: _number_text(
-            (run_dir / "paper" / name).read_text(encoding="utf-8"), spec, evidence
-        )
+        name: (run_dir / "paper" / name).read_text(encoding="utf-8")
         for name in _PAPER_DOCS
         if (run_dir / "paper" / name).is_file()
     }
@@ -1662,7 +1647,7 @@ def _failed_query_advisory(
     that holds failed queries (queries the index returned an error or no response to).
 
     One line per distinct log (decisions recording the same searches -- the same times and
-    queries -- share one line, the rule the paper's novelty scope counts by), naming the
+    queries -- share one line, the rule :func:`failed_query_counts` counts by), naming the
     claim, every decision that records the log, how many of its queries failed out of how
     many, and the failed queries per index (spellings of one index merged, most failures
     first). The two-index soundness rule (:func:`_check_search_logs`) is not changed: an
@@ -1691,9 +1676,9 @@ def _failed_query_advisory(
             lines.append(
                 f"search log: the {kind}-novelty claim for hypothesis '{claim.answers}' "
                 f"({claim_id}) rests on {which}, {counts.failed} of {counts.total} queries "
-                f"{FAILED_QUERY_TERM} ({per_index}); the paper's novelty scope states the "
-                "count and the record lists every query -- check that these queries do not "
-                "include the ones closest to the claim."
+                f"{FAILED_QUERY_TERM} ({per_index}); the paper's novelty scope points to the "
+                "record, which lists every query -- check that these queries do not include "
+                "the ones closest to the claim."
             )
     return lines
 
@@ -1884,8 +1869,9 @@ def _check_paper_requirements(
         for name in _PAPER_DOCS:
             doc = run_dir / "paper" / name
             if doc.is_file():
-                text = _number_text(doc.read_text(encoding="utf-8"), spec, evidence)
-                problems.extend(number_audit_problems(text, pool, source=name))
+                problems.extend(
+                    number_audit_problems(doc.read_text(encoding="utf-8"), pool, source=name)
+                )
         warnings.append(_NUMBER_LIST_ADVICE)
 
     if pubreqs.required_sections:

@@ -297,25 +297,26 @@ Render then ships no protocol file, and the manifest keeps each file's SHA-256 w
 `deposit/record.tex` still ships: it prints the hypotheses with their decision rules and each
 protocol file's time and SHA-256, never the proposal itself.
 `verify` reports, as an advisory and never a failure, that readers cannot check the protocol or
-what the paper says about it, such as when it was written. The paper and SI then name no
-protocol file: `verify` fails every sentence that does, by bundle path or bare name. A
+what the paper says about it, such as which choices it fixed in advance. The paper and SI then
+name no protocol file: `verify` fails every sentence that does, by bundle path or bare name. A
 declaration without the two keys ships the protocol again.
 
 **Name the deposited files by their bundle paths** — `deposit/protocol/protocol-v1.json`,
 `deposit/protocol/amendment-v2.json`, `deposit/data/results.csv`, `deposit/record.tex`,
-`deposit/manifest.csv` — in the SI and in the availability statement (a time recorded with an
-analysis step is in `deposit/record.tex`, so a sentence about it can name that file), never by
+`deposit/manifest.csv` — in the SI and in the availability statement, never by
 a record name (`spec.json`, `spec_history/…`, `checkpoints/…`, `deposit.json`), which the
 vocabulary check fails. `verify`
 fails a `deposit/…` path that names no file the bundle holds; a cited file that is not shipped
 has no bundle path, so cite it by its checksum. In LaTeX write a path as
 `\path{deposit/data/results.csv}`, which needs no `\_`.
 
-> Version 1 of the protocol (\path{deposit/protocol/protocol-v1.json}) was created at
-> \texttt{2026-10-08T10:03:39Z}. The amendment (\path{deposit/protocol/amendment-v2.json}),
-> recorded at \texttt{2026-10-08T14:05:17Z}, stores the SHA-256 of the version it replaced,
-> which is the checksum of \path{deposit/protocol/protocol-v1.json}. Version 2
-> (\path{deposit/protocol/protocol-v2.json}) is the protocol the results were judged against.
+Where the venue expects a statement of the protocol, it is one sentence plus the deviations,
+each with what changed and why:
+
+> The analysis followed version 2 of the protocol
+> (\path{deposit/protocol/protocol-v2.json}). It differs from version 1
+> (\path{deposit/protocol/protocol-v1.json}) in one respect, described in the amendment
+> (\path{deposit/protocol/amendment-v2.json}): <what changed, and why>.
 
 The availability statement names the folders, the manifest and the terms:
 
@@ -344,14 +345,15 @@ A withheld protocol:
 > the SHA-256 of each of the three files, so a copy released later can be checked against
 > them.
 
-**Times are recorded times.** Every time in the protocol files and in the Evidence (which
-`record.tex` prints beside each item) was read from a local clock, and nothing witnesses it.
-Write each as a recorded time — "was created at", "recorded at" — never as "time-stamped" or
-"registered" by anyone, and claim no order the recorded times do not show.
-`verify` prints the protocol's times and the earliest Evidence side by side as an advisory.
+**The paper states no times.** The time of each protocol version and each analysis step is
+record content: `deposit/record.tex` prints every one, with the note that local clocks wrote
+them, and the availability statement points there. The paper and SI give no timestamps, no
+"logged at" lists and no account of when each step was done (see "Report the study the
+record holds"). `verify` prints the protocol's times and the earliest Evidence side by side as
+an advisory, for checking that a criterion called pre-specified was in the protocol before
+the results it bears on were recorded.
 
-**Paths, checksums and times in the text.** Put each inside `\path{…}` or `\texttt{…}`; a
-date-time is then one literal, declared as an `identifier` in `numbers.json`. Write each
+**Paths and checksums in the text.** Put each inside `\path{…}` or `\texttt{…}`. Write each
 checksum in full, 64 hex digits as `\texttt` pieces of 16 joined by `\allowbreak`, never
 elided: an elided prefix such as `1081e637` reads as a number, and a reader cannot check an
 elided value.
@@ -487,7 +489,10 @@ a retraction on top. Downgrade the claim to what the design supports, or delete 
 8. Walk the introduction from what is known to the gap to this work: every step cites or
    shows, and a step you cannot support goes back to the orchestrator as a blocker.
 9. Check that every pilot, exploratory or post hoc result says so, with its n, in its own
-   sentence. If the central claim rests on such a result, return that before polishing.
+   sentence, and that every criterion called pre-specified is in the frozen protocol. If
+   the central claim rests on such a result, return that before polishing. Delete
+   timestamps, "logged at" lists and accounts of when each step was done: the deposited
+   record carries them.
 10. Run `verify` — it re-checks every number and every declared conclusion against the
     record.
 11. Read the opening and the closing cold. In both, every sentence is either the question
@@ -519,9 +524,18 @@ do. A well-made sentence cannot make up for a missing comparison, and must not h
   replicate, no comparison, or a criterion a trivial alternative also passes, stop and
   return it as a blocker saying what is missing. Writing cannot fix the study: no stronger
   verbs, and no longer limitations section.
-- **Times are logged times.** The record holds the times local clocks wrote when items
-  were recorded, not when the work was done. Say "recorded at", and claim an order of
-  events ("before the data were seen") only where the logged times show it.
+- **Times and the order of work stay in the deposited record.** A real paper does not
+  print timestamps, "logged at" lists, an account of when each step was done or in what
+  order, or details of how the tools ran (failed or repeated queries, run times):
+  `deposit/record.tex` carries them, and the availability statement points there. What the
+  reader needs from the order of work is said next to the result it bears on: a result
+  that is exploratory or post hoc is labelled so there, with its n ("added after the
+  results were known, n = 12"), where the label changes how it reads. Write that a
+  criterion, a threshold or a choice was pre-specified only when the frozen protocol holds
+  it (the `study-and-question` reader checks `spec.json` and the protocol versions);
+  otherwise it is post hoc. Where the venue expects a pre-registration statement, it is one
+  sentence naming the protocol, plus each deviation from it with what changed, and nothing
+  more.
 - **No remarks about how the paper was written or checked.** "This could not be fully
   verified", "a simplified implementation was used": such a remark is either a real
   limitation of the study — stated once, next to the result it limits, under the
@@ -741,9 +755,10 @@ failure except by an explicit re-freeze (anti-moving-the-goalposts).
   back. The marker never reaches the `.tex`: render writes the plain sentence and appends
   the scope of the recorded search — "(no such report was found in searches of OpenAlex,
   arXiv and Crossref on 2026-10-08)", or "(as of <date>)" when no search log was recorded;
-  when queries of that search failed, the scope also says how many of how many and that the
-  record lists every query — so write the claim without a hedge of your own, and do not
-  declare the counts in the scope in numbers.json (verify reads them from the record).
+  when queries of that search failed, the scope ends instead with "; the queries and their
+  outcomes are listed in the analysis record distributed with the paper)" and states no
+  count (the record and verify's advisory give the counts) — so write the claim without a
+  hedge of your own; declare the date as an `identifier` in numbers.json.
   Render records the sentence's binding
   to its hypothesis in `runs/<id>/novelty_sentences.json` (never submitted, never
   hand-edited) and `verify` re-checks it: the sentence must still be in the paper and end

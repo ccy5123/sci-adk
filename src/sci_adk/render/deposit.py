@@ -1815,8 +1815,8 @@ def withheld_advisory(reason: str) -> str:
     """The ``verify`` advisory for a run that withholds its protocol (D5)."""
     return (
         f"protocol withheld ({reason}): readers cannot check the protocol or what the paper "
-        "says about it, such as when it was written; the manifest lists the SHA-256 of each "
-        "withheld file"
+        "says about it, such as which choices it fixed in advance; the manifest lists the "
+        "SHA-256 of each withheld file"
     )
 
 
