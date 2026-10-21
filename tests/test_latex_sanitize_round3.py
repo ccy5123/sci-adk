@@ -14,11 +14,9 @@ Found by independent checkers on the hardened render path (render and verify exi
   3. Without a ``.bib``, the cited DOIs were written into ``\\url{https://doi.org/<doi>}`` as
      written; a DOI holding ``}`` closed the ``\\url`` and ran what followed. A DOI must now
      have the DOI form to be cited; any other is left out with a render warning.
-  4. Verify failed any bib command outside a closed list of known-harmless ones. It now fails
-     only a command that can read or write a file, define a macro, change how TeX reads its
-     input or end the document (and ``^^`` notation), names any other unknown command in an
-     advisory, and runs on every bibliography render writes, with or without a publishing
-     contract.
+  4. The bib command check runs on every bibliography render writes, with or without a
+     publishing contract. (Its deny-list of this pass was replaced by an allow-list after the
+     fourth pass, tests/test_bib_allowlist.py: any command off the list fails.)
   5. Further: warnings (one short line per command, the rule once, replaced characters named),
      the authored SI body cleaned of control characters, the record's bibliography decided
      from its closing lines, the reproduction listing's ids on one line, an HTML entity
@@ -576,14 +574,19 @@ def test_a_record_with_text_after_the_bibliography_lines_names_none():
     assert record_bibliography(None) is None
 
 
-# -- 4. bib commands: fail on a dangerous one, advise on an unknown one, always ----------------
+# -- 4. bib commands: everything off the allow-list fails, always ------------------------------
+#
+# Changed after the fourth pass (tests/test_bib_allowlist.py): the deny-list this section first
+# pinned could not be closed, so a bibliography now holds only allow-listed commands
+# (bib_latex.TEXT_COMMANDS, MATH_COMMANDS); there is no advisory for an unknown command.
 
-# Publisher / Crossref commands that print a symbol or change case: harmless, and unknown to
-# the list of commands a reference needs.
-_HARMLESS_UNKNOWN = [
-    "texttimes", "textpm", "textminus", "textmicro", "textcelsius", "texteuro", "textsterling",
-    "MakeUppercase", "uppercase", "hspace", "texthyphen",
-]
+# Publisher / Crossref symbols the allow-list carries (each compiles under every preamble).
+_PUBLISHER_ALLOWED = ["texttimes", "textpm", "textminus", "textcelsius", "texteuro",
+                      "textsterling"]
+# Publisher commands off the allow-list: undefined in a preamble render emits, or able to stop
+# pdflatex with their argument.
+_PUBLISHER_REFUSED = ["textmicro", "MakeUppercase", "uppercase", "hspace", "texthyphen",
+                      "nolinkurl"]
 # The commands that can read or write a file, define a macro, change how TeX reads its input
 # or end the document (the list the checkers named).
 _DANGEROUS = [
@@ -602,46 +605,35 @@ def _command_lines(problems: list[str]) -> list[str]:
     return [p for p in problems if "command" in p]
 
 
-def test_harmless_publisher_commands_do_not_fail_and_are_named_in_an_advisory():
-    from sci_adk.render.pkgreqs_checks import (
-        bib_command_advisories,
-        bib_command_problems,
-        bib_latex_safety_problems,
-    )
+def test_allow_listed_publisher_symbols_pass_and_the_others_fail():
+    from sci_adk.render.pkgreqs_checks import bib_command_problems, bib_latex_safety_problems
 
-    title = " ".join(BS + name + "{x}" for name in _HARMLESS_UNKNOWN) + " " + BS + "nolinkurl{a}"
-    bib = _bib_entry(title)
-    assert _command_lines(bib_latex_safety_problems(bib)) == []
-    assert bib_command_problems(bib) == []
-    notes = bib_command_advisories(bib)
-    assert len(notes) == 1, notes
-    for name in _HARMLESS_UNKNOWN:
-        assert BS + name in notes[0]
-    assert "entry 'X2020'" in notes[0]
+    allowed = _bib_entry(" ".join(BS + name + "{}" for name in _PUBLISHER_ALLOWED))
+    assert _command_lines(bib_latex_safety_problems(allowed)) == []
+    assert bib_command_problems(allowed) == []
+    refused = _bib_entry(" ".join(BS + name + "{x}" for name in _PUBLISHER_REFUSED))
+    lines = bib_command_problems(refused)
+    assert len(lines) == 1 and "entry 'X2020'" in lines[0], lines
+    for name in _PUBLISHER_REFUSED:
+        assert BS + name in lines[0]
 
 
 @pytest.mark.parametrize("name", _DANGEROUS)
 def test_a_dangerous_command_fails(name):
-    from sci_adk.render.pkgreqs_checks import (
-        bib_command_advisories,
-        bib_command_problems,
-        bib_latex_safety_problems,
-    )
+    from sci_adk.render.pkgreqs_checks import bib_command_problems, bib_latex_safety_problems
 
     bib = _bib_entry("x " + BS + name + "{m} y")
     lines = bib_command_problems(bib)
     assert len(lines) == 1 and BS + name in lines[0], lines
     assert _command_lines(bib_latex_safety_problems(bib)) == lines
-    assert bib_command_advisories(bib) == []
 
 
-def test_every_command_on_the_deny_list_fails_and_none_is_safe():
-    from sci_adk.render.bib_latex import DANGEROUS_COMMANDS, SAFE_COMMANDS
+def test_no_dangerous_command_is_on_the_allow_list_and_each_fails_in_math():
+    from sci_adk.render.bib_latex import MATH_COMMANDS, TEXT_COMMANDS
     from sci_adk.render.pkgreqs_checks import bib_command_problems
 
-    assert not DANGEROUS_COMMANDS & SAFE_COMMANDS
-    assert set(_DANGEROUS) <= DANGEROUS_COMMANDS
-    for name in sorted(DANGEROUS_COMMANDS):
+    assert not set(_DANGEROUS) & (set(TEXT_COMMANDS) | set(MATH_COMMANDS))
+    for name in _DANGEROUS:
         assert bib_command_problems(_bib_entry("$" + BS + name + "$")), name
 
 
@@ -655,12 +647,13 @@ def test_caret_notation_fails_in_text_and_in_math(value):
 def test_a_url_with_a_backslash_fails():
     # Changed in the fourth pass (test_latex_sanitize_round4.py): hyperref reads a URL as TeX,
     # so a backslash in one is a command that runs, not a character the url package prints.
-    from sci_adk.render.pkgreqs_checks import bib_command_advisories, bib_command_problems
+    from sci_adk.render.bib_latex import paper_bib
+    from sci_adk.render.pkgreqs_checks import bib_command_problems
 
     bib = "@misc{X2020, title={T}, url={http://a.org/" + BS + "input}, year={2020}}"
     problems = bib_command_problems(bib)
     assert len(problems) == 1 and "a backslash" in problems[0] and "URL" in problems[0]
-    assert bib_command_advisories(bib) == []
+    assert "url" not in paper_bib(bib)  # the copy leaves such a url out
 
 
 def _rendered_run(tmp_path, spec_id):
@@ -697,7 +690,7 @@ def test_verify_names_a_dangerous_command_once_with_a_contract(tmp_path):
     assert len([p for p in report.paper_requirements_problems if BS + "def" in p]) == 1
 
 
-def test_verify_checks_the_deposit_bibliography_and_advises_on_unknown_commands(tmp_path):
+def test_verify_checks_the_deposit_bibliography_and_accepts_allow_listed_commands(tmp_path):
     from sci_adk.loop.verify import verify_run
 
     run_dir = _rendered_run(tmp_path, "bib-deposit")
@@ -710,11 +703,14 @@ def test_verify_checks_the_deposit_bibliography_and_advises_on_unknown_commands(
     report = verify_run(run_dir)
     assert any("deposit/references.bib" in p and BS + "write" in p
                for p in report.paper_requirements_problems), report.paper_requirements_problems
+    # \texttimes is on the allow-list; the appended entry fails only as a hand edit.
     assert not any(BS + "texttimes" in p for p in report.paper_requirements_problems)
-    assert any(BS + "texttimes" in n and "Z2020" in n for n in report.paper_advisory)
+    assert any("bib form: references.bib entry 'Z2020'" in p
+               for p in report.paper_requirements_problems), report.paper_requirements_problems
+    assert not any(n.startswith("bib commands:") for n in report.paper_advisory)
 
 
-def test_the_package_gate_advises_on_unknown_commands(tmp_path):
+def test_the_package_gate_accepts_an_allow_listed_symbol(tmp_path):
     from sci_adk.loop.verify import _check_package_requirements
     from tests.test_si_bib_integrity import _assemble_pkg_with_bibs
 
@@ -722,7 +718,7 @@ def test_the_package_gate_advises_on_unknown_commands(tmp_path):
     ws, pkgreqs = _assemble_pkg_with_bibs(tmp_path, main_bib=si_bib, si_bib=si_bib)
     problems, warnings, _runs, _repro = _check_package_requirements(ws, ws / "package", pkgreqs)
     assert not any(BS + "textpm" in p for p in problems)
-    assert any(BS + "textpm" in w and "package_src/references.bib" in w for w in warnings)
+    assert not any(BS + "textpm" in w for w in warnings)
 
 
 def test_render_warns_about_a_dangerous_command_in_the_bib_it_writes(tmp_path, capsys):

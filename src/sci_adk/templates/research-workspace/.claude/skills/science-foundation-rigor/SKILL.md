@@ -232,6 +232,12 @@ user happens to also work on:
   gates. Rationale: "syntax-correct = done" and "code-coverage = verified" are
   software-engineering assumptions that the record/belief discipline rejects —
   scientific "done" is `sci-adk verify`-pass, not a green build or a merged PR.
+- **Scripts are ASCII-only**: comments, docstrings, messages and names in English; a
+  character the data needs is written as an escape (Python or R `"\u00b5"`, shell
+  `printf '\302\265'`). The record typesets each recorded script with pdflatex, which
+  cannot show other characters. The workspace PreToolUse hook blocks a non-ASCII write into a
+  script and `sci-adk append-evidence` refuses to record such a script; Lean (`.lean`) is
+  exempt.
 
 The kernel carries ZERO domain code. Domain knowledge enters via the Spec's
 MethodPlan and future `science-domain-*` skills, never via the kernel.

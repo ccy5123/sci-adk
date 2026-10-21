@@ -34,7 +34,7 @@ from sci_adk.init_session import InstallReport, install_session
 
 # The plain file assets the kit installs (relative to the target dir). CLAUDE.md
 # and settings.json have their own special handling and are asserted separately.
-# As of the sci-adk-as-moai Phase C upgrade the verb installs the FULL kit: the two
+# As of the sci-adk-as-moai Phase C upgrade the verb installs the FULL kit: the three
 # enforcement hooks, the science-orchestrator output style, the 11 worker/guard
 # agents (6 workers, including the v2-promoted expert-replicator, and 5 advisory
 # guards), the 8 sci/science-* Skills, and the 8 /sci command routers. Kept in
@@ -42,6 +42,7 @@ from sci_adk.init_session import InstallReport, install_session
 _FILE_ASSETS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
+    ".claude/hooks/sci-adk/ascii-script-gate.sh",
     ".claude/output-styles/science-orchestrator/science-orchestrator.md",
     # v1 worker agents (5)
     ".claude/agents/manager-prereg.md",
@@ -79,6 +80,7 @@ _FILE_ASSETS = (
 _HOOK_SHELL_SCRIPTS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
+    ".claude/hooks/sci-adk/ascii-script-gate.sh",
 )
 _SETTINGS = ".claude/settings.json"
 
@@ -140,13 +142,15 @@ def test_install_into_empty_dir_lays_down_every_asset(tmp_path):
         assert (tmp_path / rel).is_file(), f"missing asset: {rel}"
     assert (tmp_path / "CLAUDE.md").is_file()
 
-    # settings.json created, persona + both hook events wired
+    # settings.json created, persona + the three hook events wired
     settings = _settings(tmp_path)
     assert settings["outputStyle"] == "science-orchestrator"
     stop_cmds = _stop_commands(settings)
     ups_cmds = _ups_commands(settings)
     assert any("stop-verify-gate.sh" in c for c in stop_cmds)
     assert any("reanchor.sh" in c for c in ups_cmds)
+    pre_groups = settings["hooks"]["PreToolUse"]
+    assert any("ascii-script-gate.sh" in h["command"] for g in pre_groups for h in g["hooks"])
 
     # the report names what it installed (asset basenames appear somewhere)
     assert "settings.json" in "\n".join(report.settings_changes).lower() \

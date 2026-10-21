@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -145,6 +146,25 @@ def _report_tool_error(e: Exception) -> int:
     return 1
 
 
+#: Verbs the CLI runs that are not part of its public surface: the help and the verb list leave
+#: them out (design/surface-freeze-analysis.md). ``check-ascii`` is the research-workspace
+#: PreToolUse hook's helper.
+INTERNAL_VERBS = frozenset({"check-ascii"})
+
+
+class _PublicVerbMap(dict):
+    """The top-level verb map: a lookup finds every verb, a listing names the public ones.
+
+    argparse finds a verb with ``in`` and ``[]``, and names the verbs by iterating this map:
+    in the "invalid choice: ... (choose from ...)" error of an unknown verb, and in the usage
+    line when no metavar is set. Iterating it leaves out :data:`INTERNAL_VERBS`, so neither
+    names them, and they still run.
+    """
+
+    def __iter__(self):
+        return (name for name in dict.__iter__(self) if name not in INTERNAL_VERBS)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sci-adk",
@@ -156,6 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
         _v = "unknown"
     parser.add_argument("--version", action="version", version=f"sci-adk {_v}")
     sub = parser.add_subparsers(dest="command", required=True)
+    # argparse keeps the verbs in one dict, the action's choices (its _name_parser_map is the
+    # same object): this one lists only the public verbs (_PublicVerbMap).
+    sub.choices = sub._name_parser_map = _PublicVerbMap()
 
     run = sub.add_parser("run", help="compile a proposal into runs/<spec.id>/")
     run.add_argument("proposal", nargs="?", default=None,
@@ -496,8 +519,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_session = sub.add_parser(
         "init-session",
-        help="install the research-workspace enforcement kit (Stop/UserPromptSubmit "
-             "hooks + science-orchestrator persona + CLAUDE.md) into a target "
+        help="install the research-workspace enforcement kit (Stop/UserPromptSubmit/"
+             "PreToolUse hooks + science-orchestrator persona + CLAUDE.md) into a target "
              "dir. Non-clobbering and idempotent: never overwrites the user's files, "
              "merges settings.json, and re-running is a clean no-op. Exit 0 on success "
              "(a conflict is a warning, not a failure)",
@@ -510,6 +533,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="compute and report every planned action but write NOTHING to disk",
     )
+
+    # check-ascii: the English-only scripts check the workspace PreToolUse hook runs
+    # (design/english-only-scripts.md). Reads the hook input on stdin; no argument. An internal
+    # verb, outside the public CLI (design/surface-freeze-analysis.md): registered without a
+    # help line and left out of the verb list, so 'sci-adk --help' does not show it.
+    sub.add_parser(
+        "check-ascii",
+        description="Internal: the check the research-workspace PreToolUse hook runs (not part "
+                    "of the public CLI). Reads the Claude Code hook input (JSON) on stdin and "
+                    "exits 3 (CHECK_ASCII_BLOCKED), with the reason on stderr, when the "
+                    "Write/Edit/MultiEdit/NotebookEdit would put a non-ASCII character into a "
+                    "script (a script in a research workspace is ASCII-only; Lean is exempt); "
+                    "exits 0 otherwise, with a warning on stderr when the input cannot be read, "
+                    "and 2 when stdin is a terminal.",
+    )
+    sub.metavar = "{" + ",".join(sub.choices) + "}"  # the public verbs (_PublicVerbMap)
     return parser
 
 
@@ -1806,6 +1845,19 @@ def _cmd_append_evidence(args: argparse.Namespace) -> int:
         print(f"error: invalid EvidenceItem ({ev_path}): {e}", file=sys.stderr)
         return 2
 
+    # English-only scripts (design/english-only-scripts.md, the record-time layer): a script
+    # the code_ref names (the reading the reproduction bundle uses) must be ASCII-only, or
+    # the record can only name it. Refused before anything is written.
+    from sci_adk.loop.ascii_scripts import code_ref_violations, refusal_message
+    from sci_adk.loop.code_ref import NON_REPRODUCIBLE_KINDS
+
+    code_ref = (item.provenance.code_ref or "").strip()
+    if code_ref and item.kind not in NON_REPRODUCIBLE_KINDS:
+        violations = code_ref_violations(code_ref, run_dir, workspace)
+        if violations:
+            print(refusal_message(item.id, violations), file=sys.stderr)
+            return 2
+
     compiler = ResearchCompiler(workspace_dir=workspace)
     compiler.stage_append_evidence(spec, item)
     print(f"append-evidence: appended Evidence '{item.id}' ({item.kind.value}) "
@@ -1889,6 +1941,16 @@ def _print_render_warnings(compiler: ResearchCompiler) -> None:
         print(f"  warning: {line}", file=sys.stderr)
     for line in getattr(compiler, "reference_warnings", []):
         print(f"  warning: {line}", file=sys.stderr)
+    _print_record_notes(compiler)
+
+
+def _print_record_notes(compiler: ResearchCompiler) -> None:
+    """What the last render's record shows differently from the record: an id cut in a label
+    (stderr, a warning) and the scripts it shows by name only (stdout, one note)."""
+    for line in getattr(compiler, "record_warnings", []):
+        print(f"  warning: {line}", file=sys.stderr)
+    for line in getattr(compiler, "record_notices", []):
+        print(f"  note: {line}")
 
 
 def _print_deposit_files(compiler: ResearchCompiler) -> None:
@@ -1951,6 +2013,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
         print(f"render: deposited the record for Spec '{spec.id}' -> {record_path} "
               "(record only: nothing written under paper/)")
         _print_code_ref_warnings(compiler)
+        _print_record_notes(compiler)
         stale_draft = run_dir / "paper" / "draft.tex"
         if stale_draft.is_file():
             # Never deleted (an earlier render's output is the user's to keep or move), but
@@ -2315,17 +2378,23 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     # Publishing-requirements gate (F1, design §1.3): the umbrella that consumes F2 (font/DPI)
     # + F3 (reproduction bundle) + section/reference/word-count checks the frozen pubreqs.json
-    # declared. Absent pubreqs.json -> vacuously clean (no line). advisory/max_pages are
-    # surfaced but NEVER gated, so a clean run with a contract is reported OK.
+    # declared, and the checks that run with or without it (a conclusion-bearing draft with no
+    # contract, the bibliographies render wrote, the prior-work decision). Every failure is
+    # printed, with or without pubreqs.json: a run used to exit 1 here with no reason.
+    # advisory/max_pages are surfaced but NEVER gated, so a clean run with a contract is
+    # reported OK.
     pubreqs_path = run_dir / "pubreqs.json"
+    if not report.paper_requirements_clean:
+        _err_in_order(
+            "  publishing requirements FAILED (declared requirements not met):"
+            if pubreqs_path.is_file()
+            else "  publishing requirements FAILED (no pubreqs.json is frozen for this run):"
+        )
+        for problem in report.paper_requirements_problems:
+            _err_in_order(f"    - {problem}")
     if pubreqs_path.is_file():
         if report.paper_requirements_clean:
             print("  publishing requirements: OK (declared requirements met)")
-        else:
-            _err_in_order(
-                "  publishing requirements FAILED (declared requirements not met):")
-            for problem in report.paper_requirements_problems:
-                _err_in_order(f"    - {problem}")
         # ADVISORY surfacing (never gated): the contract's free-form advisory + max_pages.
         from sci_adk.core.pubreqs import PubReqs
 
@@ -2343,9 +2412,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                 print(f"  publishing advisory: {note} (advisory only -- not gated)")
         # SPEC-PAPER-GATE-001 OD-5/OD-6 (R1): per-run non-blocking advisories -- an
         # unpublished/DOI-less citation, or an undeclared section order deviating from default
-        # IMRaD. Surfaced here, NEVER gated (not in report.passed).
+        # IMRaD. Surfaced here, NEVER gated (not in report.passed). A recorded script that
+        # holds non-ASCII bytes is not about the paper: it keeps the plain prefix.
         for note in report.paper_advisory:
-            print(f"  publishing advisory: {note} (advisory only -- not gated)")
+            kind = "advisory" if note in report.script_advisory else "publishing advisory"
+            print(f"  {kind}: {note} (advisory only -- not gated)")
     else:
         # No contract: the per-run advisories (e.g. a found-nothing with no search log)
         # still reach the reader. Never gated.
@@ -2693,6 +2764,40 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+# @MX:NOTE: [AUTO] The exit code of a refusal, and only of a refusal: the kit hook blocks on it
+#   and lets every other non-zero code through with a warning (Python exits 1 on a crash).
+CHECK_ASCII_BLOCKED = 3
+
+
+def _cmd_check_ascii(args: argparse.Namespace) -> int:
+    """Judge one PreToolUse hook input for the English-only scripts rule.
+
+    The workspace hook ``ascii-script-gate.sh`` pipes Claude Code's hook input here and
+    maps the exit code: 3 -> block the call (exit 2, our stderr to the model); 0 -> let it
+    through (a stderr line is a warning that it went through unchecked). Anything else --
+    argparse's 2 from a sci-adk without this verb, Python's 1 from a crash -- the hook
+    treats as "could not check" and lets the call through with a warning: a block has a
+    code of its own so a failure can never read as one. The project's ``.claude/`` is the
+    one under ``CLAUDE_PROJECT_DIR`` (Claude Code sets it for hooks). Decided by
+    :func:`sci_adk.loop.ascii_scripts.check_hook_input`.
+    """
+    from sci_adk.loop.ascii_scripts import check_hook_input
+
+    stdin = sys.stdin
+    if stdin is None or stdin.isatty():
+        print("error: check-ascii reads a Claude Code PreToolUse hook input (JSON) on stdin; "
+              "it is run by the workspace hook .claude/hooks/sci-adk/ascii-script-gate.sh",
+              file=sys.stderr)
+        return 2
+    data = stdin.buffer.read() if hasattr(stdin, "buffer") else stdin.read().encode("utf-8")
+    decision = check_hook_input(
+        data.decode("utf-8", "replace"), project_dir=os.environ.get("CLAUDE_PROJECT_DIR")
+    )
+    if decision.message:
+        print(decision.message, file=sys.stderr)
+    return CHECK_ASCII_BLOCKED if decision.blocked else 0
+
+
 def _cmd_init_session(args: argparse.Namespace) -> int:
     """Install the research-workspace enforcement kit into a target dir (D3).
 
@@ -2943,6 +3048,8 @@ def main(argv=None) -> int:
         return _cmd_status(args)
     if args.command == "init-session":
         return _cmd_init_session(args)
+    if args.command == "check-ascii":
+        return _cmd_check_ascii(args)
     return 1
 
 

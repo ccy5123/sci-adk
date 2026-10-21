@@ -66,7 +66,8 @@ RUNS = os.path.join(WS, "runs")
 OUT = os.path.join(PKG, "06_provenance", "record.tex")
 NARRATIVE = os.path.join(PKG, "narrative.json")
 
-BASIS = re.compile(r"'point'=([-\d.eE]+)\s*(<=|>=|<|>|==)\s*([-\d.eE]+)")
+# ASCII digits only: without re.ASCII, \d also matches other scripts' digits.
+BASIS = re.compile(r"'point'=([-\d.eE]+)\s*(<=|>=|<|>|==)\s*([-\d.eE]+)", re.ASCII)
 SY = {"supported": "S", "refuted": "R", "contested": "C", "proposed": "P"}
 
 
@@ -94,37 +95,37 @@ _TEX_SPECIAL = {
 }
 # Curated Unicode -> LaTeX (sci_adk.render.paper._UNICODE_MAP).
 _UNICODE_MAP = {
-    '₀': '$_0$', '₁': '$_1$', '₂': '$_2$', '₃': '$_3$',
-    '₄': '$_4$', '₅': '$_5$', '₆': '$_6$', '₇': '$_7$',
-    '₈': '$_8$', '₉': '$_9$', '⁰': '$^0$', '¹': '$^1$',
-    '²': '$^2$', '³': '$^3$', '⁴': '$^4$', '⁵': '$^5$',
-    '⁶': '$^6$', '⁷': '$^7$', '⁸': '$^8$', '⁹': '$^9$',
-    '⁺': '$^+$', '⁻': '$^-$', 'ⁿ': '$^n$', '≥': r'$\geq$',
-    '≤': r'$\leq$', '≠': r'$\neq$', '±': r'$\pm$', '×': r'$\times$',
-    '÷': r'$\div$', '−': '$-$', '≈': r'$\approx$', '≡': r'$\equiv$',
-    '∝': r'$\propto$', '·': r'$\cdot$', '∙': r'$\cdot$', '∞': r'$\infty$',
-    '∑': r'$\sum$', '∏': r'$\prod$', '∫': r'$\int$', '√': r'$\surd$',
-    '∂': r'$\partial$', '∇': r'$\nabla$', '∈': r'$\in$', '∉': r'$\notin$',
-    '⊂': r'$\subset$', '⊆': r'$\subseteq$', '∪': r'$\cup$', '∩': r'$\cap$',
-    '→': r'$\rightarrow$', '←': r'$\leftarrow$', '↔': r'$\leftrightarrow$', '⇒': r'$\Rightarrow$',
-    '⇐': r'$\Leftarrow$', 'α': r'$\alpha$', 'β': r'$\beta$', 'γ': r'$\gamma$',
-    'δ': r'$\delta$', 'ε': r'$\epsilon$', 'ζ': r'$\zeta$', 'η': r'$\eta$',
-    'θ': r'$\theta$', 'ι': r'$\iota$', 'κ': r'$\kappa$', 'λ': r'$\lambda$',
-    'μ': r'$\mu$', 'ν': r'$\nu$', 'ξ': r'$\xi$', 'ο': 'o',
-    'π': r'$\pi$', 'ρ': r'$\rho$', 'σ': r'$\sigma$', 'ς': r'$\varsigma$',
-    'τ': r'$\tau$', 'υ': r'$\upsilon$', 'φ': r'$\phi$', 'χ': r'$\chi$',
-    'ψ': r'$\psi$', 'ω': r'$\omega$', 'Γ': r'$\Gamma$', 'Δ': r'$\Delta$',
-    'Θ': r'$\Theta$', 'Λ': r'$\Lambda$', 'Ξ': r'$\Xi$', 'Π': r'$\Pi$',
-    'Σ': r'$\Sigma$', 'Φ': r'$\Phi$', 'Ψ': r'$\Psi$', 'Ω': r'$\Omega$',
-    'µ': r'$\mu$', '°': r'\textdegree{}', '–': '--', '—': '---',
-    '‘': '`', '’': "'", '“': '``', '”': "''",
-    '…': r'\ldots{}',
+    '\u2080': '$_0$', '\u2081': '$_1$', '\u2082': '$_2$', '\u2083': '$_3$',
+    '\u2084': '$_4$', '\u2085': '$_5$', '\u2086': '$_6$', '\u2087': '$_7$',
+    '\u2088': '$_8$', '\u2089': '$_9$', '\u2070': '$^0$', '\u00b9': '$^1$',
+    '\u00b2': '$^2$', '\u00b3': '$^3$', '\u2074': '$^4$', '\u2075': '$^5$',
+    '\u2076': '$^6$', '\u2077': '$^7$', '\u2078': '$^8$', '\u2079': '$^9$',
+    '\u207a': '$^+$', '\u207b': '$^-$', '\u207f': '$^n$', '\u2265': r'$\geq$',
+    '\u2264': r'$\leq$', '\u2260': r'$\neq$', '\u00b1': r'$\pm$', '\u00d7': r'$\times$',
+    '\u00f7': r'$\div$', '\u2212': '$-$', '\u2248': r'$\approx$', '\u2261': r'$\equiv$',
+    '\u221d': r'$\propto$', '\u00b7': r'$\cdot$', '\u2219': r'$\cdot$', '\u221e': r'$\infty$',
+    '\u2211': r'$\sum$', '\u220f': r'$\prod$', '\u222b': r'$\int$', '\u221a': r'$\surd$',
+    '\u2202': r'$\partial$', '\u2207': r'$\nabla$', '\u2208': r'$\in$', '\u2209': r'$\notin$',
+    '\u2282': r'$\subset$', '\u2286': r'$\subseteq$', '\u222a': r'$\cup$', '\u2229': r'$\cap$',
+    '\u2192': r'$\rightarrow$', '\u2190': r'$\leftarrow$', '\u2194': r'$\leftrightarrow$', '\u21d2': r'$\Rightarrow$',
+    '\u21d0': r'$\Leftarrow$', '\u03b1': r'$\alpha$', '\u03b2': r'$\beta$', '\u03b3': r'$\gamma$',
+    '\u03b4': r'$\delta$', '\u03b5': r'$\epsilon$', '\u03b6': r'$\zeta$', '\u03b7': r'$\eta$',
+    '\u03b8': r'$\theta$', '\u03b9': r'$\iota$', '\u03ba': r'$\kappa$', '\u03bb': r'$\lambda$',
+    '\u03bc': r'$\mu$', '\u03bd': r'$\nu$', '\u03be': r'$\xi$', '\u03bf': 'o',
+    '\u03c0': r'$\pi$', '\u03c1': r'$\rho$', '\u03c3': r'$\sigma$', '\u03c2': r'$\varsigma$',
+    '\u03c4': r'$\tau$', '\u03c5': r'$\upsilon$', '\u03c6': r'$\phi$', '\u03c7': r'$\chi$',
+    '\u03c8': r'$\psi$', '\u03c9': r'$\omega$', '\u0393': r'$\Gamma$', '\u0394': r'$\Delta$',
+    '\u0398': r'$\Theta$', '\u039b': r'$\Lambda$', '\u039e': r'$\Xi$', '\u03a0': r'$\Pi$',
+    '\u03a3': r'$\Sigma$', '\u03a6': r'$\Phi$', '\u03a8': r'$\Psi$', '\u03a9': r'$\Omega$',
+    '\u00b5': r'$\mu$', '\u00b0': r'\textdegree{}', '\u2013': '--', '\u2014': '---',
+    '\u2018': '`', '\u2019': "'", '\u201c': '``', '\u201d': "''",
+    '\u2026': r'\ldots{}',
 }
 # Latin-1 Supplement + Latin Extended-A pass through inputenc, except the letters with no
 # glyph (sci_adk.render.paper._ACCENT_LO/_ACCENT_HI/_UNDEFINED_LATIN_A).
 _ACCENT_LO = 0x00C0
 _ACCENT_HI = 0x017E
-_UNDEFINED_LATIN_A = frozenset('ĦħĸĿŀŉŦŧ')
+_UNDEFINED_LATIN_A = frozenset('\u0126\u0127\u0138\u013f\u0140\u0149\u0166\u0167')
 _UNICODE_PLACEHOLDER = "?"
 # C0 controls other than tab and line feed, and DEL: pdflatex stops on each.
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -508,6 +509,55 @@ def declared_files_section(runs):
     return L
 
 
+# -- long lines: a copy of sci_adk.render.paper.break_long_lines --------------------------------
+# TeX reads a line into a buffer of 200000 characters; a line longer than TEX_LINE_LIMIT is
+# broken at white space (a line end is a space to TeX; in a comment the next line starts with
+# its own comment character), never inside a verbatim body. A test compares the copy.
+TEX_LINE_LIMIT = 10000
+_VERBATIM_BEGIN_RE = re.compile(r"\\begin\s*\{(lstlisting|verbatim\*?|Verbatim)\}")
+_UNESCAPED_PERCENT_RE = re.compile(r"(?<!\\)(?:\\\\)*%")
+
+
+def _comment_start(line):
+    m = _UNESCAPED_PERCENT_RE.search(line)
+    return m.end() - 1 if m else None
+
+
+def _break_line(line, limit):
+    comment = _comment_start(line)
+    out = []
+    start, prefix = 0, ""
+    while len(prefix) + len(line) - start > limit:
+        cut = next(
+            (p for p in range(start + limit - len(prefix), start, -1)
+             if line[p] == " " and line[p - 1] != "\\"),
+            None,
+        )
+        if cut is None:
+            break
+        out.append(prefix + line[start:cut])
+        prefix = "% " if comment is not None and cut > comment else ""
+        start = cut + 1
+    out.append(prefix + line[start:])
+    return "\n".join(out)
+
+
+def break_long_lines(tex_text, limit=TEX_LINE_LIMIT):
+    out = []
+    verbatim_end = None
+    for line in tex_text.split("\n"):
+        if verbatim_end is not None:
+            out.append(line)
+            if verbatim_end in line:
+                verbatim_end = None
+            continue
+        out.append(_break_line(line, limit) if len(line) > limit else line)
+        m = _VERBATIM_BEGIN_RE.search(line)
+        if m is not None and ("\\end{" + m.group(1) + "}") not in line[m.end():]:
+            verbatim_end = "\\end{" + m.group(1) + "}"
+    return "\n".join(out)
+
+
 def build():
     discovered = discover_runs()
     narrative = load_narrative()
@@ -533,7 +583,7 @@ def build():
     L = []
     L.append(r"\documentclass[10pt]{article}")
     # T1 + Latin Modern, as in every preamble sci-adk emits: in the default OT1 encoding
-    # letters such as Ð, þ, Ę and the guillemets stop pdflatex.
+    # letters such as the capital eth, the small thorn, the E with ogonek and the guillemets stop pdflatex.
     L.append(r"\usepackage[T1]{fontenc}")
     L.append(r"\usepackage{lmodern}")
     L.append(r"\usepackage[margin=1in]{geometry}")
@@ -595,7 +645,8 @@ def build():
         for hyp, st, pt, op, th in claim_blocks[rid]:
             opx = {"<=": r"$\leq$", ">=": r"$\geq$", "<": r"$<$", ">": r"$>$",
                    "==": r"$=$", "": ""}.get(op, tex(op))
-            L.append(f"{tex(hyp)} & {tex(pt)} & {opx} & {tex(th)} & "
+            # {} first: after \\ a row starting with [ or * is read as its option.
+            L.append(f"{{}}{tex(hyp)} & {tex(pt)} & {opx} & {tex(th)} & "
                      f"\\textbf{{{tex(SY.get(st, st))}}} \\\\")
     L.append(r"\bottomrule\end{longtable}")
 
@@ -632,7 +683,7 @@ def build():
 
     L.append(r"\end{document}")
 
-    text = "\n".join(L) + "\n"
+    text = break_long_lines("\n".join(L) + "\n")
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as fh:
         fh.write(text)

@@ -26,6 +26,14 @@ experiments -> append-only Evidence -> sci-adk surfaces checkpoints/halts ->
 author verdicts in-session -> `sci-adk resolve` -> `sci-adk verify` (the gate).
 Record prior-work / novelty / contested decisions at their trigger moments.
 
+**Scripts are ASCII-only.** Every script you write here (`.py`, `.R`, `.jl`, `.m`, `.sh`,
+`.do`, `.sql`, ...) is ASCII: comments, docstrings, messages and names in English. Write a
+character the data needs (a column name, a unit sign) as an escape, so the file stays ASCII
+and behaves the same: Python or R `"\u00b5"`, shell `printf '\302\265'`. The record
+(`record.tex`) typesets each recorded script with pdflatex, which cannot show other
+characters. A PreToolUse hook blocks a write that breaks this rule, and `sci-adk
+append-evidence` refuses to record such a script. Lean proofs (`.lean`) are exempt.
+
 **Emergent questions mid-research.** Work like a researcher: when a genuine NEW
 question surfaces DURING the run — "wait, has anyone already measured / proven /
 refuted this?" — do not let it pass silently. Search it (your `web_search` / the
@@ -100,6 +108,9 @@ Enforcement lives in the harness, not in memory (a prompt decays; a hook does no
   with a warning naming the run, for the session that owns the paper to fix.
 - A **UserPromptSubmit hook** (`.claude/hooks/sci-adk/reanchor.sh`) re-injects
   this protocol + the current run's `sci-adk status` every turn.
+- A **PreToolUse hook** (`.claude/hooks/sci-adk/ascii-script-gate.sh`) blocks a Write,
+  Edit, MultiEdit or NotebookEdit that puts a non-ASCII character into a script, naming
+  the file, the line, the character and how to write it as an escape.
 - The **`science-orchestrator` output style**
   (`.claude/output-styles/science-orchestrator/`) is the always-on persona.
 - The **`/sci` command** (`.claude/skills/sci/`) is the single entry point — it
@@ -107,8 +118,8 @@ Enforcement lives in the harness, not in memory (a prompt decays; a hook does no
   `replicate` (or a natural-language intent) to the research workers and gates every
   conclusion through `sci-adk verify`. Prefer it over ad-hoc freeform work.
 
-Both hooks degrade to no-op if `sci-adk` is not on PATH (a missing tool never
-bricks a session).
+The hooks degrade to no-op if `sci-adk` is not on PATH (a missing tool never
+bricks a session; the PreToolUse hook then lets the call through with a warning).
 
 ## Two environments [HARD]
 

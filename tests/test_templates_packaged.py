@@ -69,6 +69,7 @@ _KIT_FILES = (
 _HOOK_SCRIPTS = (
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
+    ".claude/hooks/sci-adk/ascii-script-gate.sh",
 )
 
 
@@ -101,9 +102,9 @@ def test_packaged_hooks_carry_the_executable_bit():
         assert mode & 0o111, f"packaged hook is not executable at all: {rel}"
 
 
-def test_settings_json_wires_the_two_hook_events():
+def test_settings_json_wires_the_three_hook_events():
     # a smoke check that the packaged settings fragment is the real one (not an
-    # empty placeholder): it must name both hook events.
+    # empty placeholder): it must name all three hook events.
     import json
 
     settings = json.loads(
@@ -112,3 +113,4 @@ def test_settings_json_wires_the_two_hook_events():
     hooks = settings.get("hooks", {})
     assert "Stop" in hooks
     assert "UserPromptSubmit" in hooks
+    assert "PreToolUse" in hooks

@@ -45,6 +45,7 @@ import csv
 import importlib.resources
 import json
 import math
+import re
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -70,11 +71,23 @@ from sci_adk.render.deposit import (
     package_rows,
     plan_run_deposit,
 )
-from sci_adk.render.paper import TIMES_FONT_LINES, _latex_sanitize, _one_line
+from sci_adk.render.bib_latex import paper_bib
+from sci_adk.render.latex_lint import lint_advisories
+from sci_adk.render.paper import (
+    TIMES_FONT_LINES,
+    _latex_sanitize,
+    _one_line,
+    break_long_lines,
+)
 # The 6 canonical package folders are defined in the pure gate module (kernel-side, no
 # verify_run dependency) so importing it here does not re-introduce a circular import; the
 # assembler and the gate share that one source of truth.
-from sci_adk.render.pkgreqs_checks import PACKAGE_FOLDERS, bib_subset, cited_keys
+from sci_adk.render.pkgreqs_checks import (
+    PACKAGE_FOLDERS,
+    SI_BIB_CUT_LINE,
+    bib_subset,
+    cited_keys,
+)
 
 # The builders shipped under templates/research-workspace/package/04_scripts/. The assembler
 # copies them into the package's 04_scripts/ (so the package is self-regenerating) AND runs
@@ -253,16 +266,23 @@ def assemble_package(
 
     # (5) Merged manuscript: preserve an author-supplied main.tex/references.bib, else emit a
     # deterministic record-derived skeleton (tool-agnostic, names the science).
-    main_tex_authored, si_tex_authored = _ensure_manuscript(
+    main_tex_authored, si_tex_authored, si_bib_cut = _ensure_manuscript(
         workspace_dir, manuscript_dir, runs, pkgreqs
     )
+    # An author's main.tex / si.tex is copied as is: LaTeX outside sci-adk's execution and
+    # compile guarantee. A command in it that reads or writes a file or runs code is named.
+    for name, authored in ((_MAIN_TEX, main_tex_authored), (_SI_TEX, si_tex_authored)):
+        if authored:
+            notes.extend(lint_advisories(
+                (manuscript_dir / name).read_text(encoding="utf-8", errors="replace"), name
+            ))
     _write_verify_logs(workspace_dir, package_dir, runs)
     _write_inputs_readme(package_dir, deposits)
 
     # (6) The two index documents. The MANIFEST is written LAST among the folder-populating
     # steps so its inventory is complete + stable (every 05_inputs/06_provenance file already
     # exists); README.md is a ROOT file the inventory excludes, so its order does not matter.
-    _write_manifest(package_dir, runs)
+    _write_manifest(package_dir, runs, si_bib_cut)
     _write_readme(package_dir, runs, pkgreqs, main_tex_authored)
 
     return PackageAssembly(
@@ -668,7 +688,7 @@ def _ensure_manuscript(
     manuscript_dir: Path,
     runs: List[str],
     pkgreqs: Optional[PackageReqs],
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, bool]:
     """Preserve author-supplied ``main.tex``/``si.tex``, else emit deterministic skeletons.
 
     Source of an author manuscript: ``<ws>/package_src/{main.tex,si.tex,references.bib}`` (the
@@ -683,7 +703,9 @@ def _ensure_manuscript(
     copied from the author source if present, else a minimal empty bib is written so the
     manuscript's ``\\bibliography{references}`` resolves.
 
-    Returns ``(main_tex_authored, si_tex_authored)``.
+    Returns ``(main_tex_authored, si_tex_authored, si_bib_cut)`` -- the last True when this
+    assembly cut ``references_SI.bib`` from ``references.bib`` (MANIFEST.md then says so, and
+    verify holds that file, which sci-adk wrote, to the canonical form).
     """
     author_src = workspace_dir / "package_src"
     author_main = author_src / _MAIN_TEX
@@ -730,16 +752,20 @@ def _ensure_manuscript(
     #       keys CITED in the resulting package si.tex (author-supplied or generated
     #       skeleton). A citation-free si.tex (the default skeleton, D7) -> NO file
     #       (REQ-SA-610). The subset is a PURE set op over the pool -- no LLM/network.
+    si_bib_cut = False
     if author_si_bib.is_file():
         shutil.copyfile(author_si_bib, si_bib_dest)
     else:
         si_keys = cited_keys(si_dest.read_text(encoding="utf-8"))
         if si_keys and bib_dest.is_file():
-            subset = bib_subset(bib_dest.read_text(encoding="utf-8"), si_keys)
+            # Cut from the canonical copy (a file sci-adk writes is canonical; verify checks
+            # it), so a parenthesised entry, '@ article' or a macro is handled by construction.
+            subset = bib_subset(paper_bib(bib_dest.read_text(encoding="utf-8")), si_keys)
             if subset:
                 si_bib_dest.write_text(subset, encoding="utf-8")
+                si_bib_cut = True
 
-    return main_authored, si_authored
+    return main_authored, si_authored, si_bib_cut
 
 
 def _skeleton_si_tex() -> str:
@@ -844,7 +870,7 @@ def _skeleton_main_tex(
     lines.append(r"\bibliographystyle{" + ref_style + r"}")
     lines.append(r"\bibliography{references}")
     lines.append(r"\end{document}")
-    return "\n".join(lines) + "\n"
+    return break_long_lines("\n".join(lines) + "\n")
 
 
 # A recorded comparison operator -> a neutral English phrase, so the merged manuscript renders
@@ -949,18 +975,23 @@ def _results_sentence(row: Dict[str, str]) -> str:
     return sentence
 
 
+# A number as the manuscript may print it raw: ASCII digits, an optional sign, point and
+# exponent. float() also takes Unicode digits ("\uff11\uff12" is 12.0) and underscores
+# ("1_000"), which would be written into the .tex as they are.
+_ASCII_NUMBER_RE = re.compile(
+    r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", re.ASCII
+)
+
+
 def _csv_number(cell: Optional[str]) -> Optional[str]:
-    """The cell's text iff it parses as a finite number (emittable as an audited literal), else
-    None. The emitted text is the recorded cell VERBATIM -- the audit re-parses it to the same
-    float the pool holds, so the literal is record-backed by construction."""
+    """The cell's text iff it is a finite number written in ASCII (:data:`_ASCII_NUMBER_RE`;
+    emittable as an audited literal), else None. The emitted text is the recorded cell
+    VERBATIM -- the audit re-parses it to the same float the pool holds, so the literal is
+    record-backed by construction."""
     text = (cell or "").strip()
-    if not text:
+    if _ASCII_NUMBER_RE.fullmatch(text) is None:
         return None
-    try:
-        value = float(text)
-    except ValueError:
-        return None
-    return text if math.isfinite(value) else None
+    return text if math.isfinite(float(text)) else None
 
 
 def _load_spec(run_dir: Path) -> Spec:
@@ -1011,8 +1042,10 @@ def _write_verify_logs(workspace_dir: Path, package_dir: Path, runs: List[str]) 
 
 # -- (6) MANIFEST + README ---------------------------------------------------
 
-def _write_manifest(package_dir: Path, runs: List[str]) -> None:
-    """Write ``MANIFEST.md`` -- the file inventory of the assembled package (deterministic)."""
+def _write_manifest(package_dir: Path, runs: List[str], si_bib_cut: bool = False) -> None:
+    """Write ``MANIFEST.md`` -- the file inventory of the assembled package (deterministic).
+    When this assembly cut ``01_manuscript/references_SI.bib`` (``si_bib_cut``), its line says so
+    (``pkgreqs_checks.SI_BIB_CUT_LINE``), which is how verify tells it from one an author wrote."""
     lines: List[str] = []
     lines.append("# MANIFEST -- near-submission package")
     lines.append("")
@@ -1038,7 +1071,10 @@ def _write_manifest(package_dir: Path, runs: List[str]) -> None:
                 "assembly; a file put there by hand is removed."
             )
         for rel in files:
-            lines.append(f"- `{rel}`")
+            if si_bib_cut and rel == "01_manuscript/references_SI.bib":
+                lines.append(SI_BIB_CUT_LINE)
+            else:
+                lines.append(f"- `{rel}`")
         lines.append("")
     lines.append("## Root")
     lines.append("- `README.md` -- overview, reproduction, submission-readiness self-assessment.")

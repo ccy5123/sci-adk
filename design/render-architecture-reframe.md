@@ -216,10 +216,10 @@ A second hostile pass found the same class in four more places (pinned in
 - **The bib copy.** It kept a compatibility fold's ASCII raw, so a fullwidth
   `\input{<file>}` in a bib title was read from the `.bbl`. The fold is now written as text
   (braces as `\textbraceleft{}`/`\textbraceright{}`, boxed in math) and ASCII control
-  characters are dropped. Commands are still copied as acquired, but verify names every
-  control word outside `bib_latex.SAFE_COMMANDS` (accents, letters, markup, symbols, common
-  math) and `^^` in math (TeX's character-code notation), which the copy writes as two
-  printed carets.
+  characters are dropped. [Superseded by §4h: the copy no longer keeps commands as acquired,
+  and verify judges it against the allow-list there. As written on 2026-10-12: commands were
+  copied as acquired, and verify named every control word outside a closed list of known
+  ones and `^^` in math, which the copy writes as two printed carets.]
 - **Macro arguments on one line.** A blank line in a claim statement stopped the record's
   `\subsection{}`; every free text or id the renderers put in a macro argument (record
   `\item[...]`, `\texttt{}`, table cells, figure captions and axis labels) is now one line.
@@ -245,15 +245,12 @@ builds included):
   without spaces, braces, backslash, `%`, `#` or `^`) is cited now; any other is left out and
   named in a render warning with where it was recorded. Leaving it out, rather than printing
   it as text, keeps a value that cannot resolve at doi.org out of the reference list.
-- **Bib commands: a deny-list.** Verify failed every command outside a closed list of known
-  ones, which refused harmless publisher commands (`\texttimes`, `\MakeUppercase`,
-  `\hspace`). It now fails only a command that can read or write a file, define a macro,
-  change how TeX reads its input, run code later, stop the run or reach the engine
-  (`bib_latex.DANGEROUS_COMMANDS`), and `^^` notation in text or math; any other unknown
-  command is advisory. The check runs on every bibliography render writes (`paper/`,
-  `references_SI.bib`, `paper/deposit/`) with or without `pubreqs.json`, and render names a
-  dangerous command in the bibliography it writes. Measured: 0 failures and 0 advisories over
-  the 131 bibliographies under `~/research`, raw and copied.
+- **Bib commands: a deny-list.** [Superseded by §4h: the deny-list could not be closed and
+  is gone from the bibliography gate.] As written on 2026-10-12: verify failed only a command
+  that can read or write a file, define a macro, change how TeX reads its input, run code
+  later, stop the run or reach the engine, and `^^` notation; any other unknown command was
+  advisory. What still holds: the check runs on every bibliography render writes
+  (`paper/`, `references_SI.bib`, `paper/deposit/`) with or without `pubreqs.json`.
 - **Entities in bib math.** An HTML entity decoded inside `$...$` became a text command
   (`&#92;` gave `\textbackslash{}`), which stops pdflatex in math; the decoded character is
   now boxed (`\mbox{\textbackslash{}}`), except `<` and `>`, which stay relations.
@@ -291,10 +288,10 @@ builds included):
   next `@`), and the checks scan every entry, `@string` and `@preamble` it returns. A
   `@preamble` fails, and render's copy leaves every one out. A `url` or `doi` value, a macro
   one names and the URL argument of `\url`/`\href` fail on a backslash, `^^`, a brace or a
-  `run:`/`file:` link: hyperref reads a URL as TeX. `\bibitem` is on the deny-list; `\hbox`
-  and `\upmu` are unknown commands (advisory); a math command in running text is advisory; an
-  accented letter in bib math is written as boxed accent commands. Measured: 0 failures and 0
-  advisories over the 131 bibliographies under `~/research`, raw and copied.
+  `run:`/`file:` link: hyperref reads a URL as TeX. An accented letter in bib math is written
+  as boxed accent commands. [Superseded by §4h: `\bibitem` on a deny-list, `\hbox` and
+  `\upmu` as advisory unknown commands, and a math command in running text as an advisory;
+  the reading of a `.bib` as BibTeX reads it still holds, and the copy is now built from it.]
 - **Reproduction listings.** A script is typeset only when its body is printable ASCII, tabs
   and line feeds with no line over 2000 columns (a UTF-8 comment, a control character or a
   3000-column line stopped the record); any other is shipped and named.
@@ -306,6 +303,250 @@ builds included):
 - **Bibliography not UTF-8.** Render exited 2 after writing the paper; the store is copied as
   before and render says it is not UTF-8. The authored SI body names in a render warning each
   character pdflatex cannot typeset there.
+
+## 4h. The bibliography is a canonical copy holding allow-listed commands (2026-10-20)
+
+This section replaces the bibliography parts of §4e, §4f and §4g. Pinned in
+`tests/test_bib_allowlist.py` and `tests/test_render_round5.py` (pdflatex and bibtex builds
+included).
+
+Independent checkers showed that a list of forbidden commands over the bibliography copy could
+not be closed: a command split across BibTeX `#` parts or `@string` macros was never seen by a
+scan of the parts but BibTeX joins it; BibTeX's `change.case$` lowercases a title at brace level
+0, so `\INPUT{...}` reached the reference list as `\input`; expl3, `\expandableinput`, pdfTeX
+link actions, hyperref form fields and `\typein` were not on the list; `\(`, `\[` and commands
+the figure-less preamble does not define (`\mathbb`, `\text`, `\operatorname` ...) stopped
+pdflatex while verify was silent; a name holding `[` broke natbib's author-year label.
+
+The design: render and verify judge the same text.
+
+- **Render writes a canonical copy.** `bib_latex.paper_bib` reads the store as BibTeX reads it
+  (`bib_commands`: braces or parentheses, `@string` macros with the predefined `jan`..`dec`,
+  `#` parts joined, macros expanded in file order, `@preamble` and `@comment` dropped, after a
+  syntax error the next `@` BibTeX would read) and writes every entry as
+  `@type{key, field = {value}, ...}`: one braced value per field, no `@string`, `@preamble`
+  or `@comment`, nothing between entries. Fields no style prints, the ISSN, and a url that is
+  the entry's own doi.org link are left out; a bare month macro stays a macro. So `abstract`,
+  `keywords`, `copyright` and the other `UNPRINTED_FIELDS` are left out of every shipped copy
+  (the literature store keeps them; the bibliographies under `~/research` hold 25 `keywords`
+  and 24 `copyright` fields, which the verbatim copies of earlier renders carried).
+- **A value holds only allow-listed commands.** Each value is read as TeX tokens. The
+  commands kept (`bib_latex.TEXT_COMMANDS`, `MATH_COMMANDS`) are accents and letters, the
+  escaped specials, the text symbols publisher metadata carries, simple markup and font
+  declarations, `\url`/`\href` with a plain URL, and a math set defined without amsmath. A
+  test compiles each of them under the four preambles render emits (draft and record, Latin
+  Modern without figures and Times with them). Every other control word or symbol is printed
+  as text (`{\textbackslash}name`, boxed in math); balanced `\( ... \)` and `\[ ... \]` become
+  `$ ... $`, unbalanced ones are printed; `^^` never survives. Each kept command and its
+  arguments sit in one brace group, which BibTeX treats as one special character, so its case
+  change cannot alter the command; math is written `{$...$}`. A math command in running text
+  is put in math; a text command in math in an `\mbox`. `[` and `]` at brace level 0 are
+  braced. Titles keep their case and names are tidied as before.
+- **url, doi, keys.** A url is kept only when it is http, https or ftp with printable ASCII and
+  no white space, backslash, brace, `%`, `#` or `^`; a doi only in the DOI form (a doi.org
+  prefix is dropped). Any other is left out and named in a render warning with the entry key,
+  and so is an entry whose key a citation cannot name and a repeated key (BibTeX keeps the
+  first). The SI subset and the package's SI cut are taken from the canonical copy.
+- **Verify.** Every bibliography sci-adk ships (`paper/references.bib`, `references_SI.bib`,
+  the `paper/deposit/` copy, the package SI cut) fails unless it is the canonical copy itself
+  (`paper_bib(text) == text`) and holds only allow-listed commands; each line names the entry
+  key and what differs. A package bibliography the author supplied gets the allow-list check
+  (judged on its values as BibTeX prints them, macros expanded), and there a math command in
+  running text or a text command in math fails too (the copy moves them; the author's file
+  would stop pdflatex). There are no bib advisories for unknown commands any more: what is not
+  on the list fails. A superscript or subscript the copy rewrites so that it compiles fails it
+  too (`bib script:`, §4k), so the author's bibliography gets the same compile rules as the copy
+  for what the writer judges, not only the command allow-list.
+- **Measured** (2026-10-21, after §4i and §4j) over the 136 bibliographies under `~/research`
+  (985 entries): the copy keeps every key, is idempotent and passes the form and command
+  checks. Render gives 12 warnings: 10 names in one entry that end with a comma (BibTeX stops on
+  them; the copy writes them without it, §4i), one entry holding U+FFFD (kept, and named by
+  verify) and one entry with a BibTeX syntax error (none of its fields kept). No url, doi or
+  entry is left out and no command is printed as text. Two copies differ from the ones the
+  §4i code wrote, each by a braced parenthesis in a name (`European Food Safety Authority
+  {(}EFSA{)}`, `Li, Ang {(}Leo{)}`, §4j).
+
+**Author-written LaTeX is outside the guarantee.** The guarantee above covers the text sci-adk
+writes from the record and from external metadata. The body of an authored SI section and a
+package `main.tex` / `si.tex` the author supplies are written as the author wrote them; sci-adk
+does not judge what that LaTeX does. A lint (`render/latex_lint.py`) names the commands in it
+that read or write files or run code (`\input`, `\include`, `\InputIfFileExists`,
+`\expandableinput`, `\scantokens`, `\write`, `\immediate`, `\openout`, `\openin`, `\read`,
+`\ExplSyntaxOn` and expl3-shaped names, `\directlua`, pdfTeX primitives, hyperref form and
+action commands, `\typein`, `\special`) in a render warning and a verify advisory. It never
+fails a run.
+
+Other defects closed in the same pass: `sci-adk verify` prints why a run without `pubreqs.json`
+fails; a CSV cell is written raw as a number only in ASCII; a claims-table row starts with `{}`
+so `\\` cannot read a `[` as its option; a record label cuts an id over 200 characters (shown
+whole, breakable, in the item, and named in a warning); an image must be the format its
+extension names; a .tex line over 10000 characters is broken at white space; a script the
+record cannot typeset is one line naming why, its `paper/code/` path and its SHA-256, and render
+says once which scripts it showed by name only.
+
+## 4i. What BibTeX and pdflatex do with the remaining edge cases (2026-10-21)
+
+Pinned in `tests/test_bib_round6.py` (bibtex and pdflatex builds included). Independent checkers
+found places where the copy or its checks still parted from BibTeX or pdflatex. Each is closed
+as follows; every change is a render warning naming the entry key.
+
+- **The reader after an error.** BibTeX stores a `@string` macro's name as its text before it
+  reads the value, so a definition that fails defines the macro as its own name, in lower case.
+  It reads nothing after the key of an entry that repeats an earlier key (ASCII case ignored)
+  and looks for the next `@` from there. `bib_commands` reads both the same way. A test runs
+  BibTeX, with a style that writes every field of every entry, over 260 mutated bibliographies
+  and checks that every value BibTeX prints is one the reader reads. An author's package
+  bibliography with a syntax error, a repeated key or a macro no `@string` defines fails verify
+  (`bib syntax:` lines): what BibTeX prints after an error depends on how it recovers.
+- **Limits.** Braces nested more than 50 deep give an empty value (TeX has 255 grouping levels;
+  254 stopped pdflatex). Text accents nest at most 3 deep and deeper ones are printed as text
+  (each level doubled pdflatex's time; 22 levels took 17 s). A run of more than 10000 characters
+  without a space gets one (TeX reads lines of at most 200000 characters, and BibTeX breaks a
+  line only at a space). A value written longer than 100000 characters is cut (BibTeX's string
+  pool holds 200000). A url longer than 4000 characters is not kept.
+- **Math.** Every script argument is braced, and a second script of one kind on one base gets an
+  empty base (`x^2^3`, `x^\hat{y}` and `x^\int` stopped pdflatex). Empty math is left out (`$$`
+  opens display math). A character outside ASCII in math is written in its math form, as boxed
+  accent commands, or boxed. ~~`\not` always gets an argument (newtxmath defines it with
+  one).~~ (Superseded by §4j: `\not` is kept only before one plain symbol.) A test compiles every
+  allow-listed command as `x^NAME`, `x_NAME` and `x^NAME^2` under both typefaces.
+- **natbib's label.** A year is written as plain text, at most 40 characters (a command, math or
+  a group there stopped natbib with "Improper alphabetic constant"). A name with more than two
+  commas, or ending in a comma, is braced as one name (BibTeX: "Too many commas in name"). A last
+  name longer than 100 characters is shortened (the label is one BibTeX entry string, 250
+  characters by BibTeX's default; past it the label lost its year and natbib stopped).
+- **Types, cross references, keys.** An entry type other than the 14 BibTeX ones is written
+  `misc`, as a style prints it (`@output` and `@and` are function names in plainnat, and BibTeX
+  stopped). A crossref to an entry the copy lacks is left out; an SI subset keeps the entries
+  its entries cross-reference. A key may hold the Latin letters pdflatex typesets
+  (`Müller2019`; `\citep` reads it under both preambles), after its first character (§4k).
+- **Fixed point.** The copy writes each value again until that changes nothing, so a file render
+  wrote is one verify accepts (the checkers had found one random value in ten that changed when
+  copied again). A test copies 2500 values built from TeX fragments twice.
+- **Characters with no LaTeX form** are kept, so a reference never silently loses a letter;
+  render names each and verify fails it, with or without a publishing contract. A line or
+  paragraph separator becomes a space.
+- **Package SI bibliography.** verify holds `01_manuscript/references_SI.bib` to the canonical
+  form only when the assembler cut it (its MANIFEST.md line says so); one written in place, or
+  supplied in `package_src/`, gets the allow-list check. Its form line says to re-assemble the
+  package or to supply the file in `package_src/`. A per-run copy's form line names the full
+  re-render, with the `--prose`, `--si`, `--si-prose` and `--figures` inputs of the last render
+  (the deposit declaration is kept; a bare `sci-adk render` writes a skeleton draft).
+- **An author's bibliography** is checked for commands in every field, not only in those plainnat
+  prints (the author's style may print `annote`).
+- **Lost fields.** An entry a syntax error cut short is named, with how many fields were kept.
+
+## 4j. Labels, `\not`, scripts, accents and an author's case change (2026-10-21)
+
+Pinned in `tests/test_bib_round7.py` (bibtex and pdflatex builds, every key cited by `\citep`
+and `\citet`, under the four preambles of §4h). Independent checkers found six more inputs on
+which the copy, its own fixed point, stopped pdflatex in the draft, the SI and the record while
+render and verify said nothing. Each is closed as follows.
+
+- **natbib's label.** plainnat writes `\bibitem[<label>(<year>)]` and natbib reads it back up to
+  the first `(` at brace level 0 as the names. A `(` there followed by a command, a group or a
+  letter outside ASCII stopped it ("Improper alphabetic constant"), so the copy braces `(` and
+  `)` at brace level 0 of an author, editor or key field, as it braces `[` and `]`.
+- **Three-character labels.** An authorless `@manual` or `@proceedings` is labelled by the first
+  three characters of its organization (`"The "` dropped), and an entry with no author, editor,
+  key or organization by the first three bytes of its citation key. Those cut `AT\&T` to `AT\`,
+  `$\alpha$` to `$\a`, a letter outside ASCII in two, or hold a `_`, and pdflatex stopped. Where
+  they would, the copy writes a `key` field: the first three letters, digits and spaces of the
+  organization, or the key's first three characters as text (`a\_b`). natbib then cites the
+  entry by that key without a year, as plainnat cites any entry that has a key; an entry whose
+  three characters are plain keeps plainnat's label and year. An entry with a crossref is judged
+  with what it inherits. A key field is at most 100 characters (BibTeX cut a longer label,
+  braces and all).
+- **`\not`.** newtxmath's `\not` reads one plain symbol; before anything else (a box, a command
+  with arguments, an empty group, nothing) it looped ("TeX capacity exceeded"). The copy keeps
+  `\not` only before one ASCII letter, digit or `=<>|+-:/()[]!`, or one `zero` math command, and
+  writes it `\not{X}`; any other is printed as text. A test compiles `\not` before every `zero`
+  command under both typefaces.
+- **Scripts.** A math font declaration (`\rm \it \bf \sf \tt`) is an assignment, not an atom, and
+  so is a token the copy drops: a script after one still belongs to the atom before it, and the
+  copy gives a second script of one kind an empty base there too (`x^2\rm{}^3`).
+- **Accents.** LaTeX's T1 accents read their argument's first item inside `\csname`: an empty
+  group there stopped pdflatex ("Missing \endcsname inserted"), and so did a group holding a
+  command after its first token. The copy drops the braces around the whole argument when that
+  gives one that compiles (`\~{{}}` -> `\~{}`, `\"{{\foo}}` -> `\"{{\textbackslash}foo}`) and
+  otherwise prints the accent as text. Both count as a fix an author's bibliography fails on.
+- **An author's bibliography.** It is not rewritten, so verify fails what BibTeX or natbib stop
+  on though every command in it is allowed (`pkgreqs_checks.bib_label_problems`): the label
+  shapes above, a bracket in the names or key a label holds, a year that is not plain text
+  (`bib label:`); a command with a capital letter, or a capital in math, at brace level 0 of a
+  title, edition or type, the fields the TeX Live styles change the case of (BibTeX writes
+  `\LaTeX` as the undefined `\latex`, `$\Delta$` as `$\delta$`: `bib case:`, fixed by braces); a
+  key a citation cannot name and a type named like a function of the standard styles
+  (`@output`: `bib entry:`). A value longer than BibTeX holds fails too.
+- **Time.** A chain of `@string` macros each doubling the last is joined to at most 200000
+  characters (27 doublings would be 2^29 characters; an entry field cut there is noted), and
+  markup tags are paired in one pass (200000 unclosed `<i>` took minutes).
+- **verify's form line** names the re-render once per file, not on every entry line.
+- **The reader.** On the file's last line BibTeX reads only the first command (a `@string` and
+  an entry there gave no entry) and drops what follows a syntax error; the reader reads all of
+  it, so it reads more than BibTeX there, never less. A test diffs the two both ways for files
+  with no syntax error and a last line without a command.
+
+Left open: more than 26 cited entries sharing one label make plainnat's year letters run past
+`z` (`{`, `|`, `}`) and natbib stops; in the bibliographies under `~/research` at most 3
+entries of one file share a label. (Closed in §4k: a warning and a verify line, no rewrite.)
+
+## 4k. Links, nesting, keys, script errors and file size (2026-10-21)
+
+Pinned in `tests/test_bib_round8.py` (pdflatex and bibtex builds under both typefaces, every key
+cited, build times bounded). Independent checkers found inputs that stop pdflatex or BibTeX, or
+keep pdflatex busy for minutes, while render exits 0 and verify says nothing. Measured with TeX
+Live 2026 under both preambles render emits.
+
+- **Links.** hyperref keeps at most 10 links open: 11 nested `\href`, or 10 and a `\url` inside,
+  in a title, note or howpublished stopped pdflatex ("TeX capacity exceeded, sorry [pdf link
+  stack size=10]"). The copy never keeps a link command (`\href`, `\url`) inside another; the
+  inner one is printed as text, with a render warning. An author's bibliography fails on it.
+- **Nesting and count.** A `\sqrt` with an index and the arrow accents (`\overrightarrow`,
+  `\overleftarrow`) typeset their argument four times (`\mathpalette`), so pdflatex's time grows
+  fourfold with each level: `\sqrt[3]` 12 deep took over 120 s a pass, `\overrightarrow` 10 deep
+  39 s, 49 deep ran out of grouping levels; 4700 arrow accents in one reference took 24 s a pass
+  (1000 took 0.6 s); `\textsuperscript` about 37 deep made the type so small that pdflatex
+  stopped ("Improper `at' size"). Other math commands with arguments, 2000 in a paragraph, took
+  under 0.4 s. The copy keeps math commands with arguments at most 4 deep in all, never an arrow
+  accent inside an arrow accent and never a `\sqrt` with an index inside a `\sqrt`; text markup
+  at most 8 deep; and at most 32 math commands with arguments in one value (counted in reading
+  order before the walk, so the count does not depend on what is written first). Past a limit
+  the command is printed as text and what follows it is written as it stands; each is a render
+  warning, and an author's bibliography fails. The values under `~/research` hold no math
+  command with arguments.
+- **Keys.** A `\cite` whose first key starts with a character outside ASCII stopped pdflatex
+  under both preambles ("Missing \endcsname inserted"; the cedilla and ogonek letters "Illegal
+  parameter number"); the same key after a comma, and a letter outside ASCII later in a key,
+  compiled. A key of 100000 characters overflowed TeX's buffer; 1000 compiled. The copy leaves
+  out an entry whose key starts with a character outside ASCII (the warning suggests an ASCII
+  key, `Önal2019` -> `Onal2019`) or is longer than 200 characters. Every first character the
+  copy keeps is cited by `\citep`, `\citet`, `\cite` and `\citeauthor` in a test.
+- **Names.** BibTeX reads `-` and `~` as separators inside a name, so `Doe, -`, `Doe,--` and
+  `Doe, J, ~` end in an empty part ("has a comma at the end", exit 2). The copy writes the name
+  without that tail.
+- **Labels.** plainnat tells entries with one label (the first author's last name, or two, or
+  "et al.", and the year) apart by a letter after the year; the 27th gets `{` and natbib stops
+  ("Paragraph ended before \@lbibitem was complete"); 26 compile. More than 26 entries with one
+  label are a render warning; verify fails when the manuscript that loads the bibliography cites
+  more than 26 of them and gives an advisory when it cites fewer. The copy is not rewritten:
+  which of the entries a paper needs is the author's call.
+- **Scripts.** The copy braces every script argument and gives a second script of one kind on a
+  base an empty base. Now that is a signal too (`bib_latex.script_issues`): an author's
+  bibliography fails with a `bib script:` line on each place the copy rewrites -- a second script
+  (`x^2^3`, `x_1_2`, `x^{2}^{3}`, `x^2'`, `x' '`), a script with nothing to take (`x^$`), and an
+  argument pdflatex takes only in braces: a math command measured to stop pdflatex unbraced
+  after `^` or `_` in either preamble (`bib_latex._SCRIPT_UNSAFE`: `\hat`, `\sqrt`, `\cdots`,
+  `\log`, `\rm` ...; a test compiles every other math command unbraced), `\, \; \: \!`, `~`,
+  `'` and a letter outside ASCII. `x'^2`, `x''` and `x^\alpha` compile and pass; the copy no
+  longer gives `x'^2` an empty base (TeX joins a prime and the superscript after it), and gives
+  one to a prime after a space (`x' '` and `x' ^2` were double superscripts).
+- **File size.** The checks read a file once (the reading of the last few files is remembered)
+  and count lines as they go; before, each check read it again and counted lines from the start
+  for each entry, so 100000 `@string` macros did not finish in 120 s, 50000 repeated keys took
+  51 s and a 3 MB copy 31 s. They read at most 5000 commands of a file (entries, `@string`,
+  `@preamble`); a file with more fails with a `bib size:` line and its first 5000 are checked
+  (the form check is left out then). A paper's bibliography holds far fewer.
 
 ## 5. Defect → resolution map
 

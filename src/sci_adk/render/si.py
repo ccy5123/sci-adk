@@ -60,6 +60,7 @@ from sci_adk.render.paper import (
     _one_line,
     _result_summary,
     _status_str,
+    break_long_lines,
     text_font_lines,
 )
 from sci_adk.render.prose import SIProse
@@ -90,6 +91,53 @@ _NUMERIC_FIELDS: tuple[str, ...] = (
 )
 
 
+# An id longer than this is cut where TeX sets it in one unbreakable box -- an \item[...] label
+# or a table cell -- and shown whole, breakable, in the item body: a box wider than TeX's
+# largest dimension stops the compile, and a long one runs off the page.
+_LABEL_MAX = 200
+# The run of characters between the break points of an id shown whole.
+_ID_CHUNK = 40
+
+
+def _label_id(text: str) -> tuple[str, bool]:
+    """``text`` (an id or a file name) on one line, sanitized, for an unbreakable label: cut to
+    :data:`_LABEL_MAX` characters and ``...`` when longer. ``(LaTeX, cut)``."""
+    one = _one_line(text)
+    if len(one) <= _LABEL_MAX:
+        return _latex_sanitize(one), False
+    return _latex_sanitize(one[:_LABEL_MAX]) + "...", True
+
+
+def _breakable_id(text: str) -> str:
+    """``text`` (an id) whole, sanitized, with a break point every :data:`_ID_CHUNK`
+    characters, for running text."""
+    one = _one_line(text)
+    return r"\allowbreak{}".join(
+        _latex_sanitize(one[k : k + _ID_CHUNK]) for k in range(0, len(one), _ID_CHUNK)
+    )
+
+
+def record_label_warnings(
+    evidence: Sequence[EvidenceItem], protocol: Optional[ProtocolPlan] = None
+) -> List[str]:
+    """One render warning per Evidence id (and protocol file name) the record cuts in its
+    label (:data:`_LABEL_MAX` characters); the record shows each whole in the item body.
+    PURE."""
+    names = [("evidence id", ev.id) for ev in evidence]
+    if protocol is not None:
+        names += [("protocol file name", entry.name) for entry in protocol_history(protocol)]
+    lines: List[str] = []
+    for what, name in dict.fromkeys(names):
+        one = _one_line(name)
+        if len(one) > _LABEL_MAX:
+            lines.append(
+                f"record.tex: the {what} {one[:60]!r}... ({len(one)} characters) is cut to "
+                f"{_LABEL_MAX} characters in its label and table cell, which TeX cannot break; "
+                "the record shows it whole in the item"
+            )
+    return lines
+
+
 def _protocol_history_section(protocol: ProtocolPlan) -> str:
     """The record's "Protocol history" section (design/deposit-files.md D11).
 
@@ -115,8 +163,10 @@ def _protocol_history_section(protocol: ProtocolPlan) -> str:
         # "created <time>" / "recorded <time>": the time in an \mbox, so a line never
         # breaks at one of its hyphens.
         verb, _, when = entry.time_label.partition(" ")
+        label, cut = _label_id(entry.name)
+        whole = f"\\texttt{{{_breakable_id(entry.name)}}}: " if cut else ""
         lines.append(
-            f"  \\item[\\texttt{{{_latex_sanitize(_one_line(entry.name))}}}] "
+            f"  \\item[\\texttt{{{label}}}] {whole}"
             f"{_latex_sanitize(entry.description)}; {_latex_sanitize(verb)} "
             f"{_time_box(when)}; {checksum}"
         )
@@ -464,11 +514,14 @@ def render_si_latex(
         for ev, group in deduped:
             summary = _result_summary(ev)
             times = f" (recorded {len(group)}x)" if len(group) > 1 else ""
+            label, cut = _label_id(ev.id)
             lines.append(
-                f"  \\item[\\texttt{{{_latex_sanitize(_one_line(ev.id))}}} "
+                f"  \\item[\\texttt{{{label}}} "
                 f"({_latex_sanitize(_one_line(_kind_str(ev)))})] "
                 f"{_latex_sanitize(summary)}{times}"
             )
+            if cut:
+                lines.append(f"    \\\\ \\textit{{id:}} \\texttt{{{_breakable_id(ev.id)}}}")
             lines.append(
                 f"    \\\\ \\textit{{created:}} {_created_label(group)}"
             )
@@ -517,7 +570,7 @@ def render_si_latex(
         lines.append(f"{header} \\\\")
         lines.append(r"\hline")
         for ev in quant_items:
-            cells = [f"\\texttt{{{_latex_sanitize(_one_line(ev.id))}}}"]
+            cells = [f"\\texttt{{{_label_id(ev.id)[0]}}}"]
             for f in active_fields:
                 cells.append(_fmt_cell(getattr(ev.result, f, None)))
             lines.append(" & ".join(cells) + r" \\")
@@ -562,8 +615,9 @@ def render_si_latex(
 
         supporting = [link.evidence_id for link in claim.get_supporting_evidence()]
         refuting = [link.evidence_id for link in claim.get_refuting_evidence()]
-        sup_str = ", ".join(_latex_sanitize(s) for s in supporting) or "(none)"
-        ref_str = ", ".join(_latex_sanitize(s) for s in refuting) or "(none)"
+        # Ids in running text, with break points: a long one is one word TeX cannot break.
+        sup_str = ", ".join(_breakable_id(s) for s in supporting) or "(none)"
+        ref_str = ", ".join(_breakable_id(s) for s in refuting) or "(none)"
         lines.append(f"  \\item Supporting evidence: {sup_str}")
         lines.append(f"  \\item Refuting evidence: {ref_str}")
 
@@ -663,7 +717,7 @@ def render_si_latex(
         lines.append("")
 
     lines.append(r"\end{document}")
-    return "\n".join(lines)
+    return break_long_lines("\n".join(lines))
 
 
-__all__ = ["render_si_latex"]
+__all__ = ["record_label_warnings", "render_si_latex"]

@@ -41,7 +41,7 @@ Key rule (extends ``citation_keys``'s ``<Surname><Year>`` + ``a/b`` convention):
 Entries without a DOI already in the bib (manual / synthetic) are kept verbatim,
 and PDFs/sidecars present before the call are never renamed or overwritten. No
 LLM, no new dependency; bib entries are split brace-depth-aware via
-``render.pkgreqs_checks._entry_close_index`` (the helper ``bib_subset`` uses).
+``render.pkgreqs_checks._entry_close_index``.
 """
 
 from __future__ import annotations

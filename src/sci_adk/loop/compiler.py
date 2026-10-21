@@ -85,10 +85,15 @@ from sci_adk.render.figures import (
     check_figure_consistency,
     figure_labels,
     image_figure_filename,
+    image_format_problem,
     order_figures_by_reference,
 )
-from sci_adk.render.authored_si import authored_si_warnings, render_authored_si_latex
-from sci_adk.render.bib_latex import paper_bib
+from sci_adk.render.authored_si import (
+    authored_si_lint_warnings,
+    authored_si_warnings,
+    render_authored_si_latex,
+)
+from sci_adk.render.bib_latex import canonical_bib, paper_bib
 from sci_adk.render.deposit import (
     MANIFEST_NAME,
     OWNED_DIRS,
@@ -118,6 +123,7 @@ from sci_adk.render.novelty import (
 from sci_adk.render.paper import (
     _clean_text,
     is_doi,
+    long_line_warnings,
     prose_warnings,
     render_paper_latex,
     run_font_policy,
@@ -130,12 +136,13 @@ from sci_adk.render.reproduction import (
     bundle_file_names,
     bundle_scripts,
     listed_code_files,
+    names_only_notice,
     reader_summary,
     reader_text,
     render_reproduce_driver,
     written_by_sci_adk,
 )
-from sci_adk.render.si import render_si_latex
+from sci_adk.render.si import record_label_warnings, render_si_latex
 
 # An experiment hook turns a Spec into Evidence (e.g. by running code in Docker).
 ExperimentFn = Callable[[Spec, Path], Sequence[EvidenceItem]]
@@ -339,10 +346,15 @@ class ResearchCompiler:
         # warnings.
         self.prose_warnings: List[str] = []
         # What the last render left out of or found in the references it wrote: a recorded DOI
-        # that is not of the DOI form (left out of the no-bibliography DOI list), a command
-        # in a bibliography it wrote that can read or write a file, define a macro or end the
-        # document. The CLI prints them as warnings.
+        # that is not of the DOI form (left out of the no-bibliography DOI list), an entry,
+        # field or macro the canonical bibliography copy left out, a command it printed as text
+        # (bib_latex.canonical_bib notes). The CLI prints them as warnings.
         self.reference_warnings: List[str] = []
+        # What the last render's record shows differently from the record: an id cut in an
+        # unbreakable label (warnings), and one line naming the scripts it shows by name only
+        # (a notice). The CLI prints both.
+        self.record_warnings: List[str] = []
+        self.record_notices: List[str] = []
 
     def compile(
         self,
@@ -765,7 +777,11 @@ class ResearchCompiler:
         kept_si_bindings = self._kept_si_bindings(run_dir, spec.id) if si is None else []
         # The authored SI body is LaTeX written as is: a character pdflatex cannot typeset there
         # is named too (render does not map it as it does in a prose slot).
-        self.prose_warnings = prose_warnings(prose, si_prose) + authored_si_warnings(si)
+        self.prose_warnings = (
+            prose_warnings(prose, si_prose)
+            + authored_si_warnings(si)
+            + authored_si_lint_warnings(si)
+        )
         self.reference_warnings = []
 
         # The record (record.tex) is rendered here, before anything is written, so its bytes
@@ -806,6 +822,10 @@ class ResearchCompiler:
         deposit_prep = self._prepare_deposit(run_dir, spec.id, deposit, record_for)
         record_tex = (
             deposit_prep.record_tex if deposit_prep is not None else record_for(None)
+        )
+        self._note_record(
+            evidence_list, repro_listings,
+            deposit_prep.plan if deposit_prep is not None else None, record_tex,
         )
 
         # Citations + bibliography are gathered for the run (renderers stay pure --
@@ -871,6 +891,7 @@ class ResearchCompiler:
         )
         paper_path = paper_dir / "draft.tex"
         paper_path.write_text(paper_tex, encoding="utf-8")
+        self.prose_warnings += long_line_warnings(paper_tex, "draft.tex")
 
         # Co-locate each IMAGE figure's source into paper/figures/fig<N><ext> (the
         # renderer only emits that reference; the compiler -- the sole filesystem toucher
@@ -914,29 +935,25 @@ class ResearchCompiler:
             if si_tex is not None:
                 si_path = paper_dir / "si.tex"
                 si_path.write_text(si_tex, encoding="utf-8")
+                self.prose_warnings += long_line_warnings(si_tex, "si.tex")
 
-        # The copies keep every command as acquired: one that can read or write a file, define
-        # a macro or end the document is named here (and fails verify) -- the deposit's copy
-        # holds the paper's bytes, so the two written here cover it. A literature store that is
-        # not UTF-8 is copied as is (_colocate_bib): read for the scan as verify reads it, and
-        # named, since pdflatex reads the bibliography as UTF-8.
+        # The copies are canonical (paper_bib): what the copy left out of the store, or printed
+        # as text, is named once here (the SI subset and the deposit copy are cut from the same
+        # copy). A literature store that is not UTF-8 is copied as is (_colocate_bib) and named,
+        # since pdflatex reads the bibliography as UTF-8 (verify fails it).
         for written in (bib_path, si_bib_path):
             if written is not None and Path(written).is_file():
-                raw = Path(written).read_bytes()
                 try:
-                    bib_text = raw.decode("utf-8")
+                    Path(written).read_bytes().decode("utf-8")
                 except UnicodeDecodeError:
-                    bib_text = raw.decode("utf-8", errors="replace")
                     self.reference_warnings.append(
                         f"paper/{Path(written).name} is not UTF-8: it is the run's literature "
                         "references.bib copied byte for byte, and pdflatex reads a "
                         "bibliography as UTF-8, so it stops on the non-ASCII bytes -- save the "
                         "literature references.bib as UTF-8 and render again"
                     )
-                self.reference_warnings.extend(
-                    f"{line} (verify fails the paper until it is removed)"
-                    for line in bib_command_problems(bib_text, source=Path(written).name)
-                )
+        if bib_path is not None:
+            self.reference_warnings.extend(self._bib_copy_notes(run_dir))
 
         self._write_novelty_sentences(run_dir, spec.id, novelty_found + kept_si_bindings)
 
@@ -1006,12 +1023,37 @@ class ResearchCompiler:
         # files, so no declaration is read: the section is the same withheld or not, and
         # this stage leaves runs/<id>/deposit.json alone (D13).
         protocol = plan_protocol(run_dir) if (run_dir / "spec.json").is_file() else None
-        return self._write_record(
+        repro_listings = self._resolve_repro_listings(evidence_list, run_dir)
+        record_path = self._write_record(
             spec, claims_list, evidence_list, run_dir,
-            repro_listings=self._resolve_repro_listings(evidence_list, run_dir),
+            repro_listings=repro_listings,
             figures=None, prose=None, bib_path=self._locate_bib_path(run_dir),
             protocol=protocol,
         )
+        self._note_record(
+            evidence_list, repro_listings, protocol, record_path.read_text(encoding="utf-8"),
+            record_only=True,
+        )
+        return record_path
+
+    def _note_record(
+        self,
+        evidence: Sequence[EvidenceItem],
+        listings: Sequence[ReproListing],
+        protocol: Optional[ProtocolPlan],
+        record_tex: str,
+        *,
+        record_only: bool = False,
+    ) -> None:
+        """What the record a render writes shows differently from the record: a label cut, a
+        line too long to break (``self.record_warnings``) and the scripts shown by name only
+        (``self.record_notices``, one line, worded for a record-only render when
+        ``record_only``). The CLI prints both."""
+        self.record_warnings = record_label_warnings(evidence, protocol) + long_line_warnings(
+            record_tex, "record.tex"
+        )
+        notice = names_only_notice(listings, record_only=record_only)
+        self.record_notices = [notice] if notice else []
 
     def render_texts(
         self,
@@ -1362,16 +1404,21 @@ class ResearchCompiler:
         """Copy the run's ``references.bib`` next to ``draft.tex`` and return its path.
 
         Overleaf self-containment: when ``_locate_bib_path`` finds the run's
-        ``references.bib`` (see ``_LITERATURE_DIRS``), write its LaTeX-safe copy
-        (:func:`paper_bib`: HTML entities and tags to LaTeX, bare specials escaped,
-        characters pdflatex cannot typeset through the prose map or accent commands; title case
-        protected, no ISSN or URL repeating the DOI, name letters as LaTeX commands; keys and
-        doi values untouched) to ``paper/references.bib`` so
-        uploading the ``paper/`` folder as-is resolves ``\\bibliography{references}`` and
-        compiles. The literature store is only read -- it keeps the bytes it was acquired
-        with. The returned path's stem is ``references``, so the (pure) renderer emits
-        exactly that ``\\bibliography`` key. ``None`` when no source ``.bib`` exists -> the
-        renderer emits no ``\\bibliography``. No entry is generated or dropped.
+        ``references.bib`` (see ``_LITERATURE_DIRS``), write its canonical copy
+        (:func:`paper_bib`: every entry BibTeX reads, as ``@type{key, field = {value}, ...}``,
+        each value LaTeX-safe and holding only allow-listed commands; title case protected, no
+        ISSN or URL repeating the DOI, name letters as LaTeX commands) to
+        ``paper/references.bib`` so uploading the ``paper/`` folder as-is resolves
+        ``\\bibliography{references}`` and compiles. The copy leaves out the fields no style
+        prints (``bib_latex.UNPRINTED_FIELDS``: keywords, abstract, copyright ...; the ISSN; a
+        url that is the doi.org link of the entry's doi) without a warning. What else it leaves
+        out -- an entry whose key no citation can name or that repeats a key, a url or doi that
+        is not plain, a crossref naming no entry of the copy -- and a BibTeX syntax error in the
+        store are each a render warning (:meth:`_bib_copy_notes`). The key of an entry it keeps
+        never changes. The literature store is only read -- it keeps the bytes
+        it was acquired with. The returned path's stem is ``references``, so the (pure)
+        renderer emits exactly that ``\\bibliography`` key. ``None`` when no source ``.bib``
+        exists -> the renderer emits no ``\\bibliography``.
         """
         src = cls._locate_bib_path(run_dir)
         if src is None:
@@ -1385,6 +1432,25 @@ class ResearchCompiler:
             return str(dest)
         dest.write_text(paper_bib(pool), encoding="utf-8")
         return str(dest)
+
+    @classmethod
+    def _bib_copy_notes(cls, run_dir: Path) -> List[str]:
+        """What the canonical copy of the run's literature ``references.bib``
+        (:func:`canonical_bib`) left out or printed as text, one render warning each, or none.
+        A store that is not UTF-8 is copied as is, so what it holds outside the allow-list is
+        named as verify will name it (read as verify reads it)."""
+        src = cls._locate_bib_path(run_dir)
+        if src is None:
+            return []
+        try:
+            pool = Path(src).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = Path(src).read_bytes().decode("utf-8", errors="replace")
+            return [
+                f"{line} (verify fails the paper until it is removed)"
+                for line in bib_command_problems(text, source="paper/references.bib")
+            ]
+        return [f"paper/references.bib: {note}" for note in canonical_bib(pool).notes]
 
     @classmethod
     def _paper_bib_bytes(cls, run_dir: Path) -> Optional[bytes]:
@@ -1494,6 +1560,13 @@ class ResearchCompiler:
                     f"(an image figure must reference an existing file -- record "
                     f"fidelity; the paper/ folder must be self-contained)"
                 )
+            # pdflatex picks the graphics driver by the extension: a file of another format
+            # stops the compile, or is read as what it is not.
+            with src.open("rb") as handle:
+                head = handle.read(16)
+            problem = image_format_problem(src.name, head)
+            if problem is not None:
+                raise ValueError(f"figure '{fig.id}': {src}: {problem}")
             dest = figures_dir / image_figure_filename(fig, number)
             shutil.copyfile(src, dest)
 

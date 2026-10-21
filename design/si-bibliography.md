@@ -190,7 +190,9 @@ decisions; both harden their mechanism.
   line). Fixed by scanning `{`/`}` nesting depth from the entry-open brace to the TRUE matching
   close (`_entry_close_index`), still regex/line-based, no `bibtexparser` (house style). Contract
   preserved: `bib_keys(bib_subset(bib, keep)) == sorted(set(keep) & set(bib_keys(bib)))`, empty
-  → `""`. Real-world trigger is LOW (paperforge/doi.org minimal bib), but the gate blind-spot
+  → `""`. [Superseded 2026-10-20: `bib_subset` reads the file as BibTeX does
+  (`bib_latex.bib_commands`) and, since 2026-10-21, also keeps the entries a kept entry names in
+  its `crossref` field; see §8.] Real-world trigger is LOW (paperforge/doi.org minimal bib), but the gate blind-spot
   was real.
 - **Dual-bib integrity gate.** `sci-adk verify` now validates the brace-balance of BOTH
   `references.bib` (main) AND `references_SI.bib` (SI) — per-run (`paper/`) and package
@@ -204,7 +206,8 @@ decisions; both harden their mechanism.
 The trial run's manuscript did not compile: entry `oki2005` in the run's pool has U+2212 MINUS
 SIGN in its title, and the verbatim copy carried it into `paper/references.bib`.
 
-- **The copy.** `paper/references.bib` is `latex_safe_bib(pool)` (`render/bib_latex.py`), and
+- **The copy.** [Superseded 2026-10-20: the copy is the canonical `paper_bib(pool)`; see §8.]
+  `paper/references.bib` is `latex_safe_bib(pool)` (`render/bib_latex.py`), and
   `paper/references_SI.bib` is the cited-only subset of that copy, so an SI entry stays byte-for-byte
   equal to its main-bib entry. Only field values change, plus one token: a bare month name
   BibTeX does not define (`month = June`, `sept`; BibTeX warns and drops the month) becomes its
@@ -246,9 +249,22 @@ SIGN in its title, and the verbatim copy carried it into `paper/references.bib`.
   record's bibliography never reaches the pool's raw bib; a record that cites (only through
   `--si-prose`) shows its citations unresolved where it lies. Left as is.
 
+## 8. The canonical copy (2026-10-20, 2026-10-21)
+
+`paper/references.bib` is now `bib_latex.paper_bib(pool)`: every entry BibTeX reads, written as
+`@type{key, field = {value}, ...}` with only allow-listed commands in each value
+(`design/render-architecture-reframe.md` §4h, §4i). `paper/references_SI.bib` and the package's
+SI cut are `bib_subset` of that copy, read as BibTeX reads it (`bib_latex.bib_commands`), so a
+parenthesised entry, `@ article` or a macro is handled by construction; the subset also keeps
+the entries its entries name in `crossref` (BibTeX stops on a cross reference to an entry the
+file lacks). Every SI entry is still byte-for-byte its entry in `references.bib`. The copy drops
+entries, unprinted fields, and a url or doi that is not plain, each named in a render warning.
+verify accepts a per-run copy only in that form; in a package it holds `references_SI.bib` to
+the form only when the assembler cut it.
+
 ---
 
-Version: 1.3.0
+Version: 1.4.0
 Status: DECIDED (2026-07-01)
 History:
 - v1.0.0 (2026-07-01): the four confirmed decisions (cited-only subset, both paths, SI cite gate,
@@ -266,6 +282,9 @@ History:
   copy cannot fix. Same day, after a second review: math-aware copy (no nested `$`), printed fields
   only, known tags only, `^` and month names, fully decomposed accents, and the package T1 check.
   The four decisions are UNCHANGED.
+- v1.4.0 (2026-10-21): §8 — the copy is canonical (`paper_bib`), the subset reads the file as
+  BibTeX does and keeps cross-referenced entries, and the package SI form check applies only to
+  an SI bibliography the assembler cut. The four decisions are UNCHANGED.
 Decomposed by: SPEC-SI-AUTHORING-001 M6 (REQ-SA-6xx), revised in SPEC v0.3.1.
 Extends: design/si-belief-record-split.md (v0.4, FROZEN — single source for the SI split)
 Related: design/paper-figures-and-si.md, design/paper-publishing-requirements.md,

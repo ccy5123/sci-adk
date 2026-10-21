@@ -83,6 +83,12 @@ artifacts; the kernel carries no domain code.
   shipped. Descriptions and notes such as "no git commit" go in the finding. A
   `code_ref` that does not resolve to a file is kept as a pointer, and a file whose
   sha256 no longer matches is not shipped as the recorded code.
+- **Scripts are ASCII-only.** Write every analysis script in ASCII: comments, docstrings,
+  messages and names in English, and a character the data needs (a column name, a unit
+  sign) as an escape (Python or R `"\u00b5"`, shell `printf '\302\265'`), so the record
+  can typeset it. The workspace hook blocks a non-ASCII write into a script, and
+  `append-evidence` refuses (exit 2, nothing recorded) a `code_ref` that names such a
+  script. Lean proofs (`.lean`) are exempt.
 - **Name every output table a paper may ship by its checksum, in `provenance.data_ref`.**
   For every output table the analysis writes that a paper may offer its readers (a
   filtered data set, a results table), write `<path> sha256=<hex>` (`sha256sum <file>` on

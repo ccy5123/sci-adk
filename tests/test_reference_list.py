@@ -2,8 +2,9 @@
 The reference list a rendered paper prints: the ``paper/`` bibliography copy beyond LaTeX safety.
 
 Render writes ``paper/references.bib`` (and the cited-only ``paper/references_SI.bib``) as
-``bib_latex.paper_bib(store)``: the LaTeX-safe copy (``latex_safe_bib``, see
-tests/test_bib_latex_copy.py) with four changes to what plainnat prints. The trial run's compiled
+``bib_latex.paper_bib(store)``: the canonical copy (tests/test_bib_allowlist.py), LaTeX-safe
+(the ``latex_safe_bib`` layer, tests/test_bib_latex_copy.py), with four changes to what
+plainnat prints. The trial run's compiled
 reference list (lit-search-trial-2, SPEC-BCFKOW-001) showed each problem:
 
 1. plainnat lowercases a title (``change.case$`` "t": every letter at brace level 0 but the
@@ -100,16 +101,17 @@ def _author(raw: str) -> str:
         ),
         # The field's first letter is printed as it is: "Matula" needs no braces there.
         ("Neto2013", "Matula numbers, {Gödel} numbering and {Fock} space"),
-        # Markup arguments are brace groups already.
+        # A kept command and its argument are one brace group (a special character to
+        # BibTeX); one holding a capital is braced once more.
         (
             "Bertelsen1998",
-            "Evaluation of log \\textit{K}\\textsubscript{OW} and tissue lipid content as "
+            "Evaluation of log {{\\textit{K}}}{{\\textsubscript{OW}}} and tissue lipid content as "
             "predictors of chemical partitioning to fish tissues",
         ),
-        # A command name is never braced; the words after its argument are.
+        # The words after a command's group are braced as words.
         (
             "Bintein1993",
-            "Nonlinear {Dependence} of {Fish} {Bioconcentration} on \\textit{n}-{Octanol}/{Water} "
+            "Nonlinear {Dependence} of {Fish} {Bioconcentration} on {\\textit{n}}-{Octanol}/{Water} "
             "{Partition} {Coefficient}",
         ),
         # The minus the LaTeX-safe copy wrote is already a protected group.
@@ -141,15 +143,15 @@ def test_journal_is_not_braced():
     "raw, expected",
     [
         ("the $K_{OW}$ of x", "the {$K_{OW}$} of x"),  # BibTeX would lowercase K inside $...$
-        ("a $x \\geq 3$ bound", "a $x \\geq 3$ bound"),  # nothing to lowercase
-        ("of $$\\Delta G$$", "of {$$\\Delta G$$}"),
+        ("a $x \\geq 3$ bound", "a {$x \\geq 3$} bound"),  # math is always one group
+        ("of $$\\Delta G$$", "of {$\\Delta G$}"),  # display math in a reference: inline
         ("{DNA} and {Matula Numbers}", "{DNA} and {Matula Numbers}"),  # already braced
         ("on {\\textcommabelow{S}}tefan", "on {{\\textcommabelow{S}}}tefan"),  # a letter group
-        ("on {\\'e}t{\\'e}", "on {\\'e}t{\\'e}"),  # lowercase letter groups need nothing
+        ("on {\\'e}t{\\'e}", "on {\\'{e}}t{\\'{e}}"),  # lowercase letter groups need nothing
         # An accent with its unbraced capital is braced twice (section 1b below).
-        ("an \\'Etude of X", "an {{\\'E}}tude of {X}"),
+        ("an \\'Etude of X", "an {{\\'{E}}}tude of {X}"),
         ("Science \\& Technology Review", "Science \\& {Technology} {Review}"),
-        ("see \\url{http://X.org/A} Now", "see \\url{http://X.org/A} {Now}"),
+        ("see \\url{http://X.org/A} Now", "see {{\\url{http://X.org/A}}} {Now}"),
         ("3D-QSAR of CO2", "{3D}-{QSAR} of {CO2}"),
         # A brace group that opens with a command is a BibTeX "special character": its
         # letters are lowercased like any other, so it is braced once more.
@@ -162,9 +164,9 @@ def test_case_protection_leaves_math_groups_and_commands_intact(raw, expected):
     assert bib_latex_safety_problems(f"@article{{X2020, title={{{out}}}, year={{2020}}}}") == []
 
 
-def test_a_quoted_or_concatenated_title_is_protected_part_by_part():
+def test_a_quoted_or_concatenated_title_is_joined_then_protected():
     out = paper_bib('@article{X2020, title = "OPERA and" # { BCF}, year=2020}')
-    assert 'title = "{OPERA} and" # { {BCF}}' in out
+    assert "title = {{OPERA} and {BCF}}" in out
 
 
 # -- 1b. an accent command or a capitalised control word written without braces ------------------
@@ -182,25 +184,25 @@ def test_a_quoted_or_concatenated_title_is_protected_part_by_part():
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        (r'Trade in \"Osterreich', r'Trade in {{\"O}}sterreich'),
-        (r"une \'Etude", r"une {{\'E}}tude"),
+        (r'Trade in \"Osterreich', r'Trade in {{\"{O}}}sterreich'),
+        (r"une \'Etude", r"une {{\'{E}}}tude"),
         # BibTeX lowercases it even as the field's first letter (its "first character" is \).
-        (r'\"Uber alles', r'{{\"U}}ber alles'),
-        (r'zu \" Ubung', r'zu {{\" U}}bung'),  # the accent's argument may follow a space
-        (r"the \v Skoda and \c Cedric", r"the {{\v S}}koda and {{\c C}}edric"),
-        (r"on \H O and \H o", r"on {{\H O}} and {{\H o}}"),  # \H itself would become \h
+        (r'\"Uber alles', r'{{\"{U}}}ber alles'),
+        (r'zu \" Ubung', r'zu {{\"{U}}}bung'),  # the accent's argument may follow a space
+        (r"the \v Skoda and \c Cedric", r"the {{\v{S}}}koda and {{\c{C}}}edric"),
+        (r"on \H O and \H o", r"on {{\H{O}}} and {{\H{o}}}"),  # \H itself would become \h
         (r"\H{o}szi", r"{{\H{o}}}szi"),
-        (r"the \LaTeX\ Workshop", r"the {{\LaTeX}}\ {Workshop}"),
-        (r"the \LaTeX Workshop", r"the {{\LaTeX }}{Workshop}"),  # TeX eats that space
-        (r"the \LaTeX{} Companion", r"the {{\LaTeX{}}} {Companion}"),
-        (r"\AE ther and \O rsted", r"{{\AE }}ther and {{\O }}rsted"),
-        # Lowercase: nothing BibTeX can change.
-        (r'an \'etude, \"uber, \v skoda', r'an \'etude, \"uber, \v skoda'),
-        (r"a \textit{Daphnia} test", r"a \textit{Daphnia} test"),
+        (r"the \LaTeX\ Workshop", r"the {{\LaTeX}} {Workshop}"),  # a control space: a space
+        (r"the \LaTeX Workshop", r"the {{\LaTeX}}{Workshop}"),  # TeX eats that space
+        (r"the \LaTeX{} Companion", r"the {{\LaTeX}} {Companion}"),
+        (r"\AE ther and \O rsted", r"{{\AE}}ther and {{\O}}rsted"),
+        # Lowercase: one brace group, nothing BibTeX can change.
+        (r'an \'etude, \"uber, \v skoda', r'an {\'{e}}tude, {\"{u}}ber, {\v{s}}koda'),
+        (r"a \textit{Daphnia} test", r"a {{\textit{Daphnia}}} test"),
         # A lowercase accent, then capitals in the same word.
-        (r"\'eTUDE", r"\'e{TUDE}"),
-        # Already protected: left alone.
-        (r'{\"O}sterreich and \"{O}sterreich', r'{{\"O}}sterreich and \"{O}sterreich'),
+        (r"\'eTUDE", r"{\'{e}}{TUDE}"),
+        # Already a group: the copy writes it the same way.
+        (r'{\"O}sterreich and \"{O}sterreich', r'{{\"{O}}}sterreich and {{\"{O}}}sterreich'),
     ],
 )
 def test_an_unbraced_accent_or_capitalised_command_is_protected(raw, expected):
@@ -232,10 +234,10 @@ def test_unbraced_accents_and_capitalised_commands_print_as_written(tmp_path, fi
     # BibTeX breaks long lines at spaces (one inside "{{\AE }}" too): compare with each run
     # of white space read as one space, as TeX reads it.
     items = {key: " ".join(text.split()) for key, text in _bibitems(bbl).items()}
-    for printed in ('{{\\"O}}sterreich', "{{\\'E}}tude", "{{\\LaTeX}}\\ {Workshop}",
-                    "{{\\AE }}ther"):
+    for printed in ('{{\\"{O}}}sterreich', "{{\\'{E}}}tude", "{{\\LaTeX}} {Workshop}",
+                    "{{\\AE}}ther"):
         assert printed in items["Unb2001"], items["Unb2001"]
-    for printed in ('{{\\"U}}ber', "{{\\v S}}koda", "{{\\H O}}", "{{\\LaTeX{}}} {Companion}"):
+    for printed in ('{{\\"{U}}}ber', "{{\\v{S}}}koda", "{{\\H{O}}}", "{{\\LaTeX}} {Companion}"):
         assert printed in items["Unb2002"], items["Unb2002"]
     assert "\\latex" not in bbl and "\\ae" not in bbl and "\\h " not in bbl
 
@@ -283,12 +285,12 @@ def test_removing_fields_keeps_a_multi_line_entry_well_formed():
         "@article{X2020,\n"
         "  issn = {1234-5678},\n"
         "  title = {t},\n"
-        "  url = {https://doi.org/10.1/abc},\n"
-        "  doi = {10.1/abc},\n"
+        "  url = {https://doi.org/10.1000/abc},\n"
+        "  doi = {10.1000/abc},\n"
         "  ISSN = {8765-4321}\n"
         "}\n"
     )
-    assert paper_bib(bib) == "@article{X2020,\n  title = {t},\n  doi = {10.1/abc}\n}\n"
+    assert paper_bib(bib) == "@article{X2020,\n  title = {t},\n  doi = {10.1000/abc}\n}\n"
 
 
 # -- 3. a stray period after a full given name ------------------------------------------------

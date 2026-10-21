@@ -97,6 +97,10 @@ data set / alternative implementation). Do not hardcode a domain assumption — 
 whatever the frozen MethodPlan specifies, against whatever independent context the
 orchestrator supplied.
 
+Every script you write is ASCII-only: English comments, docstrings and messages, and a
+character the data needs written as an escape (Python or R `"\u00b5"`). The workspace hook
+blocks a non-ASCII write into a script, and `append-evidence` refuses to record such a script.
+
 ## Input Contract (from the orchestrator)
 
 - `[FROZEN SPEC REFERENCE]` (spec_id, spec_digest) of the Spec to replicate.

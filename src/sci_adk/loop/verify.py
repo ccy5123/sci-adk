@@ -72,6 +72,7 @@ from sci_adk.core.validity import (
     check_falsifiability_adequacy,
     derive_novelty_status,
 )
+from sci_adk.loop.ascii_scripts import code_ref_violations, recorded_advisory
 from sci_adk.loop.claim_updater import counted_evidence, status_for_verdict
 from sci_adk.loop.code_ref import (
     NON_REPRODUCIBLE_KINDS,
@@ -127,13 +128,17 @@ from sci_adk.render.number_audit import (
     number_audit_problems,
     pool_from_record,
 )
+from sci_adk.render.latex_lint import lint_advisories
 from sci_adk.render.number_checks import NumberRecord, number_list_checks
 from sci_adk.render.paper import _latex_sanitize, check_paper_tool_vocabulary
 from sci_adk.render.pkgreqs_checks import (
+    PACKAGE_SI_BIB_FIX,
     abstract_max_words_problems,
     bib_article_number_advisories,
-    bib_command_advisories,
+    bib_character_problems,
     bib_command_problems,
+    bib_form_problems,
+    bib_label_count_lines,
     bib_latex_safety_problems,
     bib_month_advisories,
     bib_sort_advisories,
@@ -149,6 +154,7 @@ from sci_adk.render.pkgreqs_checks import (
     package_deposit_problems,
     package_record_path,
     readme_submission_readiness_problems,
+    si_bib_cut_by_assembler,
     unpublished_citation_warnings,
 )
 from sci_adk.render.pubreqs_checks import (
@@ -325,6 +331,9 @@ class VerifyReport:
             (not in ``passed``). The per-run companion to ``PackageVerifyReport.advisory``. EMPTY
             when clean / no paper / no contract. Closing the per-run advisory-channel gap the
             package gate already had.
+        script_advisory: the lines of ``paper_advisory`` that name a recorded script holding
+            non-ASCII bytes (design/english-only-scripts.md): not about the paper, so the CLI
+            prints them with one prefix whether or not a publishing contract is frozen.
         deposit_problems: the RECORD-side deposit-completeness problems (SPEC-SI-AUTHORING-001
             M2, Pillar C) -- presence-only lines naming a deposit element that is absent: the
             retained deterministic record artifact (located via ``deposit_record_path``, the M1
@@ -403,6 +412,7 @@ class VerifyReport:
     paper_requirements_problems: List[str] = field(default_factory=list)
     paper_requirements_clean: bool = field(default=True)
     paper_advisory: List[str] = field(default_factory=list)
+    script_advisory: List[str] = field(default_factory=list)
     deposit_problems: List[str] = field(default_factory=list)
     deposit_complete: bool = field(default=True)
     search_log_problems: List[str] = field(default_factory=list)
@@ -773,16 +783,23 @@ def verify_run(
     paper_requirements_problems, paper_advisory = _check_paper_requirements(
         run_dir, evidence, list(recorded_claims.values()), spec
     )
-    # The bib command gate runs on every bibliography render wrote, with or without a frozen
-    # contract (a dangerous command runs when the reference list is typeset, whatever the
-    # contract says). With a contract the safety check above already wrote the same lines for
+    # The bib form gate runs on every bibliography render wrote, with or without a frozen
+    # contract (what a reference list holds runs when it is typeset, whatever the contract
+    # says): each must be the canonical copy render writes, holding only allow-listed commands.
+    # With a contract the safety check above already wrote the command lines for
     # paper/references.bib and references_SI.bib: each line is kept once.
-    bib_command_lines, bib_command_notes = _check_bib_commands(run_dir)
+    bib_command_lines = _check_bib_commands(run_dir)
+    # More than 26 entries with one citation label: a FAIL when the paper cites more than 26 of
+    # them (natbib stops on the 27th), an advisory when it cites fewer (render warned too).
+    label_lines, label_advisories = _check_bib_label_groups(run_dir)
     paper_requirements_problems = [
         *paper_requirements_problems,
-        *(line for line in bib_command_lines if line not in paper_requirements_problems),
+        *(line for line in bib_command_lines + label_lines
+          if line not in paper_requirements_problems),
     ]
-    paper_advisory = [*paper_advisory, *bib_command_notes]
+    # Author-written LaTeX (the authored SI body) is outside the execution and compile
+    # guarantee: a command that reads or writes a file or runs code is named, never gated.
+    paper_advisory = [*paper_advisory, *_si_lint_advisory(run_dir), *label_advisories]
 
     # Prior-work decision gate: a conclusion-bearing run (draft.tex present) must carry a
     # recorded prior-work DECISION -- searched or skipped-with-reason. This enforces the
@@ -823,6 +840,11 @@ def verify_run(
     # pointer. READ-ONLY (stats/hashes the named files, executes nothing), no LLM.
     reproduction_notes = _reproduction_advisory(run_dir, evidence)
 
+    # English-only scripts (design/english-only-scripts.md): a recorded script holding
+    # non-ASCII bytes was recorded before append-evidence refused one. ADVISORY ONLY, one
+    # line per script; never a FAIL. READ-ONLY (reads the named scripts), no LLM.
+    ascii_script_notes = _ascii_script_advisory(run_dir, evidence)
+
     # Deposit files (design/deposit-files.md D5): the protocol history shipped under
     # paper/deposit/ must be exactly what its manifest lists and what runs/<id>/ calls for,
     # and the record's own protocol files must agree. FAIL lines gate; the times advisory
@@ -854,7 +876,8 @@ def verify_run(
         paper_requirements_clean=paper_requirements_clean,
         paper_advisory=(paper_advisory + number_notes + conclusion_review_notes
                         + search_log_notes + literature_key_notes + reproduction_notes
-                        + deposit_check.advisories),
+                        + ascii_script_notes + deposit_check.advisories),
+        script_advisory=ascii_script_notes,
         deposit_problems=deposit_problems,
         deposit_complete=deposit_complete,
         search_log_problems=search_log_problems,
@@ -1636,23 +1659,77 @@ def _check_paper_tool_vocab(run_dir: Path) -> Dict[str, List[str]]:
 _RUN_BIBS = ("references.bib", "references_SI.bib", "deposit/references.bib")
 
 
-def _check_bib_commands(run_dir: Path) -> tuple[List[str], List[str]]:
-    """The command gate over every bibliography render wrote for ``run_dir`` (:data:`_RUN_BIBS`),
-    whether or not a publishing contract is frozen: ``(problems, advisories)``. A command that
-    can read or write a file, define a macro, change how TeX reads its input or end the
-    document, and ``^^`` notation, FAIL (``pkgreqs_checks.bib_command_problems``); any other
-    command verify does not know is advisory (``bib_command_advisories``). A bibliography that
-    is not there is skipped. READ-ONLY."""
+def _literature_store_fix(run_dir: Path) -> str:
+    """Where a problem in a per-run bibliography copy is fixed: the literature store render
+    copies it from (the advice the per-run bib lines carry)."""
+    store = ResearchCompiler._literature_file(run_dir, "references.bib")
+    name = store.relative_to(run_dir).as_posix() if store is not None else "literature/references.bib"
+    return f"{name} (the literature store the paper copy is made from), then re-render"
+
+
+def _check_bib_commands(run_dir: Path) -> List[str]:
+    """The form gate over every bibliography render wrote for ``run_dir`` (:data:`_RUN_BIBS`),
+    whether or not a publishing contract is frozen: each must be the canonical copy render
+    writes (``pkgreqs_checks.bib_form_problems``: ``paper_bib(text) == text``), hold only
+    allow-listed commands (``bib_command_problems``) and only characters pdflatex typesets
+    (``bib_character_problems``: the copy keeps a character with no LaTeX form, so a reference
+    never silently loses a letter); each FAILs, naming the entry. A
+    bibliography that is not UTF-8 fails as such (the copy of a store that is not UTF-8 is
+    written byte for byte). A bibliography that is not there is skipped. READ-ONLY."""
     problems: List[str] = []
-    notes: List[str] = []
     for name in _RUN_BIBS:
         path = run_dir / "paper" / name
         if not path.is_file():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text, utf8 = _read_bib(path)
+        if not utf8:
+            problems.append(_not_utf8_line(name, f"save {_literature_store_fix(run_dir)}"))
+            continue
+        problems.extend(bib_form_problems(text, source=name))
         problems.extend(bib_command_problems(text, source=name))
-        notes.extend(bib_command_advisories(text, source=name))
-    return problems, notes
+        problems.extend(bib_character_problems(text, source=name))
+    return problems
+
+
+# The manuscript that cites from each bibliography render writes (paper/ relative).
+_RUN_BIB_CITERS = {
+    "references.bib": "draft.tex",
+    "references_SI.bib": "si.tex",
+    "deposit/references.bib": "deposit/record.tex",
+}
+
+
+def _check_bib_label_groups(run_dir: Path) -> Tuple[List[str], List[str]]:
+    """``(FAIL lines, advisory lines)`` for each bibliography render wrote for ``run_dir`` in
+    which more than 26 entries share one citation label
+    (``pkgreqs_checks.bib_label_count_lines``, judged against the manuscript that cites from
+    it). Whether or not a publishing contract is frozen. READ-ONLY."""
+    problems: List[str] = []
+    advisories: List[str] = []
+    for name, citer in _RUN_BIB_CITERS.items():
+        path = run_dir / "paper" / name
+        if not path.is_file():
+            continue
+        text, utf8 = _read_bib(path)
+        if not utf8:
+            continue  # the form gate names a file that is not UTF-8
+        tex_path = run_dir / "paper" / citer
+        tex = tex_path.read_text(encoding="utf-8", errors="replace") if tex_path.is_file() else ""
+        failed, advised = bib_label_count_lines(text, tex, source=name, package_source=None)
+        problems.extend(failed)
+        advisories.extend(advised)
+    return problems, advisories
+
+
+def _si_lint_advisory(run_dir: Path) -> List[str]:
+    """One advisory line when the authored ``paper/si.tex`` uses a command that reads or writes
+    a file or runs code (``latex_lint.lint_commands``): its section bodies are author-written
+    LaTeX, written as is, outside what sci-adk checks. Empty when there is no si.tex.
+    READ-ONLY, never gated."""
+    path = run_dir / "paper" / "si.tex"
+    if not path.is_file():
+        return []
+    return lint_advisories(path.read_text(encoding="utf-8", errors="replace"), "si.tex")
 
 
 # -- F1 publishing-requirements gate (design §1.3) ---------------------------
@@ -1821,11 +1898,7 @@ def _check_paper_requirements(
     # registrar BibTeX has no field for an article-numbered journal's number); both copies are
     # made from the run's literature store, so that is where the number is added.
     si_tex = si_tex_path.read_text(encoding="utf-8") if si_tex_path.is_file() else ""
-    _store = ResearchCompiler._literature_file(run_dir, "references.bib")
-    _store_name = (
-        _store.relative_to(run_dir).as_posix() if _store is not None else "literature/references.bib"
-    )
-    _store_fix = f"{_store_name} (the literature store the paper copy is made from), then re-render"
+    _store_fix = _literature_store_fix(run_dir)
     for _bib_name, _citing_tex in (("references.bib", draft_tex), ("references_SI.bib", si_tex)):
         _bib_file = run_dir / "paper" / _bib_name
         if not _bib_file.is_file():
@@ -2170,6 +2243,27 @@ def _reproduction_advisory(run_dir: Path, evidence: List[EvidenceItem]) -> List[
     ] + notes
 
 
+def _ascii_script_advisory(run_dir: Path, evidence: List[EvidenceItem]) -> List[str]:
+    """One NON-GATING line per recorded script that holds non-ASCII bytes.
+
+    Same reading of each generating ``code_ref`` as the bundle and as the append-evidence
+    refusal (:func:`sci_adk.loop.ascii_scripts.code_ref_violations`): such a script got into
+    the record before the English-only rule, or through the Python API. The record can only
+    name it; the line says so, once per file (first Evidence id that names it).
+    """
+    workspace = run_dir.parent.parent
+    seen: set = set()
+    notes: List[str] = []
+    for ev_id, ref in _reproducible_code_refs(evidence):
+        for violation in code_ref_violations(ref, run_dir, workspace):
+            key = str(violation.file.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            notes.append(recorded_advisory(ev_id, violation))
+    return notes
+
+
 # -- package-requirements gate (design/near-submission-package.md §3) --------
 
 def _load_pkgreqs(workspace_dir: Path) -> Optional[PackageReqs]:
@@ -2377,9 +2471,24 @@ def _check_package_requirements(
         problems.extend(
             bib_latex_safety_problems(_bib_text, source=_bib_name, package_source=_bib_source)
         )
-        warnings.extend(
-            bib_command_advisories(_bib_text, source=_bib_name, package_source=_bib_source)
+        _label_failed, _label_advised = bib_label_count_lines(
+            _bib_text, _citing_tex or "", source=_bib_name, package_source=_bib_source
         )
+        problems.extend(_label_failed)
+        warnings.extend(_label_advised)
+        # The SI bibliography the assembler cut from the main one (MANIFEST.md says so) is a
+        # file sci-adk wrote: it must be the canonical copy itself. Any other one -- an author's
+        # package_src/ file, or one written in place in 01_manuscript/ -- gets the allow-list
+        # check above (inside bib_latex_safety_problems) and keeps its own form.
+        if (
+            _utf8
+            and _bib_name == _REFERENCES_SI_BIB
+            and not (workspace_dir / "package_src" / _REFERENCES_SI_BIB).is_file()
+            and si_bib_cut_by_assembler(package_dir)
+        ):
+            problems.extend(
+                bib_form_problems(_bib_text, source=_bib_name, fix=PACKAGE_SI_BIB_FIX)
+            )
         warnings.extend(
             bib_month_advisories(_bib_text, source=_bib_name, package_source=_bib_source)
         )
@@ -2393,6 +2502,12 @@ def _check_package_requirements(
                 _citing_tex or "", _bib_text, source=_bib_name, fix_in=_bib_source
             )
         )
+
+    # An author's main.tex / si.tex is LaTeX sci-adk does not write: outside the execution and
+    # compile guarantee. A command in it that reads or writes a file or runs code is named
+    # (advisory, never gated).
+    for _tex_name, _tex in ((_PACKAGE_MAIN, main_tex), (_PACKAGE_SI, si_tex)):
+        warnings.extend(lint_advisories(_tex or "", _tex_name))
 
     # The character policy behind that check assumes the T1 font encoding, which the
     # main.tex/si.tex skeletons sci-adk writes load. An author-supplied manuscript may run in

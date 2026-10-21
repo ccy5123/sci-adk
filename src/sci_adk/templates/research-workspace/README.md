@@ -16,12 +16,13 @@ src/sci_adk/templates/research-workspace/
 ├── CLAUDE.md                                   # always-loaded research protocol
 ├── README.md                                   # this file
 └── .claude/
-    ├── settings.json                                          # wires the two hooks + persona
+    ├── settings.json                                          # wires the three hooks + persona
     ├── output-styles/science-orchestrator/                    # the orchestrator persona
     │   └── science-orchestrator.md
     └── hooks/sci-adk/
         ├── stop-verify-gate.sh                                # HARD gate: Stop -> sci-adk verify
-        └── reanchor.sh                                        # re-anchor: UserPromptSubmit -> sci-adk status
+        ├── reanchor.sh                                        # re-anchor: UserPromptSubmit -> sci-adk status
+        └── ascii-script-gate.sh                               # PreToolUse: ASCII-only scripts -> sci-adk check-ascii
 ```
 
 The `/sci` commands ship with the kit: `plan`, `experiment`, `publish`, `verify`, `status`, `replicate`, `package`.
@@ -36,6 +37,10 @@ The `/sci` commands ship with the kit: `plan`, `experiment`, `publish`, `verify`
 - **`reanchor.sh`** (UserPromptSubmit hook) — every turn, re-injects the
   protocol reminder + the current run's `sci-adk status` into context. The
   direct antidote to compaction drift.
+- **`ascii-script-gate.sh`** (PreToolUse hook on Write, Edit, MultiEdit and
+  NotebookEdit) — blocks a call that puts a non-ASCII character into a script (Lean is
+  exempt), naming the line, the character and its escape: the record typesets each
+  recorded script with pdflatex. `sci-adk append-evidence` refuses such a script too.
 - **`science-orchestrator` output style** — the always-on persona contract: it
   clarifies intent, delegates to research workers, and gates every conclusion
   through `sci-adk verify`.
@@ -59,7 +64,7 @@ The `/sci` commands ship with the kit: `plan`, `experiment`, `publish`, `verify`
    cp    src/sci_adk/templates/research-workspace/CLAUDE.md /path/to/research-workspace/CLAUDE.md
    ```
    If the target already has a `.claude/settings.json`, merge the `hooks.Stop`,
-   `hooks.UserPromptSubmit`, and `outputStyle` keys from this kit's
+   `hooks.UserPromptSubmit`, `hooks.PreToolUse`, and `outputStyle` keys from this kit's
    `settings.json` into it rather than overwriting.
 
 3. **Verify the hooks are executable** (they ship with the executable bit set;

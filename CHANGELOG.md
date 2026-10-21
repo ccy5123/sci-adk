@@ -10,7 +10,101 @@ The public surface (CLI + curated Python API) is frozen as the 1.0 contract
 
 ## [Unreleased]
 
+### Added
+
+- The research-workspace kit has a new PreToolUse hook (`.claude/hooks/sci-adk/ascii-script-gate.sh`,
+  timeout 30 s) on Write, Edit, MultiEdit and NotebookEdit that blocks a call putting a character
+  outside ASCII into a script. It runs `sci-adk check-ascii`, an internal verb outside the public
+  CLI (not listed by `sci-adk --help`): it reads the hook input on stdin and exits 3 to block, 0
+  otherwise. The hook blocks on exit 3 only; when sci-adk is missing or fails, it lets the call
+  through with a warning. Lean files are exempt, and a line written back unchanged is not judged
+  (a line ending CR LF and the same line ending LF are one line). `sci-adk init-session` installs
+  the hook and its settings entry.
+- `sci-adk append-evidence` refuses an Evidence item (exit 2, nothing recorded) whose
+  `code_ref` names a script holding non-ASCII bytes. `sci-adk verify` adds one advisory per
+  such script recorded before this change.
+
 ### Changed
+
+- The bibliographies sci-adk ships (`paper/references.bib`, `paper/references_SI.bib`, the
+  `paper/deposit/` copy, the package's SI cut) are a canonical copy of the literature store:
+  every entry BibTeX reads, written as `@type{key, field = {value}, ...}`, macros expanded, no
+  `@string`, `@preamble` or `@comment`. A value keeps only allow-listed commands (accents,
+  letters, text symbols, simple markup, math defined without amsmath); any other command is
+  printed as text. The fields no style prints (`abstract`, `keywords`, `copyright` and the
+  others `bib_latex.UNPRINTED_FIELDS` names), the ISSN and a url that is the doi.org link of
+  the entry's doi are left out of every shipped copy without a warning (the literature store
+  keeps them). An entry whose key no citation can name or that repeats a key, a url or doi that
+  is not plain and a crossref to an absent entry are left out too, and each of these, like a
+  BibTeX syntax error in the store, is a render warning naming the entry.
+- In that copy a `(` or `)` at brace level 0 of an author, editor or key field is braced
+  (natbib read the label up to the first `(` and stopped on `Doe ({\"O}nal)`); an entry plainnat
+  would label by the first three characters of its organization (an authorless `@manual` or
+  `@proceedings`) or of its citation key, where those cut an escape, math or a letter in two or
+  hold `_`, gets a `key` field of plain letters (natbib then cites it by that key, without a
+  year, as plainnat cites any entry with a key); a key field is at most 100 characters; `\not`
+  is kept only before one character or one plain math symbol (newtxmath's `\not` looped on
+  anything else); a script after a math font declaration on a scripted base gets an empty base
+  (`x^2\rm^3`); an accent over an empty or doubly braced group is written with its braces
+  dropped (`\~{{}}` -> `\~{}`) or printed as text. Each stopped pdflatex in the draft, the SI
+  and the record while render and verify said nothing. A run rendered before this change fails
+  `verify` until it is rendered again (see below).
+- A package bibliography the author supplies also fails on what natbib or BibTeX stop on though
+  every command in it is allowed: a `(` followed by a command, group or letter outside ASCII in
+  the names or key a label holds, a bracket there, a label too long for BibTeX, an unsafe
+  three-character label, a year that is not plain text (`bib label:`); a command with a capital
+  letter or a capital in math at brace level 0 of a title, edition or type, which BibTeX's case
+  change lowercases (`bib case:`, fix: braces); a key a citation cannot name, a type named like a
+  style's function (`bib entry:`); a value longer than BibTeX holds.
+- In that copy a link command (`\href`, `\url`) inside another link is printed as text (hyperref
+  keeps at most 10 open: 11 nested `\href` stopped pdflatex); math commands with arguments nest
+  at most 4 deep, with no arrow accent inside another and no `\sqrt` with an index inside another
+  `\sqrt`, text markup nests at most 8 deep, and a value holds at most 32 math commands with
+  arguments (`\sqrt[3]` 12 deep, `\overrightarrow` 11 deep or 4700 of them in one reference kept
+  pdflatex busy for minutes; `\textsuperscript` 37 deep stopped it). The rest are printed as
+  text, each a render warning. An entry whose key starts with a character outside ASCII (a
+  `\cite` naming it first stopped pdflatex: "Missing \endcsname inserted") or is longer than 200
+  characters is left out, the warning suggesting an ASCII key; a letter outside ASCII later in a
+  key is kept. A name ending in a comma followed only by `-`, `--` or `~` is written without it
+  (BibTeX: "has a comma at the end"). A superscript right after a prime keeps its base (`x'^2`;
+  TeX joins them), and a prime after a space gets an empty base (`x' '` was a double
+  superscript).
+- More than 26 entries sharing one citation label (plainnat tells them apart by a letter after
+  the year, a to z, and natbib stops on the 27th cited) are a render warning, and in `verify` a
+  `bib label:` failure when the manuscript cites more than 26 of them, an advisory when it cites
+  fewer. The copy is not rewritten.
+- A package bibliography the author supplies also fails on those nesting and count limits, on a
+  key that starts outside ASCII or is longer than 200 characters, and on a superscript or
+  subscript the copy rewrites so that it compiles (`bib script:`: `x^2^3`, `x_1_2`, `x^2'`, `x^$`,
+  `x^\rm 2`, `x^\hat{y}`, `x^\cdots`, a letter outside ASCII after `^`).
+- The bibliography checks read a file once and at most its first 5000 commands (entries,
+  `@string`, `@preamble`); a file with more fails with a `bib size:` line. 100000 `@string`
+  macros, 50000 repeated keys or a 3 MB copy took from 30 s to minutes in `verify`; each now
+  takes a few seconds.
+- `render --record-only` no longer says the scripts its record shows by name only are shipped
+  under `paper/code/` (that mode writes nothing under `paper/`); it says a full render ships them.
+- `verify` prints a bibliography's re-render remedy once per file, not on every entry line.
+- `sci-adk verify` fails a shipped bibliography that is not that canonical copy, or that holds
+  a command off the allow-list or a character pdflatex cannot typeset, whether or not
+  `pubreqs.json` is frozen. **A run rendered before this change fails until it is rendered
+  again with the inputs of its last render** (`sci-adk render <run_dir> --prose ... --si ...
+  --si-prose ... --figures ...`, each that the run used; the deposit declaration is kept from
+  the last render, and a bare `sci-adk render` writes a skeleton draft). A package bibliography the author supplies is checked against the
+  allow-list in every field and fails on a BibTeX syntax error, a repeated key or a macro no
+  `@string` defines. The package SI bibliography is held to the canonical form only when the
+  assembler cut it.
+- The bibliography deny-list is gone. A lint names the commands that read or write files or run
+  code in author-written LaTeX (an authored SI body, a package `main.tex` or `si.tex`), as a
+  render warning and a verify advisory; it never fails a run. It also names `\VerbatimInput`,
+  `\makeatletter`, `\newread` and `\newwrite`.
+- The English-only scripts hook lets a Write, Edit or MultiEdit of a document (`.md`, `.csv`,
+  `.json`, `.tex`, `.lean` ...) through without starting sci-adk, and warns when its input is not
+  a JSON object. The verify advisory for a recorded non-ASCII script is printed as `advisory:`
+  with or without a publishing contract.
+- `.pyw` joined `code_ref.SOURCE_EXTENSIONS` (Python source): a `.pyw` script a `code_ref`
+  names is now shipped under `paper/code/` in the reproduction bundle, and the English-only
+  scripts rule covers it. Before, the bundle did not copy it (written with a hash, it was
+  listed as a data reference).
 
 - `sci-adk render` writes a LaTeX-safe copy of the run's literature bib into
   `paper/references.bib` and `paper/references_SI.bib` instead of a verbatim one: HTML
@@ -18,15 +112,15 @@ The public surface (CLI + curated Python API) is frozen as the 1.0 contract
   `>` prints as itself, a bare `&`, `%`, `#` (and `_` or `^` outside math) is escaped, and
   characters pdflatex cannot typeset go through render's character map (inside `$...$`
   without a second pair of `$`) or become accent commands. A bare month name BibTeX does not
-  define (`month = June`, `sept`) becomes its macro (`jun`, `sep`). Keys, `url`/`doi` values
-  and fields no style prints (`abstract`, `keywords`, `file`, `annote`, `timestamp` ...) are
-  untouched; the literature store is never rewritten.
+  define (`month = June`, `sept`) becomes its macro (`jun`, `sep`). The literature store is
+  never rewritten. (Since the canonical copy, above, the copy also leaves out fields no style
+  prints and a url or doi that is not plain.)
 - `sci-adk verify` fails a run whose `paper/references.bib` or `paper/references_SI.bib`
   still holds, in a field a style prints, a character pdflatex cannot typeset, an HTML entity
   or tag, a bare special, or a `$` nested inside math or left open. Each line names the file,
   the entry key and the character, and either the LaTeX form to use or, where there is none,
   that the character must be replaced in the literature store. A run rendered before this
-  change fails until it is rendered again: re-run `sci-adk render` for it. The package gate
+  change fails until it is rendered again with the inputs of its last render. The package gate
   runs the same check, names the `package_src/` file to fix, and advises on month names
   BibTeX does not define.
 - The preambles sci-adk writes (paper draft, record, authored SI, the package `record.tex`,

@@ -239,11 +239,13 @@ def test_per_run_main_and_si_cite_different_subsets_are_independent(tmp_path):
 
 
 def test_per_run_main_bib_byte_unchanged_by_m6(tmp_path):
-    """AC-F6 / REQ-SA-607: the main paper's references.bib co-location is byte-unchanged
-    (a faithful full-pool copy) — M6 does not touch main.tex/references.bib wiring."""
+    """AC-F6 / REQ-SA-607: the main paper's references.bib co-location is unchanged by M6
+    (the canonical copy of the full pool) — M6 does not touch main.tex/references.bib wiring."""
+    from sci_adk.render.bib_latex import paper_bib
+
     run_dir, _ = _compile(tmp_path, "t-m6-mainbib", _si_citing("A2020"))
     main_bib = (run_dir / "paper" / "references.bib").read_text(encoding="utf-8")
-    assert main_bib == _POOL_BIB  # faithful full-pool copy, unchanged
+    assert main_bib == paper_bib(_POOL_BIB)  # the full pool, as render writes any bib
 
 
 # --- AC-F5: no pool / no SI citations -> NO references_SI.bib written (REQ-SA-606) ---
@@ -300,8 +302,8 @@ def test_stale_wired_into_both_documents_comment_absent():
 # ===========================================================================
 
 # Package fixtures mirror tests/test_si_authoring_m5.py.
-from sci_adk.core.pkgreqs import DEFAULT_REQUIRED_SECTIONS, PackageReqs
-from sci_adk.core.spec import (
+from sci_adk.core.pkgreqs import DEFAULT_REQUIRED_SECTIONS, PackageReqs  # noqa: E402 -- the package fixtures' own imports
+from sci_adk.core.spec import (  # noqa: E402 -- the package fixtures' own imports
     DecisionRule,
     DecisionRuleKind,
     Hypothesis,
@@ -311,7 +313,7 @@ from sci_adk.core.spec import (
     Spec,
     TargetClaim,
 )
-from sci_adk.core.evidence import (
+from sci_adk.core.evidence import (  # noqa: E402 -- the package fixtures' own imports
     Bearing,
     BearingDirection,
     EvidenceItem,
@@ -319,9 +321,9 @@ from sci_adk.core.evidence import (
     Provenance,
     Result,
 )
-from sci_adk.loop.checkpoint_loop import run_checkpoint_loop
-from sci_adk.provenance import pkgreqs_digest
-import json
+from sci_adk.loop.checkpoint_loop import run_checkpoint_loop  # noqa: E402 -- the package fixtures' own imports
+from sci_adk.provenance import pkgreqs_digest  # noqa: E402 -- the package fixtures' own imports
+import json  # noqa: E402 -- the package fixtures' own imports
 
 
 def _numeric_spec(spec_id: str, value: float = 0.9) -> Spec:

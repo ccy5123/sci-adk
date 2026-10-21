@@ -35,7 +35,8 @@ import stat
 
 # Parse the recorded point-statistic/op/threshold out of a numeric Claim's confidence basis
 # (the DecisionEngine writes it verbatim, e.g. "... statistic 'point'=0.72 >= 0.5 ...").
-BASIS = re.compile(r"'point'=([-\d.eEnan]+)\s*(<=|>=|<|>|==)\s*([-\d.eEnan]+)")
+# ASCII digits only: without re.ASCII, \d also matches other scripts' digits.
+BASIS = re.compile(r"'point'=([-\d.eEnan]+)\s*(<=|>=|<|>|==)\s*([-\d.eEnan]+)", re.ASCII)
 
 
 def load_claims(run_dir):

@@ -100,7 +100,7 @@ NON_REPRODUCIBLE_KINDS = frozenset(
 SOURCE_EXTENSIONS = frozenset(
     {
         # Python (incl. Cython), R, Julia, MATLAB/Octave, notebooks
-        ".py", ".pyx", ".pxd", ".ipynb", ".r", ".rmd", ".qmd", ".jl", ".m",
+        ".py", ".pyw", ".pyx", ".pxd", ".ipynb", ".r", ".rmd", ".qmd", ".jl", ".m",
         # statistics packages and probabilistic-model languages
         ".do", ".ado", ".sas", ".sps", ".stan", ".jags", ".bug",
         # shells and scripting languages

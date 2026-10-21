@@ -5,7 +5,7 @@ design/research-session-enforcement.md D3 + sci-adk-as-moai.md §10.3/§10.5: in
 the ``src/sci_adk/templates/research-workspace/`` kit into a target research
 workspace, with one command, keeping the hook/``verify`` contracts version-pinned to
 the sci-adk release. As of the sci-adk-as-moai Phase C upgrade the kit is the FULL
-operational layer: the two enforcement hooks, the ``science-orchestrator`` output
+operational layer: the three enforcement hooks, the ``science-orchestrator`` output
 style, ``CLAUDE.md``, a ``settings.json`` fragment, the 11 worker/guard agents (6
 workers, including the v2-promoted ``expert-replicator``, and 5 advisory guards), the 8
 ``sci``/``science-*`` Skills, and the 8 ``/sci`` command routers. (The
@@ -18,7 +18,7 @@ Two load-bearing invariants, tested explicitly in tests/test_init_session.py:
   - NON-CLOBBERING: a file the user already has is never overwritten. Identical
     content -> a no-op ("already current"); different content -> a "skipped"
     report and the user's file is left alone. The persona ``outputStyle`` and the
-    two hook events merge into an EXISTING ``settings.json`` (never replacing it).
+    three hook events merge into an EXISTING ``settings.json`` (never replacing it).
   - IDEMPOTENT: re-running the installer on the same dir changes nothing -- no
     duplicate hooks (matched by their ``command`` string), no file churn (an
     already-current file is not rewritten, so its mtime is stable), exit 0.
@@ -30,7 +30,7 @@ is composition-root-adjacent, like ``cli.py``, not kernel code).
 
 Templates root resolution: the kit ships as package data at
 ``sci_adk/templates/research-workspace/`` (via MANIFEST.in ``graft`` +
-``include-package-data`` -- the hidden ``.claude/`` dir and the two ``.sh`` hooks
+``include-package-data`` -- the hidden ``.claude/`` dir and the ``.sh`` hooks
 ride inside the wheel). ``_templates_root()`` resolves it with
 ``importlib.resources.files("sci_adk")`` so it works for BOTH an editable install
 (``pip install -e .``) and a built wheel (unzipped into site-packages as a real
@@ -54,19 +54,21 @@ from pydantic import BaseModel, Field
 # plain file assets copied verbatim (non-clobbering). CLAUDE.md and settings.json
 # have their own bespoke handling below and are NOT in this list. The ``/research``
 # command and ``researcher`` persona were removed in the sci-adk-as-moai pivot; this
-# list now installs the FULL kit -- the two enforcement hooks, the
+# list now installs the FULL kit -- the three enforcement hooks, the
 # ``science-orchestrator`` output style, the 11 worker/guard agents (6 workers,
 # including the v2-promoted ``expert-replicator``, and 5 advisory guards), the 8
 # ``sci``/``science-*`` knowledge-library Skills, and the 8 ``/sci`` command routers.
 # Every entry is copied through the same non-clobbering ``_copy_nonclobber`` path
 # (the loop's ``dst.parent.mkdir(parents=True)`` creates ``.claude/agents/``,
 # ``.claude/skills/<name>/`` and ``.claude/commands/sci/`` as needed -- no
-# per-asset special-casing). Only the two hooks are executable
+# per-asset special-casing). Only the hooks are executable
 # (``_EXECUTABLE_ASSETS``); agents/skills/commands are plain data.
 _PLAIN_ASSETS = (
-    # enforcement hooks (Stop verify gate + UserPromptSubmit re-anchor)
+    # enforcement hooks (Stop verify gate + UserPromptSubmit re-anchor + PreToolUse
+    # English-only scripts gate)
     ".claude/hooks/sci-adk/stop-verify-gate.sh",
     ".claude/hooks/sci-adk/reanchor.sh",
+    ".claude/hooks/sci-adk/ascii-script-gate.sh",
     # the always-on persona
     ".claude/output-styles/science-orchestrator/science-orchestrator.md",
     # v1 worker agents (5)
@@ -110,6 +112,7 @@ _EXECUTABLE_ASSETS = frozenset(
     {
         ".claude/hooks/sci-adk/stop-verify-gate.sh",
         ".claude/hooks/sci-adk/reanchor.sh",
+        ".claude/hooks/sci-adk/ascii-script-gate.sh",
     }
 )
 
@@ -122,8 +125,9 @@ _SETTINGS = ".claude/settings.json"
 
 # the persona key the fragment wants (D3 / Layer 3).
 _OUTPUT_STYLE = "science-orchestrator"
-# the two hook events the fragment wires (D3 / Layers 1-2).
-_HOOK_EVENTS = ("Stop", "UserPromptSubmit")
+# the hook events the fragment wires (D3 / Layers 1-2, and the PreToolUse English-only
+# scripts gate of design/english-only-scripts.md).
+_HOOK_EVENTS = ("Stop", "UserPromptSubmit", "PreToolUse")
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +288,7 @@ def _merge_settings(
         absent       -> set it to the fragment's value ("science-orchestrator").
         == fragment  -> no-op (idempotent).
         other value  -> DO NOT overwrite; record a CONFLICT (a soft warning).
-    - ``hooks.<event>`` for each of Stop / UserPromptSubmit:
+    - ``hooks.<event>`` for each of Stop / UserPromptSubmit / PreToolUse:
         the fragment's hook is matched by its ``command`` string.
         present      -> no-op (no duplicate; idempotent).
         event exists with OTHER hooks -> APPEND ours (the user's hooks survive,

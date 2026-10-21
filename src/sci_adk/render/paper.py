@@ -1278,7 +1278,82 @@ def render_paper_latex(
             lines.append(r"\end{itemize}")
     lines.append("")
     lines.append(r"\end{document}")
-    return "\n".join(lines)
+    return break_long_lines("\n".join(lines))
+
+
+# TeX reads a source line into a buffer of buf_size characters (200000 in TeX Live): a longer
+# line stops the compile (a 240000-character title did). Every .tex sci-adk writes breaks a line
+# longer than this at white space; to TeX a line end is a space, and inside a comment the next
+# line starts with a comment character of its own.
+TEX_LINE_LIMIT = 10000
+_VERBATIM_BEGIN_RE = re.compile(r"\\begin\s*\{(lstlisting|verbatim\*?|Verbatim)\}")
+_UNESCAPED_PERCENT_RE = re.compile(r"(?<!\\)(?:\\\\)*%")
+
+
+def _comment_start(line: str) -> Optional[int]:
+    """The index of the ``%`` that starts a comment in ``line`` (one not escaped), or None."""
+    m = _UNESCAPED_PERCENT_RE.search(line)
+    return m.end() - 1 if m else None
+
+
+def _break_line(line: str, limit: int) -> str:
+    """``line`` broken at spaces into lines of at most ``limit`` characters: a space after a
+    backslash (a control space) is never a break point, and a break inside the comment the line
+    ends with starts the next line with ``% ``. A run with no break point is left whole."""
+    comment = _comment_start(line)
+    out: list[str] = []
+    start, prefix = 0, ""
+    while len(prefix) + len(line) - start > limit:
+        cut = next(
+            (p for p in range(start + limit - len(prefix), start, -1)
+             if line[p] == " " and line[p - 1] != "\\"),
+            None,
+        )
+        if cut is None:
+            break
+        out.append(prefix + line[start:cut])
+        prefix = "% " if comment is not None and cut > comment else ""
+        start = cut + 1
+    out.append(prefix + line[start:])
+    return "\n".join(out)
+
+
+# @MX:ANCHOR: [AUTO] The last step of every .tex renderer (draft, authored SI, record, package
+#   skeletons): a line TeX can read whole.
+# @MX:REASON: callers: render_paper_latex, authored_si.render_authored_si_latex,
+#   si.render_si_latex, package skeletons; make_si.py carries a copy (compared by a test). A
+#   break inside a verbatim body would change the listing.
+def break_long_lines(tex: str, limit: int = TEX_LINE_LIMIT) -> str:
+    """``tex`` with every line longer than ``limit`` characters broken at white space
+    (:func:`_break_line`), except the body of a ``lstlisting`` / ``verbatim`` environment, which
+    is verbatim text (a record listing has no line over 2000 columns). PURE."""
+    out: list[str] = []
+    verbatim_end: Optional[str] = None
+    for line in tex.split("\n"):
+        if verbatim_end is not None:
+            out.append(line)
+            if verbatim_end in line:
+                verbatim_end = None
+            continue
+        out.append(_break_line(line, limit) if len(line) > limit else line)
+        m = _VERBATIM_BEGIN_RE.search(line)
+        if m is not None and f"\\end{{{m.group(1)}}}" not in line[m.end() :]:
+            verbatim_end = f"\\end{{{m.group(1)}}}"
+    return "\n".join(out)
+
+
+def long_line_warnings(tex: str, name: str, limit: int = TEX_LINE_LIMIT) -> list[str]:
+    """One render warning when ``tex`` (the document ``name``) still has a line longer than
+    ``limit`` -- a run of that many characters with no white space, which
+    :func:`break_long_lines` cannot break -- else none. PURE."""
+    longest = max((len(line) for line in tex.split("\n")), default=0)
+    if longest <= limit:
+        return []
+    return [
+        f"{name} has a line of {longest} characters with no white space to break it at -- TeX "
+        "reads at most 200000 characters of a line, so a longer one stops the compile; shorten "
+        "the text it comes from"
+    ]
 
 
 def _truncate_words(text: str, limit: int) -> str:

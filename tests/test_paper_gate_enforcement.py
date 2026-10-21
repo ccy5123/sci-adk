@@ -242,8 +242,11 @@ def test_per_run_unpublished_citation_is_advisory_not_gated(tmp_path):
     run_dir = tmp_path / "runs" / "spec-x"
     _write_run(run_dir, point=0.61)
     _draft(run_dir, r"\section{Results}As shown \cite{McKay2013}, the value is 0.61.")
+    # As render writes it (verify fails a per-run bibliography in any other form).
+    from sci_adk.render.bib_latex import paper_bib
+
     (run_dir / "paper" / "references.bib").write_text(
-        "@article{McKay2013, title={x}}\n", encoding="utf-8"  # no doi field -> unpublished
+        paper_bib("@article{McKay2013, title={x}}\n"), encoding="utf-8"  # no doi -> unpublished
     )
     _freeze_pubreqs(run_dir, required_sections=[], figure_font_policy=False,
                     image_min_dpi=None, reproduction_bundle=False)

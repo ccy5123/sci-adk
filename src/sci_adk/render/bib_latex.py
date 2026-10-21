@@ -1,36 +1,35 @@
 """
-The LaTeX-safe copy of a run's bibliography, and which characters pdflatex can typeset.
+The bibliography a rendered paper loads, and which characters pdflatex can typeset.
 
 Render copies the run's literature pool (``literature/references.bib``, as paperforge or a manual
 ingest wrote it) into ``paper/references.bib`` and the cited-only ``paper/references_SI.bib``.
 Registrar BibTeX (Crossref's metadata is XML-rooted) can carry HTML entities (``&amp;``), HTML
-markup (``<i>K</i>``) and characters pdflatex cannot typeset (U+2212 MINUS SIGN).
-:func:`latex_safe_bib` writes that copy in LaTeX; :func:`paper_bib`, what render writes, adds
-four changes to what plainnat prints (title case kept as acquired, no ISSN or URL repeating
-the DOI, no stray period after a given name, name letters BibTeX sorts by their base letter).
-The pool itself is never rewritten here: its keys never change and the merge keeps old entries
-verbatim (``search/literature_merge.py``).
+markup (``<i>K</i>``) and characters pdflatex cannot typeset (U+2212 MINUS SIGN), and a
+hand-written or publisher bibliography any LaTeX at all. What render writes is
+:func:`paper_bib`, the canonical copy (:func:`canonical_bib`): every entry BibTeX reads, as
+``@type{key, field = {value}, ...}``, each value LaTeX-safe and holding only the commands on an
+allow-list (:data:`TEXT_COMMANDS`, :data:`MATH_COMMANDS`), anything else printed as text; plus
+the reference-list changes (title case kept as acquired, no ISSN or URL repeating the DOI, no
+stray period after a given name, name letters BibTeX sorts by their base letter). Verify accepts
+a shipped bibliography only when it is that copy (``pkgreqs_checks.bib_form_problems``), so the
+copy and the check judge the same text. The pool itself is never rewritten here: its keys never
+change and the merge keeps old entries verbatim (``search/literature_merge.py``).
 
-Only field values change; entry headers (keys), field names and the text between entries are
-copied as they are, except that a bare month name BibTeX does not define (``month = June``,
-``month = sept``: BibTeX warns and leaves the month out of the reference list) becomes its
-three-letter macro (``jun``, ``sep``).
-
-Three kinds of field are left alone or nearly so:
+:func:`latex_safe_bib` is the character and markup layer on its own, over a file as written
+(layout, keys, field names and the text between entries copied as they are, a bare month name
+BibTeX does not define written as its macro); the canonical copy applies the same conversion
+to each value (:func:`_latex_safe_text`). In that layer:
 
 - ``url`` and ``doi`` values are never escaped: plainnat prints them through ``\\url`` /
   ``\\Url``, which print a special character as itself, so an escape there prints its backslash
-  (measured: ``AID\\_JBM1`` for ``\\_`` in a doi). XML's own escapes in them (``&amp;``,
-  ``&lt;``, ``&gt;``, ``&quot;``, ``&apos;``, numeric) are decoded; any other entity-shaped text
-  (``?a&copy;b``) is part of the URL. They are NOT inert: hyperref reads a URL as TeX to make
-  the link, so a backslash command in one runs (``\\csname @@input\\endcsname`` read a file)
-  and ``^^5c`` spells a backslash; verify fails a backslash, ``^^``, a brace or a ``run:`` /
-  ``file:`` link in a url or doi value and in the URL argument of ``\\url`` / ``\\href``
-  (:func:`url_problems`).
+  (measured: ``AID\\_JBM1`` for ``\\_`` in a doi). XML's own escapes in them are decoded. They
+  are NOT inert: hyperref reads a URL as TeX to make the link, so the canonical copy keeps a url
+  only when it is plain (:func:`plain_url`) and a doi only in the DOI form, and verify fails a
+  backslash, ``^^``, a brace or a ``run:`` / ``file:`` link in an author's url or doi value and in
+  the URL argument of ``\\url`` / ``\\href`` (:func:`url_problems`).
 - fields no BibTeX style prints (:data:`UNPRINTED_FIELDS`: ``abstract``, ``keywords``, ``file``,
-  ``annote``, ``timestamp`` ... -- what Zotero, JabRef, Mendeley and BibDesk write) are copied as
-  acquired. Their text never reaches the ``.bbl``, so it cannot stop pdflatex, and verify does
-  not check them either.
+  ``annote``, ``timestamp`` ... -- what Zotero, JabRef, Mendeley and BibDesk write) are left as
+  acquired; the canonical copy leaves them out.
 
 Inside a printed value the copy distinguishes running text, math (``$...$``, ``$$...$$``,
 ``\\(...\\)``) and verbatim arguments (``\\url{...}``, left alone). Markup is read only in text:
@@ -68,41 +67,58 @@ both:
   placeholder or stripped of a mark: a reference must not silently lose a letter or an accent,
   so verify names it instead.
 
-Commands are copied as acquired (a bib entry legitimately holds ``{\\"O}`` or
-``\\textit{n}``); verify fails a command on :data:`DANGEROUS_COMMANDS` (one that can read or
-write a file, define a macro, change how TeX reads its input or end the document) and TeX's
-``^^`` character-code notation, which the copy writes in math as two printed carets (in text a
-``^`` is escaped anyway); any other command outside :data:`SAFE_COMMANDS` (accents, letters,
-markup, symbols, common math) is named in an advisory, and so is a math command in running text
-(:data:`MATH_ONLY_COMMANDS`, :func:`math_commands_in_text`).
+Commands (:func:`_allowed_value`): a value is read as TeX tokens; an allow-listed command is
+kept with its arguments inside one brace group (BibTeX's case change cannot alter it), any
+other control word or symbol is printed as text (``{\\textbackslash}name``), ``\\(...\\)`` and
+``\\[...\\]`` become ``$...$``, and TeX's ``^^`` character-code notation never survives (math
+``^^`` is written as two printed carets, in text a ``^`` is escaped anyway). Verify names what
+the copy would print as text (:func:`command_issues`).
+
+natbib's citation label (:func:`label_source`): ``[`` ``]`` at brace level 0 of every value, and
+``(`` ``)`` at brace level 0 of an author, editor or key field, are braced; an entry plainnat
+would label by three characters natbib cannot read gets a key field (:func:`unsafe_label`); a
+year is plain text. An author's bibliography, not rewritten, is checked for the same shapes
+(:func:`label_issues`) and for what BibTeX's case change would alter (:func:`case_change_issues`).
 
 What BibTeX prints is read as BibTeX reads the file (:func:`bib_commands`): every ``@string``
 value (printed wherever a field names the macro) and every ``@preamble`` (written into the
 reference list as it is) as well as the entries, a parenthesised entry or ``@ article`` too. The
-paper copy (:func:`paper_bib`) leaves every ``@preamble`` out; verify fails one.
+canonical copy expands every macro and leaves every ``@preamble`` out; verify fails one.
 
 PURE (string in, string out): stdlib plus sibling render helpers, no I/O.
 """
 
 from __future__ import annotations
 
+import bisect
+import functools
 import html
 import re
 import unicodedata
 from typing import Iterator, NamedTuple
 from urllib.parse import unquote
 
-from sci_adk.render.paper import _ACCENT_HI, _UNDEFINED_LATIN_A, _UNICODE_MAP, _latex_escape
+from sci_adk.render.paper import (
+    _ACCENT_HI,
+    _UNDEFINED_LATIN_A,
+    _UNICODE_MAP,
+    _latex_escape,
+    is_doi,
+)
 
 # An entry header ``@type{KEY,``. A value never runs past one unless its braces say so.
 _HEADER_RE = re.compile(r"@\w+\s*\{\s*[^,\s}]+\s*,")
 
 # A well-formed HTML entity (named, decimal or hex, ending in ';') not preceded by a backslash:
 # ``\&amp;`` is LaTeX already -- an escaped ampersand followed by the letters "amp;".
-HTML_ENTITY_RE = re.compile(r"(?<!\\)&(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#[xX][0-9A-Fa-f]+);")
+# A numeric reference has at most 8 digits (the largest code point has 7): a longer one is text,
+# never decoded (Python refuses to convert an integer of more than 4300 digits).
+HTML_ENTITY_RE = re.compile(
+    r"(?<!\\)&(?:[A-Za-z][A-Za-z0-9]*|#[0-9]{1,8}|#[xX][0-9A-Fa-f]{1,8});"
+)
 # XML's predefined entities and numeric references: the only escapes XML-rooted metadata puts
 # into a URL. Other entity-shaped text in a url or doi value is part of the URL.
-_XML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|apos|#[0-9]+|#[xX][0-9A-Fa-f]+);")
+_XML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|apos|#[0-9]{1,8}|#[xX][0-9A-Fa-f]{1,8});")
 
 # The markup read as a tag: HTML face markup, Crossref's face markup (scp, tt, ovl, font) and
 # the namespaced MathML / JATS elements registrars deposit, with attributes written
@@ -129,10 +145,11 @@ _MARKUP_CMD = {
     "sub": "textsubscript",
     "sup": "textsuperscript",
 }
-_MARKUP_PAIR_RE = re.compile(
-    r"<(?P<tag>" + "|".join(sorted(_MARKUP_CMD, key=len, reverse=True)) + r")(?![\w:.-])"
-    + _TAG_ATTRS + r"\s*>(?P<body>.*?)</(?P=tag)\s*>",
-    re.DOTALL | re.IGNORECASE,
+# An opening or closing tag of that markup; :func:`_convert_markup` pairs them in one pass.
+_MARKUP_TAG_RE = re.compile(
+    r"<(?P<close>/)?(?P<tag>" + "|".join(sorted(_MARKUP_CMD, key=len, reverse=True))
+    + r")(?![\w:.-])(?(close)\s*|" + _TAG_ATTRS + r"\s*)>",
+    re.IGNORECASE,
 )
 
 # A decoded entity's character in LaTeX: < and > as commands, so they never read as a tag (and
@@ -181,9 +198,12 @@ _MONTH_MACRO = {
 
 # Inside a field value: arguments typeset verbatim (left alone) and math.
 _VERBATIM_ARG = r"\\(?:url|href|path|doi)\s*\{[^{}]*\}"
+# ``\(`` opens math up to the next ``\)`` (found by :func:`_segments`, once, so a run of ``\(``
+# with no partner is read in linear time).
 _VALUE_SEGMENT_RE = re.compile(
     r"(?P<verbatim>" + _VERBATIM_ARG + r")"
-    r"|(?P<math>\$\$.*?\$\$|(?<!\\)\$(?:[^$\\]|\\.)*\$|\\\(.*?\\\))",
+    r"|(?P<math>\$\$.*?\$\$|(?<!\\)\$(?:[^$\\]|\\.)*\$)"
+    r"|(?P<paren>\\\()",
     re.DOTALL,
 )
 # What the copy escapes: in text a bare & % # _ ^ and every < >; in math a bare & % #.
@@ -199,7 +219,7 @@ _TEXT_ESCAPE = {
 }
 _MATH_ESCAPE_RE = re.compile(r"(?<!\\)[&%#]")
 # What verify calls bare: the same, except a & that starts an entity (named by its own line).
-_NOT_ENTITY = r"(?!(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#[xX][0-9A-Fa-f]+);)"
+_NOT_ENTITY = r"(?!(?:[A-Za-z][A-Za-z0-9]*|#[0-9]{1,8}|#[xX][0-9A-Fa-f]{1,8});)"
 _BARE_IN_TEXT_RE = re.compile(r"(?<!\\)(?:[%#_^]|&" + _NOT_ENTITY + ")")
 _BARE_IN_MATH_RE = re.compile(r"(?<!\\)(?:[%#]|&" + _NOT_ENTITY + ")")
 
@@ -248,127 +268,143 @@ _ACCENT_CMD = {
 }
 _BELOW_MARKS = frozenset("̧̨̣̦̱")
 
-# @MX:NOTE: [AUTO] The list is about what a command can do, not whether the paper loads its
-#   package: none of these reads or writes a file, defines a macro or ends the document.
-# The control words a printed bib value is known to carry (verify names any other that is not
-# on :data:`DANGEROUS_COMMANDS` in an advisory, :func:`unknown_commands`): accents with a
-# letter name (an accent written with a symbol, the acute or the umlaut, is not a control
-# word), letters, text markup, the verbatim commands, text symbols and common math -- plus
-# every command the copy itself writes (:data:`SAFE_COMMANDS`).
-_SAFE_TEXT_COMMANDS = frozenset(
-    "b c d H k r t u v textcommabelow "
-    "i j o O l L ss SS ae AE oe OE aa AA dh DH th TH ng NG dj DJ "
-    "textit textbf textsc textrm textsf texttt textup textsl textmd textnormal emph em it bf "
-    "sc rm sf tt sl up mbox textsubscript textsuperscript underline "
-    "url href path doi Url "
+# @MX:NOTE: [AUTO] An allow-list on purpose: a deny-list over the copy could not be closed (a
+#   command split across '#' parts or @string macros, BibTeX's case change turning \INPUT into
+#   \input, expl3, PDF actions ...). Each name here is compiled by a test with the preambles
+#   render emits (Latin Modern without figures, Times with them; paper and record).
+# The commands a value of the paper's bibliography may hold, by what they take in text mode
+# (TEXT_COMMANDS) and in math (MATH_COMMANDS). Every other control word or symbol is printed as
+# text by the copy (:func:`paper_bib`), and verify fails a bibliography that holds one.
+# Accents written with a letter name (an accent written with a symbol, the acute or the umlaut,
+# is handled as a control symbol); the cedilla, ogonek and comma below need T1, which every
+# preamble loads.
+_TEXT_ACCENT_WORDS = frozenset("c v H u k r d b t textcommabelow".split())
+_TEXT_ACCENT_SYMBOLS = frozenset("'`^\"~=.")
+# Letters with no accent (the dotless i and j, the Scandinavian, Polish and Icelandic letters).
+_TEXT_LETTERS = frozenset(
+    "i j o O l L ss SS ae AE oe OE aa AA dh DH th TH ng NG dj DJ".split()
+)
+# Text symbols publisher metadata carries and the copy itself writes; the TS1 ones are in the
+# LaTeX kernel (the old textcomp package).
+_TEXT_SYMBOLS = frozenset(
     "textbackslash textasciitilde textasciicircum textless textgreater textbraceleft "
     "textbraceright textbar textunderscore textdollar textendash textemdash textquoteleft "
     "textquoteright textquotedblleft textquotedblright textquotesingle textregistered "
     "texttrademark textcopyright copyright textdegree textperiodcentered textbullet "
     "textellipsis ldots dots dag ddag S P pounds textsection textparagraph textdagger "
     "textdaggerdbl guillemotleft guillemotright guilsinglleft guilsinglright quotedblbase "
-    "quotesinglbase textexclamdown textquestiondown textmu textperthousand LaTeX LaTeXe TeX "
-    "relax protect space nobreakspace thinspace enspace quad qquad newline allowbreak "
-    "ensuremath".split()
+    "quotesinglbase textexclamdown textquestiondown textmu textperthousand texttimes textpm "
+    "textminus textdiv textcelsius textohm textonehalf textonequarter textthreequarters "
+    "textnumero textcent textyen texteuro textflorin textordfeminine textordmasculine "
+    "textonesuperior texttwosuperior textthreesuperior textsterling textleftarrow "
+    "textrightarrow textuparrow textdownarrow LaTeX LaTeXe TeX space nobreakspace thinspace "
+    "enspace quad qquad allowbreak slash".split()
 )
-_SAFE_MATH_COMMANDS = frozenset(
-    "alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa varkappa "
-    "lambda mu nu xi omicron pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi "
-    "psi omega Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega "
-    "pm mp times div cdot cdots vdots ddots leq geq le ge neq ne approx sim simeq cong equiv "
-    "propto ll gg lesssim gtrsim leqslant geqslant infty partial nabla sum prod int oint "
-    "sqrt surd frac dfrac tfrac binom left right big Big bigg Bigg bigl bigr Bigl Bigr middle "
-    "prime circ to rightarrow leftarrow Rightarrow Leftarrow leftrightarrow Leftrightarrow "
-    "longrightarrow longleftarrow uparrow downarrow mapsto rightleftharpoons in notin ni "
-    "subset supset subseteq supseteq cup cap setminus emptyset varnothing forall exists neg "
-    "lnot land lor wedge vee oplus otimes ominus odot langle rangle lfloor rfloor lceil "
-    "rceil hbar ell Re Im aleph log ln lg exp sin cos tan cot sinh cosh tanh arcsin arccos "
-    "arctan min max lim sup inf det dim ker deg arg gcd Pr hat bar tilde vec dot ddot check "
-    "breve acute grave mathring widehat widetilde overline overrightarrow star ast dagger "
-    "ddagger bullet perp parallel mid vert Vert lvert rvert backslash colon displaystyle "
-    "textstyle scriptstyle scriptscriptstyle limits nolimits not angle triangle diamond "
-    "mathrm mathit mathbf mathsf mathtt mathcal mathbb mathfrak mathscr boldsymbol text "
-    "operatorname".split()
+# Markup that takes one text argument.
+_TEXT_MARKUP = frozenset(
+    "textit textbf textsc textrm textsf texttt textup textsl textmd textnormal emph "
+    "textsuperscript textsubscript mbox underline".split()
 )
-_COMMAND_NAME_RE = re.compile(r"\\([A-Za-z]+)")
-SAFE_COMMANDS = frozenset(
-    _SAFE_TEXT_COMMANDS
-    | _SAFE_MATH_COMMANDS
-    | {cmd for cmd in _ACCENT_CMD.values() if cmd.isalpha()}
-    | set(_MARKUP_CMD.values())
-    | {
-        m.group(1)
-        for latex in (*_UNICODE_MAP.values(), *_ENTITY_LATEX.values(), *_TEXT_ESCAPE.values())
-        for m in _COMMAND_NAME_RE.finditer(latex)
-    }
+# Font declarations (article.cls): each acts to the end of its group, so the copy writes one
+# with the rest of its group inside one brace group.
+_TEXT_DECLARATIONS = frozenset("em it bf sc rm sf tt sl normalfont".split())
+# Math defined without amsmath (the figure-less preamble loads none): Greek, relations,
+# operators, arrows, the named functions, styles and the font commands of the kernel.
+_MATH_SYMBOLS = frozenset(
+    "alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda mu nu "
+    "xi pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega Gamma Delta "
+    "Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega "
+    "pm mp times div cdot cdots vdots ddots ldots dots leq geq le ge neq ne approx sim simeq "
+    "cong equiv propto ll gg infty partial nabla sum prod int oint surd prime circ to "
+    "rightarrow leftarrow Rightarrow Leftarrow leftrightarrow Leftrightarrow longrightarrow "
+    "longleftarrow uparrow downarrow mapsto rightleftharpoons in notin ni subset supset "
+    "subseteq supseteq cup cap setminus emptyset forall exists neg lnot land lor wedge vee "
+    "oplus otimes ominus odot langle rangle lfloor rfloor lceil rceil lbrace rbrace hbar ell "
+    "Re Im aleph star ast dagger ddagger bullet perp parallel mid vert Vert backslash colon "
+    "angle triangle diamond log ln lg exp sin cos tan cot sinh cosh tanh arcsin arccos "
+    "arctan min max lim sup inf det dim ker deg arg gcd Pr quad qquad S P pounds dag ddag "
+    "wp imath jmath top bot vdash dashv models smile frown asymp bowtie prec succ preceq "
+    "succeq sqsubseteq sqsupseteq doteq leftharpoonup rightharpoonup hookrightarrow "
+    "hookleftarrow nearrow searrow swarrow nwarrow Uparrow Downarrow updownarrow Updownarrow "
+    "longmapsto Longrightarrow Longleftarrow Longleftrightarrow longleftrightarrow flat "
+    "natural sharp clubsuit diamondsuit heartsuit spadesuit amalg uplus sqcap sqcup "
+    "triangleleft triangleright bigtriangleup bigtriangledown oslash bigcirc wr coprod bigcap "
+    "bigcup bigvee bigwedge bigoplus bigotimes bigodot biguplus bigsqcup".split()
 )
-# @MX:NOTE: [AUTO] A deny-list on purpose: publisher and Crossref metadata carry many harmless
-#   commands no closed list foresees (\texttimes, \MakeUppercase, \hspace ...), so verify fails
-#   only these and names any other unknown command in an advisory.
-# The control words a printed bib value must not carry (verify fails on each,
-# :func:`dangerous_commands`): what can read or write a file (input, include, openin, write,
-# the file and PDF-object primitives), define or redefine a macro (def, let, newcommand ...,
-# the register-defining primitives and the prefixes long, outer, global, protected), change
-# how TeX reads its input (catcode and the other code tables, endlinechar, csname,
-# expandafter, scantokens, makeatletter), run code at a later point (the every- token lists,
-# aftergroup, AtEndDocument ...), stop the run or swallow the rest of the document (end,
-# endinput, stop, the conditionals and loop, which can hide everything after them), start
-# another reference (bibitem), load a class or package, change the interaction mode, raise an
-# error, or reach the engine (directlua, ShellEscape, primitive).
-DANGEROUS_COMMANDS = frozenset(
-    # files
-    "input include includeonly InputIfFileExists IfFileExists openin openout closein "
-    "closeout read readline write immediate newwrite newread includegraphics lstinputlisting "
-    "verbatiminput VerbatimInput bibliography bibliographystyle nocite addbibresource "
-    "special pdfliteral pdfobj pdfrefobj pdfannot pdfcatalog pdfinfo pdfnames pdftrailer "
-    "pdfximage pdfrefximage pdffiledump pdfmdfivesum pdffilesize pdffilemoddate jobname "
-    # macro definitions
-    "def edef gdef xdef let futurelet global long outer protected chardef mathchardef "
-    "countdef dimendef skipdef muskipdef toksdef newcount newdimen newskip newtoks newbox "
-    "newif newcommand renewcommand providecommand DeclareRobustCommand DeclareTextCommand "
-    "DeclareTextSymbol DeclareMathSymbol newenvironment renewenvironment NewDocumentCommand "
-    "RenewDocumentCommand ProvideDocumentCommand DeclareDocumentCommand "
-    # how TeX reads its input
-    "catcode lccode uccode sfcode mathcode delcode endlinechar newlinechar escapechar "
-    "makeatletter makeatother csname endcsname expandafter scantokens "
-    # code run later
-    "afterassignment aftergroup everypar everymath everydisplay everyhbox everyvbox everyjob "
-    "everycr everyeof output shipout AtBeginDocument AtEndDocument "
-    # stopping, swallowing, loading
-    "begin end enddocument endinput stop bye dump usepackage RequirePackage documentclass "
-    "LoadClass if ifx ifcat ifnum ifdim ifodd ifcase iftrue iffalse ifeof ifcsname "
-    "ifdefined ifmmode ifvmode ifhmode ifinner ifvoid ifhbox ifvbox unless else or fi loop "
-    "bibitem "
-    # interaction, errors, the engine
-    "batchmode nonstopmode scrollmode errorstopmode errmessage errhelp PackageError "
-    "ClassError GenericError show showthe showbox showlists showtokens directlua latelua "
-    "luaexec luadirect ShellEscape DelayedShellEscape primitive pdfprimitive".split()
+_MATH_DECLARATIONS = frozenset(
+    "rm it bf sf tt displaystyle textstyle scriptstyle scriptscriptstyle".split()
 )
-# The commands pdflatex accepts only in math (measured: "Missing $ inserted", "\mathrm allowed
-# only in math mode"): the math list and the math forms of the prose map, less what also works
-# in running text (\ldots, \S, \text, \angle, \vdots and every command the copy writes in
-# text; each of the rest stopped pdflatex in text, measured one by one with the render
-# preamble). In running text verify names each in an advisory (:func:`math_commands_in_text`).
-_MAP_TEXT_COMMANDS = frozenset(
-    m.group(1)
-    for latex in _UNICODE_MAP.values()
-    for m in _COMMAND_NAME_RE.finditer(_MATH_FORM_RE.sub("", latex))
+# \not is a symbol in the kernel but takes an argument in newtxmath (the figure preamble), and
+# there it reads only one plain symbol: anything else stopped pdflatex (nothing after it, an
+# empty group, a box, a command with arguments: "TeX capacity exceeded"). The copy keeps \not
+# only before one character of _NOT_CHARS or one "zero" math command (each compiled after \not
+# by a test under both typefaces), written \not{X}; any other \not is printed as text.
+_MATH_ONE_ARG = frozenset(
+    "sqrt mathrm mathit mathbf mathsf mathtt mathcal hat bar tilde vec dot ddot check breve "
+    "acute grave mathring widehat widetilde overline underline overrightarrow "
+    "overleftarrow not".split()
 )
-_MAP_MATH_COMMANDS = frozenset(
-    m.group(1)
-    for latex in _UNICODE_MAP.values()
-    for inner in _MATH_FORM_RE.findall(latex)
-    for m in _COMMAND_NAME_RE.finditer(inner)
+_MATH_TWO_ARGS = frozenset({"frac"})
+_NOT_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789=<>|+-:/()[]!"
 )
-MATH_ONLY_COMMANDS = frozenset(
-    (_SAFE_MATH_COMMANDS | _MAP_MATH_COMMANDS)
-    - _SAFE_TEXT_COMMANDS
-    - _MAP_TEXT_COMMANDS
-    - {"text", "angle", "vdots"}
+# The math font declarations that are assignments (\fam), not items of the math list: a script
+# after one still belongs to the atom before it (x^2\rm^3 is a double superscript).
+_FONT_ASSIGNMENTS = frozenset("rm it bf sf tt".split())
+
+# @MX:ANCHOR: [AUTO] The allow-list: what the copy keeps, what verify accepts, and what the
+#   compile test proves defined -- one set for all three.
+# @MX:REASON: callers: _Writer here (the copy and the verify-side judge), pkgreqs_checks
+#   (bib_command_problems through command_issues), tests/test_bib_allowlist.py (compiles each
+#   name under four preambles); a name added without the test may be undefined in one of them.
+#: Control words a text-mode bib value may hold, by kind: ``zero`` (no argument), ``accent``
+#: and ``one`` (one text argument), ``declaration`` (acts to the end of its group), ``url``,
+#: ``href`` (a plain URL argument, see :func:`plain_url`) and ``math`` (``\\ensuremath``).
+TEXT_COMMANDS: dict[str, str] = {
+    **{name: "accent" for name in _TEXT_ACCENT_WORDS},
+    **{name: "zero" for name in _TEXT_LETTERS | _TEXT_SYMBOLS},
+    **{name: "one" for name in _TEXT_MARKUP},
+    **{name: "declaration" for name in _TEXT_DECLARATIONS},
+    "url": "url",
+    "href": "href",
+    "ensuremath": "math",
+}
+#: Control words a math-mode value may hold: ``zero``, ``one`` and ``two`` (math arguments;
+#: ``\\sqrt`` also takes ``[n]``), ``declaration``, ``text`` (``\\mbox``: a text argument) and
+#: ``math`` (``\\ensuremath``). A text command in math is written inside an ``\\mbox``.
+MATH_COMMANDS: dict[str, str] = {
+    **{name: "zero" for name in _MATH_SYMBOLS},
+    **{name: "declaration" for name in _MATH_DECLARATIONS},
+    **{name: "one" for name in _MATH_ONE_ARG},
+    **{name: "two" for name in _MATH_TWO_ARGS},
+    "mbox": "text",
+    "ensuremath": "math",
+}
+# The math commands pdflatex does not take as a superscript or subscript argument without
+# braces ("Missing { inserted": x^\hat{y}, x^\cdots, x_\log, x^\rm 2), measured as $x^\name$ and
+# $x_\name$ (with {a} or {a}{b} after a command that takes arguments) under both preambles
+# render emits; \cong \doteq \notin \rightleftharpoons stop only under Latin Modern, the big
+# operators \colon \not only under Times. Every other MATH_COMMANDS name compiled unbraced (\alpha,
+# \prime, \mathrm{T}, \frac{1}{2}); a test pins both sides. The copy braces every script argument
+# anyway; an author's bibliography fails on these (script_issues).
+_SCRIPT_UNSAFE = frozenset(
+    "Longrightarrow Pr acute arccos arcsin arctan arg bar bf bowtie breve cdots check cong cos "
+    "cosh cot ddot ddots deg det dim displaystyle dot doteq dots exp gcd grave hat inf int it "
+    "ker ldots lg lim ln log longrightarrow mathring max mbox min models notin oint "
+    "overleftarrow overline overrightarrow qquad quad rightleftharpoons rm scriptscriptstyle "
+    "scriptstyle sf sin sinh sqrt sup tan tanh textstyle tilde tt underline vdots vec widehat "
+    "widetilde bigcap bigcup bigodot bigoplus bigotimes bigsqcup biguplus bigvee bigwedge colon "
+    "coprod not prod sum".split()
 )
-# A TeX token that starts with a backslash: a control word (letters) or a control symbol
-# (one other character, a second backslash included -- ``\\input`` is a line break and text).
-_TEX_TOKEN_RE = re.compile(r"\\(?:([A-Za-z]+)|.)", re.DOTALL)
+# The control symbols and characters pdflatex takes as a script argument without braces
+# (measured: x^\{ x^\| x^\& x^\_ x^\$ x^- x^( compile; x^\, x^\; x^~ x^' and a letter outside
+# ASCII, which inputenc makes a command, stop).
+_UNBRACED_SCRIPT_SYMBOLS = frozenset("{}|&%#_$")
+_UNBRACED_SCRIPT_BAD_CHARS = frozenset("~'$&#%^_")
+# The control symbols kept as they are: the escaped specials in text and math, and the math
+# spaces and the double bar in math.
+_TEXT_ESCAPED_SYMBOLS = frozenset("&%$#_")
+_MATH_KEPT_SYMBOLS = frozenset("&%$#_,;:!|")
 # Math ``^^`` as the copy writes it: two printed carets, never TeX's character-code notation.
 _PRINTED_CARETS = r"\mbox{\textasciicircum{}\textasciicircum{}}"
 
@@ -467,7 +503,7 @@ def _char_to_latex(ch: str, math: bool = False) -> str:
     if ord(ch) < 0x80:
         return ch if typesettable(ch) else ""  # a C0 control or DEL: pdflatex refuses it
     category = unicodedata.category(ch)
-    if category == "Zs":
+    if category in ("Zs", "Zl", "Zp"):  # a space, a line or a paragraph separator
         return " "
     if math and (form := _math_form(ch)) is not None:
         return form  # ± in math is \pm, not a text-mode sign
@@ -570,26 +606,56 @@ def _decode_entity_verbatim(m: re.Match) -> str:
 
 
 def _convert_markup(text: str) -> str:
-    def _sub(m: re.Match) -> str:
-        return "\\" + _MARKUP_CMD[m.group("tag").lower()] + "{" + m.group("body") + "}"
-
-    for _ in range(10):  # each pass converts the outermost pairs; nesting is shallow
-        converted = _MARKUP_PAIR_RE.sub(_sub, text)
-        if converted == text:
-            break
-        text = converted
-    return text
+    """``text`` with each pair of markup tags (:data:`_MARKUP_CMD`) as its command: a closing
+    tag closes the innermost open tag of its name (``<i>a<i>b</i>c</i>`` ->
+    ``\\textit{a\\textit{b}c}``); a tag with no partner is left (and stripped later). One pass
+    over the tags, so a run of unclosed tags is read in linear time."""
+    tags = list(_MARKUP_TAG_RE.finditer(text))
+    if not tags:
+        return text
+    open_tags: dict[str, list[int]] = {}
+    partner: dict[int, int] = {}
+    for k, m in enumerate(tags):
+        name = m.group("tag").lower()
+        if m.group("close") is None:
+            open_tags.setdefault(name, []).append(k)
+        elif open_tags.get(name):
+            opened = open_tags[name].pop()
+            partner[opened] = k
+            partner[k] = opened
+    out: list[str] = []
+    pos = 0
+    for k, m in enumerate(tags):
+        if k not in partner:
+            continue
+        out.append(text[pos : m.start()])
+        if m.group("close") is None:
+            out.append("\\" + _MARKUP_CMD[m.group("tag").lower()] + "{")
+        else:
+            out.append("}")
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _segments(value: str) -> Iterator[tuple[str, str]]:
     """``(kind, text)`` pieces of one field value, in order; ``kind`` is ``"text"``,
     ``"math"`` or ``"verbatim"`` (an argument typeset verbatim, ``\\url{...}``)."""
-    pos = 0
-    for m in _VALUE_SEGMENT_RE.finditer(value):
-        if m.start() > pos:
-            yield "text", value[pos : m.start()]
-        yield ("verbatim" if m.group("verbatim") else "math"), m.group(0)
-        pos = m.end()
+    pos = search = 0
+    closer = -2  # the next "\)" at or after the last search (-1: there is none)
+    while (m := _VALUE_SEGMENT_RE.search(value, search)) is not None:
+        start, end = m.span()
+        if m.group("paren"):
+            if closer != -1 and closer < end:
+                closer = value.find("\\)", end)
+            if closer == -1:  # no partner, nor for any later "\(": text
+                search = end
+                continue
+            end = closer + 2
+        if start > pos:
+            yield "text", value[pos:start]
+        yield ("verbatim" if m.group("verbatim") else "math"), value[start:end]
+        pos = search = end
     if pos < len(value):
         yield "text", value[pos:]
 
@@ -818,34 +884,6 @@ def stray_math_dollar(value: str) -> bool:
     return any(kind == "math" for kind, _depth, _width in stack)
 
 
-def _control_words(value: str) -> Iterator[str]:
-    """The control-word names in the text and math of ``value`` (one printed field value, not
-    url/doi), in order. A verbatim argument (``\\url{...}``) is not read, and a backslash pair
-    is a line break, not the start of a command."""
-    for kind, text in _segments(value):
-        if kind == "verbatim":
-            continue
-        for m in _TEX_TOKEN_RE.finditer(text):
-            if m.group(1) is not None:
-                yield m.group(1)
-
-
-def dangerous_commands(value: str) -> list[str]:
-    """The control words of ``value`` on :data:`DANGEROUS_COMMANDS` (``\\input``, ``\\def``,
-    ``\\end``), each once, in order. PURE; verify fails a bib that carries one."""
-    return list(dict.fromkeys("\\" + n for n in _control_words(value) if n in DANGEROUS_COMMANDS))
-
-
-def unknown_commands(value: str) -> list[str]:
-    """The control words of ``value`` on neither :data:`SAFE_COMMANDS` nor
-    :data:`DANGEROUS_COMMANDS` (``\\texttimes``, ``\\MakeUppercase``), each once, in order.
-    PURE; verify names them in an advisory."""
-    return list(dict.fromkeys(
-        "\\" + n for n in _control_words(value)
-        if n not in SAFE_COMMANDS and n not in DANGEROUS_COMMANDS
-    ))
-
-
 def caret_notation(value: str) -> bool:
     """True iff the text or math of ``value`` holds ``^^``: TeX reads ``^^`` and what follows as
     another character (``^^5c`` is a backslash, ``^^e`` a ``%``) wherever ``^`` is a
@@ -854,32 +892,905 @@ def caret_notation(value: str) -> bool:
     return any(kind != "verbatim" and "^^" in text for kind, text in _segments(value))
 
 
-def _skip_group(text: str, start: int) -> int:
-    """The index just past the brace group opening at ``text[start]`` (BibTeX counting)."""
-    return _group_close(text, start) + 1
+# -- a value as TeX reads it, and the allow-list ----------------------------------------------------
+#
+# A value is read into TeX tokens (_tex_tokens): control words (``\\name``, the spaces after it
+# skipped as TeX skips them), control symbols (``\\'``, ``\\&``, ``\\\\``), brace groups (TeX's
+# braces: ``\\{`` is a symbol, not a brace), white space runs and characters. _Writer writes
+# them back: a command on the allow-list with its arguments, anything else as text. The same
+# walk is the copy (paper_bib) and the verify-side judge (command_issues): what the copy would
+# print as text is what verify names.
+
+_TEX_SPACE = frozenset(" \t\n\r")
+# The control symbols in text that are spacing hints and are left out (an italic correction or
+# a space factor setting at the start of a paragraph stops pdflatex).
+_DROPPED_SYMBOLS = frozenset("/@")
+# A plain URL: a scheme the reference list may link to, then printable ASCII without white
+# space, a backslash, a brace, % (TeX's comment), # (its parameter character) or ^ (its
+# character-code notation) -- hyperref reads a URL as TeX to make the link.
+_PLAIN_URL_RE = re.compile(r"(?:https?|ftp)://(?:(?![\\{}%#^])[!-~])+", re.IGNORECASE)
+_BACKSLASH_TEXT = "{\\textbackslash}"
+
+# @MX:WARN: [AUTO] Limits measured with TeX Live 2026; lowering one is safe, raising one is not.
+# @MX:REASON: TeX has 255 grouping levels (braces 254 deep stopped pdflatex); each nested text
+#   accent doubles pdflatex's time (22 deep took 17 s, a 100-byte title stopped a render);
+#   TeX's input buffer holds 200000 characters and BibTeX breaks a .bbl line only at a space
+#   (a 240000-character word stopped pdflatex); BibTeX's string pool holds 200000 characters
+#   per value. The writer recurses once per brace level, so the depth also bounds the stack.
+#   hyperref keeps at most 10 links open ("pdf link stack size=10"); a \sqrt with an index and
+#   the arrow accents typeset their argument four times (\mathpalette): \sqrt[3] 12 deep took
+#   over 120 s a pass, \overrightarrow 10 deep 39 s, 49 deep ran out of grouping levels;
+#   \textsuperscript about 37 deep shrank the type to "Improper `at' size"; 4700 arrow accents
+#   in one reference took 24 s a pass (1000: 0.6 s; the time grows faster than their number).
+_MAX_DEPTH = 50
+_MAX_ACCENTS = 3
+_MAX_WORD = 10000
+_MAX_FIELD = 100000
+# Math commands with arguments open around one another, text markup open around one another,
+# and math commands with arguments in one value; links open around one another is at most one.
+_MAX_MATH_NESTING = 4
+_MAX_TEXT_NESTING = 8
+_MAX_MATH_WRAPPERS = 32
+#: The math commands that take arguments (\\not, which takes one symbol, aside): what they take
+#: is typeset one level deeper.
+_MATH_WRAPPERS = frozenset(n for n, k in MATH_COMMANDS.items() if k in ("one", "two")) - {"not"}
+_ARROW_ACCENTS = frozenset({"overrightarrow", "overleftarrow"})
+_LINK_KINDS = frozenset({"url", "href"})
+_LINK_IN_LINK = (
+    "a link command (\\href, \\url) inside another link (hyperref keeps at most 10 open; the "
+    "inner one is printed as text)"
+)
+_MATH_DEEP = (
+    f"math commands with arguments nested more than {_MAX_MATH_NESTING} deep (an arrow accent or "
+    "a root with an index typesets its argument four times, so pdflatex's time grows fourfold "
+    "with each level; the deeper ones are printed as text)"
+)
+_ROOT_IN_ROOT = (
+    "a \\sqrt with an index inside another \\sqrt (each typesets its argument four times; the "
+    "inner one is printed as text)"
+)
+_ARROW_IN_ARROW = (
+    "an arrow accent (\\overrightarrow, \\overleftarrow) inside another arrow accent (each "
+    "typesets its argument four times; the inner one is printed as text)"
+)
+_TEXT_DEEP = (
+    f"text markup nested more than {_MAX_TEXT_NESTING} deep (\\textsuperscript and "
+    "\\textsubscript make the type smaller at each level until pdflatex stops; the deeper ones "
+    "are printed as text)"
+)
+_MATH_MANY = (
+    f"more than {_MAX_MATH_WRAPPERS} math commands with arguments in one value (pdflatex's time "
+    "grows faster than their number; the rest are printed as text)"
+)
+# What the caps above print as text: noted, and never a reason to keep a math command in running
+# text out of math (the cap applies there just the same).
+_CAP_NOTES = frozenset(
+    {_LINK_IN_LINK, _MATH_DEEP, _ROOT_IN_ROOT, _ARROW_IN_ARROW, _TEXT_DEEP, _MATH_MANY}
+)
+# What the copy rewrites in a script so that it compiles (script_issues): an author's
+# bibliography fails on each.
+_DOUBLE_SCRIPT = (
+    "a second superscript or subscript on one base ('Double superscript'; the copy gives it an "
+    "empty base, {})"
+)
+_EMPTY_SCRIPT = "a superscript or subscript with nothing after it (the copy writes ^{} or _{})"
+_UNBRACED_SCRIPT = (
+    "a superscript or subscript argument pdflatex takes only in braces ('Missing { inserted': "
+    "x^\\hat{y}, x^\\rm 2, a letter outside ASCII; the copy braces it)"
+)
+#: The longest value the copy and verify read as BibTeX joins it (BibTeX's string pool holds
+#: 200000 characters; a chain of @string macros each doubling the last reached 2**27 * 4).
+MAX_EXPANDED = 2 * _MAX_FIELD
+_MAX_URL = 4000
+_TOO_DEEP = f"braces nested more than {_MAX_DEPTH} deep (the copy writes the value empty)"
+_ACCENTS_DEEP = (
+    f"accents nested more than {_MAX_ACCENTS} deep (pdflatex's time doubles with each; the "
+    "deeper ones are printed as text)"
+)
 
 
-def math_commands_in_text(value: str) -> list[str]:
-    """The commands of :data:`MATH_ONLY_COMMANDS` that ``value`` (one printed field value) uses
-    in running text, outside math and outside the argument of ``\\ensuremath``, each once, in
-    order: pdflatex stops on each there (``Decay of \\alpha particles``: "Missing $ inserted").
-    PURE; verify names them in an advisory."""
-    found: list[str] = []
-    for kind, text in _segments(value):
-        if kind != "text":
-            continue
-        i = 0
-        while (m := _TEX_TOKEN_RE.search(text, i)) is not None:
-            name = m.group(1)
-            if name == "ensuremath":
-                after = _SPACE_RUN_RE.match(text, m.end()).end()
-                if text.startswith("{", after):
-                    i = _skip_group(text, after)
-                    continue
-            if name in MATH_ONLY_COMMANDS and "\\" + name not in found:
-                found.append("\\" + name)
-            i = m.end()
-    return found
+def plain_url(url: str) -> bool:
+    """True iff ``url`` is a URL the copy keeps (:data:`_PLAIN_URL_RE`, at most
+    :data:`_MAX_URL` characters). PURE."""
+    return len(url) <= _MAX_URL and _PLAIN_URL_RE.fullmatch(url) is not None
+
+
+def _tex_tokens(text: str) -> tuple[list, bool, int]:
+    """``text`` as TeX tokens, whether its braces were unbalanced in TeX's reading (a ``}``
+    with no group open is dropped, a group left open is closed at the end), and how deep its
+    groups nest. A token is ``("w", name)``, ``("s", character)`` (``""``: a backslash ending
+    the text), ``("g", tokens)``, ``(" ",)`` or ``("c", character)``."""
+    root: list = []
+    stack = [root]
+    unbalanced = False
+    deepest = 0
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            if i + 1 >= n:
+                stack[-1].append(("s", ""))
+                i += 1
+                continue
+            d = text[i + 1]
+            if d.isascii() and d.isalpha():
+                j = i + 1
+                while j < n and text[j].isascii() and text[j].isalpha():
+                    j += 1
+                stack[-1].append(("w", text[i + 1 : j]))
+                while j < n and text[j] in _TEX_SPACE:
+                    j += 1  # TeX skips the spaces after a control word
+                i = j
+            else:
+                stack[-1].append(("s", d))
+                i += 2
+        elif c == "{":
+            child: list = []
+            stack[-1].append(("g", child))
+            stack.append(child)
+            deepest = max(deepest, len(stack) - 1)
+            i += 1
+        elif c == "}":
+            if len(stack) > 1:
+                stack.pop()
+            else:
+                unbalanced = True
+            i += 1
+        elif c in _TEX_SPACE:
+            while i < n and text[i] in _TEX_SPACE:
+                i += 1
+            if not stack[-1] or stack[-1][-1][0] != " ":
+                stack[-1].append((" ",))
+        else:
+            stack[-1].append(("c", c))
+            i += 1
+    return root, unbalanced or len(stack) > 1, deepest
+
+
+def _plain_text(latex: str, keep) -> str:
+    """The characters of ``latex`` that ``keep`` accepts, read as TeX reads them (inside groups
+    and command arguments too; command names left out), white space runs as one space and the
+    ends trimmed. PURE."""
+    out: list[str] = []
+    stack = [iter(_tex_tokens(latex)[0])]
+    while stack:
+        tok = next(stack[-1], None)
+        if tok is None:
+            stack.pop()
+        elif tok[0] == "g":
+            stack.append(iter(tok[1]))
+        elif tok[0] == " ":
+            out.append(" ")
+        elif tok[0] == "c" and keep(tok[1]):
+            out.append(tok[1])
+    return " ".join("".join(out).split())
+
+
+def _join(out: list[str], piece: str) -> None:
+    """Append ``piece``, with a space when it starts with a letter or digit right after a
+    control word (``\\alpha x``, never the undefined ``\\alphax``; ``\\geq 3`` as written --
+    TeX skips the space after a control word, so it changes nothing)."""
+    if not piece:
+        return
+    if out and piece[0].isascii() and piece[0].isalnum() and _CONTROL_WORD_END_RE.search(out[-1]):
+        out.append(" ")
+    out.append(piece)
+
+
+def _next_arg(toks: list, j: int) -> tuple[list, int] | None:
+    """The argument TeX reads at ``toks[j]`` (spaces skipped): a group's tokens or one token,
+    and the index after it; None when nothing follows."""
+    while j < len(toks) and toks[j][0] == " ":
+        j += 1
+    if j >= len(toks):
+        return None
+    tok = toks[j]
+    return (tok[1] if tok[0] == "g" else [tok]), j + 1
+
+
+def _plain_chars(toks: list) -> str | None:
+    """The text of ``toks`` when it is characters only (a URL argument), else None."""
+    if all(tok[0] == "c" for tok in toks):
+        return "".join(tok[1] for tok in toks)
+    return None
+
+
+def _wrap(text: str, wrap: bool) -> str:
+    return "{" + text + "}" if wrap else text
+
+
+def _printed_name(name: str, text_char) -> str:
+    """The name of a control word or symbol as text (``~`` as a tilde, not a tie)."""
+    if name == "~":
+        return "{\\textasciitilde}"
+    return "".join(text_char(c, True) for c in name)
+
+
+def _unwrapped(toks: list) -> list:
+    """``toks`` without the brace pairs around all of it (white space beside a group ignored):
+    ``{{}}`` -> nothing, ``{{x}}`` -> ``x``; ``toks`` itself when there are none."""
+    out = toks
+    while True:
+        solid = [tok for tok in out if tok[0] != " "]
+        if len(solid) != 1 or solid[0][0] != "g":
+            return out
+        out = solid[0][1]
+
+
+def _not_operand(toks: list, j: int) -> tuple[str, int] | None:
+    """What ``\\not`` at ``toks[j - 1]`` may be kept with: one character of :data:`_NOT_CHARS`
+    or one ``zero`` math command, alone or alone in a group, as ``(LaTeX, index after it)``;
+    None for anything else (see :data:`_MATH_ONE_ARG`)."""
+    arg = _next_arg(toks, j)
+    if arg is None:
+        return None
+    solid = [tok for tok in arg[0] if tok[0] != " "]
+    if len(solid) != 1:
+        return None
+    tok = solid[0]
+    if tok[0] == "c" and tok[1] in _NOT_CHARS:
+        return tok[1], arg[1]
+    if tok[0] == "w" and MATH_COMMANDS.get(tok[1]) == "zero":
+        return "\\" + tok[1], arg[1]
+    return None
+
+
+def _unbraced_script_ok(tok: tuple) -> bool:
+    """True iff pdflatex takes ``tok`` as a superscript or subscript argument without braces
+    (see :data:`_SCRIPT_UNSAFE`)."""
+    if tok[0] == "c":
+        return (tok[1].isascii() and tok[1] not in _UNBRACED_SCRIPT_BAD_CHARS
+                and typesettable(tok[1]))
+    if tok[0] == "s":
+        return tok[1] in _UNBRACED_SCRIPT_SYMBOLS
+    if tok[0] == "w":
+        return tok[1] in MATH_COMMANDS and tok[1] not in _SCRIPT_UNSAFE
+    return False
+
+
+def _excess_wrappers(tokens: list) -> frozenset[int]:
+    """The ids of the math commands with arguments (:data:`_MATH_WRAPPERS`) after the first
+    :data:`_MAX_MATH_WRAPPERS` of a value, in reading order: the writer prints each as text.
+    Marked on the tokens before the walk, so what the writer remembers stays valid."""
+    count = 0
+    excess: set[int] = set()
+    stack = [iter(tokens)]
+    while stack:
+        tok = next(stack[-1], None)
+        if tok is None:
+            stack.pop()
+        elif tok[0] == "g":
+            stack.append(iter(tok[1]))
+        elif tok[0] == "w" and tok[1] in _MATH_WRAPPERS:
+            count += 1
+            if count > _MAX_MATH_WRAPPERS:
+                excess.add(id(tok))
+    return frozenset(excess)
+
+
+def _holds_command(toks: list) -> bool:
+    return any(tok[0] in ("w", "s") or (tok[0] == "g" and _holds_command(tok[1]))
+               for tok in toks)
+
+
+def _composite_safe(body: str) -> bool:
+    """True iff an accent with the argument ``body`` (as written) compiles: LaTeX's T1 accents
+    look its first item up as ``\\csname\\string<first token of the item>...\\endcsname``
+    (``ltoutenc``), so an item that is an empty group stops pdflatex (``\\string`` takes
+    ``\\endcsname``: "Missing \\endcsname inserted"), and so does a group holding a command
+    after its first token (the command is expanded inside the ``\\csname``). Measured for
+    every accent under both typefaces: ``{}``, ``e``, ``{e}``, ``{e}f``, ``{\\'{e}}``, ``\\i``
+    compile; ``{{}}``, `` {}``, ``{}{}``, ``{{\\textbackslash}foo}`` stop."""
+    toks = [tok for tok in _tex_tokens(body)[0] if tok[0] != " "]
+    if not toks or toks[0][0] != "g":
+        return True
+    item = toks[0][1]
+    if not item:
+        return False
+    rest = item if item[0][0] == "g" else item[1:]
+    return not _holds_command(rest)
+
+
+class _Writer:
+    """Writes TeX tokens back keeping only allow-listed commands; collects what it printed as
+    text (:attr:`issues`, each named once by :func:`command_issues`), what it moved into the
+    mode its command needs (:attr:`fixes`) and the characters pdflatex has no form of
+    (:attr:`unset`: kept as they are, so a reference never silently loses a letter; render
+    warns and verify fails each).
+
+    The walk stays linear: a group's or an argument's tokens are written once and remembered
+    (the copy tries a group as one unit before it writes it as a sequence, which would
+    otherwise redo every level below it), and where math closes is found once per token list.
+    """
+
+    def __init__(self, label: bool = False) -> None:
+        # A field natbib reads into a citation label (author, editor, key): its '(' and ')'
+        # at brace level 0 are braced, as '[' and ']' are in every field.
+        self.label = label
+        self.issues: list[str] = []
+        # What the copy changed so a value compiles (a math command in running text put in
+        # math, a text command in math boxed): fine in the copy, a stop in an author's file.
+        self.fixes: list[str] = []
+        self.unset: list[str] = []
+        # What it rewrote in a script so that it compiles (a second script on one base, a script
+        # with nothing to take, an argument TeX takes only braced): see script_issues.
+        self.scripts: list[str] = []
+        self.accents = 0  # text accents open around the item being written
+        self.links = 0  # links open around it (at most one: a link inside is printed as text)
+        self.math_depth = 0  # math commands with arguments open around it
+        self.text_depth = 0  # text markup open around it
+        self.in_arrow = False  # inside an arrow accent
+        self.in_root = False  # inside a \sqrt
+        # The math commands past the per-value cap (_excess_wrappers), by id.
+        self.excess: frozenset[int] = frozenset()
+        self._memo: dict = {}
+        self._positions: dict = {}
+
+    def _mark(self) -> tuple[int, int, int, int]:
+        return len(self.issues), len(self.fixes), len(self.unset), len(self.scripts)
+
+    def _rollback(self, mark: tuple[int, int, int, int]) -> None:
+        del self.issues[mark[0] :]
+        del self.fixes[mark[1] :]
+        del self.unset[mark[2] :]
+        del self.scripts[mark[3] :]
+
+    def _state(self) -> tuple:
+        """What a group or an argument is written under, besides its tokens and mode."""
+        return (self.accents, self.links, self.math_depth, self.text_depth, self.in_arrow,
+                self.in_root)
+
+    def _remember(self, kind: str, toks: list, mode: str, write) -> str:
+        """``write()``'s result for ``toks``, computed once (what it noted is noted again on
+        every reuse). The token list is kept with the result, so its id cannot be reused."""
+        key = (kind, id(toks), mode, self._state())
+        hit = self._memo.get(key)
+        if hit is not None and hit[0] is toks:
+            self.issues += hit[2]
+            self.fixes += hit[3]
+            self.unset += hit[4]
+            self.scripts += hit[5]
+            return hit[1]
+        mark = self._mark()
+        out = write()
+        self._memo[key] = (toks, out, self.issues[mark[0] :], self.fixes[mark[1] :],
+                           self.unset[mark[2] :], self.scripts[mark[3] :])
+        return out
+
+    def _as_text(self, name: str, note: str, mode: str) -> str:
+        """The command ``name`` printed as text (boxed in math) because a cap stopped it,
+        noted once with ``note``; what follows it is written next, as it stands."""
+        self.issues.append(note)
+        text = _BACKSLASH_TEXT + _printed_name(name, self.text_char)
+        return _box(text) if mode == "math" else text
+
+    def _capped_text(self, name: str) -> str | None:
+        """The cap note when the text command ``name`` may not be kept here: a link inside a
+        link, text markup past :data:`_MAX_TEXT_NESTING`; else None."""
+        kind = TEXT_COMMANDS.get(name)
+        if kind in _LINK_KINDS and self.links:
+            return _LINK_IN_LINK
+        if kind == "one" and self.text_depth >= _MAX_TEXT_NESTING:
+            return _TEXT_DEEP
+        return None
+
+    def _root_index(self, toks: list, i: int) -> tuple[int, int] | None:
+        """``(start, end)`` of the index of the ``\\sqrt`` at ``toks[i]`` (``[n]``), or None."""
+        k = i + 1
+        while k < len(toks) and toks[k][0] == " ":
+            k += 1
+        if k < len(toks) and toks[k] == ("c", "["):
+            end = self._next_at(toks, k + 1, ("c", "]"))
+            if end is not None:
+                return k + 1, end
+        return None
+
+    def _capped_math(self, toks: list, i: int) -> str | None:
+        """The cap note when the math command with arguments at ``toks[i]`` may not be kept
+        here: past the per-value count, past :data:`_MAX_MATH_NESTING`, an arrow accent inside
+        an arrow accent, a root with an index inside a root; else None."""
+        tok = toks[i]
+        if id(tok) in self.excess:
+            return _MATH_MANY
+        if self.math_depth >= _MAX_MATH_NESTING:
+            return _MATH_DEEP
+        if tok[1] in _ARROW_ACCENTS and self.in_arrow:
+            return _ARROW_IN_ARROW
+        if tok[1] == "sqrt" and self.in_root and self._root_index(toks, i) is not None:
+            return _ROOT_IN_ROOT
+        return None
+
+    def _enter(self, name: str) -> tuple:
+        """Open the math command ``name`` around what is written next; returns what
+        :meth:`_leave` restores."""
+        saved = (self.math_depth, self.in_arrow, self.in_root)
+        self.math_depth += 1
+        self.in_arrow = self.in_arrow or name in _ARROW_ACCENTS
+        self.in_root = self.in_root or name == "sqrt"
+        return saved
+
+    def _leave(self, saved: tuple) -> None:
+        self.math_depth, self.in_arrow, self.in_root = saved
+
+    def _next_at(self, toks: list, start: int, close: tuple, width: int = 1) -> int | None:
+        """The first index ``j >= start`` where ``width`` tokens equal to ``close`` begin, or
+        None; the places are found once per token list."""
+        key = (id(toks), close, width)
+        entry = self._positions.get(key)
+        if entry is None or entry[0] is not toks:
+            found = [j for j in range(len(toks) - width + 1)
+                     if all(toks[j + k] == close for k in range(width))]
+            entry = (toks, found)
+            self._positions[key] = entry
+        found = entry[1]
+        k = bisect.bisect_left(found, start)
+        return found[k] if k < len(found) else None
+
+    def _printed(self, name: str, mode: str) -> str:
+        """The control word or symbol ``name`` printed as text (boxed in math), noted."""
+        self.issues.append("\\" + name)
+        text = _BACKSLASH_TEXT + _printed_name(name, self.text_char)
+        return _box(text) if mode == "math" else text
+
+    # -- sequences and groups
+
+    def seq(self, toks: list, mode: str, top: bool, field: bool = False) -> str:
+        out: list[str] = []
+        scripts = ""  # in math: the scripts the current base carries ("^", "_")
+        after_prime = False
+        i, n = 0, len(toks)
+        while i < n:
+            tok = toks[i]
+            kind = tok[0]
+            if kind == " ":
+                out.append(" ")
+                after_prime = False  # TeX joins a prime and what follows only when adjacent
+                i += 1
+                continue
+            if mode == "math" and kind == "c" and tok[1] in "^_'":
+                piece, i, scripts = self._script(toks, i, scripts, after_prime)
+                after_prime = tok[1] == "'"
+                _join(out, piece)
+                continue
+            if kind == "g":
+                piece = self.group(tok[1], mode)
+                i += 1
+            elif mode == "math":
+                piece, i = self.math_item(toks, i)
+            else:
+                piece, i = self.text_item(toks, i, top, field)
+            if mode == "math" and kind == "w" and tok[1] in _FONT_ASSIGNMENTS:
+                after_prime = False  # no atom: a script after it is on the same base
+            elif mode != "math" or piece.strip():
+                scripts, after_prime = "", False  # an atom (a dropped token is none)
+            _join(out, piece)
+        return "".join(out)
+
+    def _single_unit(self, toks: list, mode: str) -> str | None:
+        """``toks`` written as the one unit they are (a kept command and its arguments, or
+        math), without the braces the copy puts around a unit, or None when they are not one:
+        the braces around them already make it one special character for BibTeX."""
+        if mode == "text" and toks:
+            mark = self._mark()
+            piece, j = self.text_item(toks, 0, top=False, field=False, unit=True)
+            if piece is not None and j == len(toks):
+                return piece
+            self._rollback(mark)
+        return None
+
+    def group(self, toks: list, mode: str) -> str:
+        return self._remember("group", toks, mode, lambda: self._group(toks, mode))
+
+    def _group(self, toks: list, mode: str) -> str:
+        piece = self._single_unit(toks, mode)
+        return "{" + (piece if piece is not None else self.seq(toks, mode, top=True)) + "}"
+
+    def arg(self, toks: list, mode: str) -> str:
+        """A command's argument (the braces are the caller's)."""
+        return self._remember("arg", toks, mode, lambda: self._arg(toks, mode))
+
+    def _arg(self, toks: list, mode: str) -> str:
+        piece = self._single_unit(toks, mode)
+        return piece if piece is not None else self.seq(toks, mode, top=False)
+
+    def math_arg(self, toks: list) -> str:
+        """Math tokens (an argument, a script's group, the body of math)."""
+        return self._remember("math", toks, "math", lambda: self.seq(toks, "math", top=False))
+
+    def _math(self, toks: list, wrap: bool) -> str:
+        """Math written as ``$...$`` (braced when ``wrap``), or nothing when it is empty: an
+        empty ``$$`` opens display math."""
+        body = self.math_arg(toks)
+        return _wrap("$" + body + "$", wrap) if body.strip() else ""
+
+    # -- text mode
+
+    def text_char(self, ch: str, field: bool) -> str:
+        if ch in "&%#_":
+            return "\\" + ch
+        if ch == "^":
+            return "{\\textasciicircum}"
+        if ch == "<":
+            return "{\\textless}"
+        if ch == ">":
+            return "{\\textgreater}"
+        if ch in "[]" and field:
+            return "{" + ch + "}"  # natbib reads a label up to the first ] at brace level 0
+        if ch in "()" and field and self.label:
+            return "{" + ch + "}"  # ... and its names up to the first ( at brace level 0
+        if ch.isascii():
+            return ch if typesettable(ch) else ""
+        if typesettable(ch):
+            return ch
+        return self._converted(ch, False)
+
+    def _converted(self, ch: str, math: bool) -> str:
+        """A character pdflatex has no glyph for as it stands: its LaTeX form, or the
+        character itself (noted in :attr:`unset`)."""
+        form = _char_to_latex(ch, math)
+        if form != ch and all(typesettable(c) for c in form):
+            return form
+        self.unset.append(ch)
+        return ch
+
+    def _math_span(self, toks: list, i: int, close: tuple, width: int) -> tuple[int, int] | None:
+        """(end of the math tokens, index after the closing delimiter) for math opening at
+        ``toks[i]`` and closed by ``width`` tokens equal to ``close`` at the same level."""
+        j = self._next_at(toks, i + width, close, width)
+        return None if j is None else (j, j + width)
+
+    def text_item(self, toks: list, i: int, top: bool, field: bool, unit: bool = False):
+        """One item of a text sequence: ``(LaTeX, index after it)``. With ``unit`` the item
+        must be one the copy braces (a kept command and its arguments, or math), written
+        without those braces; ``(None, i)`` when it is not."""
+        tok = toks[i]
+        wrap = top and not unit
+        kind = tok[0]
+        if kind in ("g", " "):
+            return None, i  # a group or a space is no unit (seq writes them itself)
+        if kind == "c":
+            ch = tok[1]
+            if ch == "$":
+                display = i + 1 < len(toks) and toks[i + 1] == ("c", "$")
+                span = self._math_span(toks, i, ("c", "$"), 2 if display else 1)
+                if span is not None:
+                    start = i + (2 if display else 1)
+                    return self._math(toks[start : span[0]], wrap), span[1]
+                if unit:
+                    return None, i
+                return "\\$", i + 1
+            if unit:
+                return None, i
+            return self.text_char(ch, field), i + 1
+        if kind == "s":
+            return self._text_symbol(toks, i, wrap, unit)
+        return self._text_word(toks, i, wrap, unit)
+
+    def _text_symbol(self, toks: list, i: int, wrap: bool, unit: bool):
+        ch = toks[i][1]
+        if ch in _TEXT_ACCENT_SYMBOLS:
+            return self._accent(toks, i, ch, wrap, unit)
+        if ch in "([":
+            span = self._math_span(toks, i, ("s", ")" if ch == "(" else "]"), 1)
+            if span is not None:
+                return self._math(toks[i + 1 : span[0]], wrap), span[1]
+        if ch == "|":
+            self.fixes.append("\\| in running text")
+            return _wrap("$\\|$", wrap), i + 1
+        if unit:
+            if ch in "{}":
+                return "\\textbrace" + ("left" if ch == "{" else "right"), i + 1
+            if ch in ",-":
+                return "\\" + ch, i + 1
+            return None, i
+        if ch in _TEXT_ESCAPED_SYMBOLS:
+            return "\\" + ch, i + 1
+        if ch in "{}":
+            return "{\\textbrace" + ("left" if ch == "{" else "right") + "}", i + 1
+        if ch in ",-":
+            return "{\\" + ch + "}", i + 1
+        if ch in _TEX_SPACE or ch == "\\":
+            return " ", i + 1  # a control space or a line break: a space
+        if ch in _DROPPED_SYMBOLS:
+            return "", i + 1
+        return self._printed(ch, "text"), i + 1
+
+    def _accent(self, toks: list, i: int, name: str, wrap: bool, unit: bool):
+        arg = _next_arg(toks, i + 1)
+        if arg is None:
+            return (None, i) if unit else (self._printed(name, "text"), i + 1)
+        if self.accents >= _MAX_ACCENTS:
+            if unit:
+                return None, i
+            # Printed as text; its argument is written next, at this depth, so any accent in
+            # it is printed as text too.
+            self.issues.append(_ACCENTS_DEEP)
+            return _BACKSLASH_TEXT + _printed_name(name, self.text_char), i + 1
+        mark = self._mark()
+        self.accents += 1
+        try:
+            body = self._accent_body(arg[0], name)
+        finally:
+            self.accents -= 1
+        if body is None:
+            # An argument the accent cannot read: the accent is printed as text and its
+            # argument written next, as text.
+            self._rollback(mark)
+            return (None, i) if unit else (self._printed(name, "text"), i + 1)
+        return _wrap("\\" + name + "{" + body + "}", wrap), arg[1]
+
+    def _accent_body(self, toks: list, name: str) -> str | None:
+        """An accent's argument as written, or None when no form of it compiles
+        (:func:`_composite_safe`): braces around all of it are dropped when that makes it one
+        that compiles (``\\~{{}}`` -> ``\\~{}``; noted, an author's file stops there)."""
+        body = self.arg(toks, "text")
+        if _composite_safe(body):
+            return body
+        inner = _unwrapped(toks)
+        if inner is not toks:
+            body = self.arg(inner, "text")
+            if _composite_safe(body):
+                self.fixes.append(f"\\{name} over an empty or doubly braced group")
+                return body
+        return None
+
+    def _text_word(self, toks: list, i: int, wrap: bool, unit: bool):
+        name = toks[i][1]
+        kind = TEXT_COMMANDS.get(name)
+        if kind == "zero":
+            j = i + 1
+            if j < len(toks) and toks[j] == ("g", []):
+                j += 1  # \ss{} -> {\ss}
+            return ("\\" + name if unit else "{\\" + name + "}"), j
+        if kind == "accent":
+            return self._accent(toks, i, name, wrap, unit)
+        if kind in ("one", "url", "href") and (note := self._capped_text(name)) is not None:
+            return (None, i) if unit else (self._as_text(name, note, "text"), i + 1)
+        if kind == "one":
+            arg = _next_arg(toks, i + 1)
+            if arg is not None:
+                self.text_depth += 1
+                try:
+                    body = self.arg(arg[0], "text")
+                finally:
+                    self.text_depth -= 1
+                return _wrap("\\" + name + "{" + body + "}", wrap), arg[1]
+        elif kind == "declaration":
+            rest = toks[i + 1 :]
+            while rest and rest[0][0] == " ":
+                rest = rest[1:]
+            body = self.seq(rest, "text", top=False)
+            return _wrap("\\" + name + (" " + body if body else ""), wrap), len(toks)
+        elif kind == "url":
+            arg = _next_arg(toks, i + 1)
+            url = _plain_chars(arg[0]) if arg is not None else None
+            if url is not None and plain_url(url):
+                return _wrap("\\url{" + url + "}", wrap), arg[1]
+        elif kind == "href":
+            first = _next_arg(toks, i + 1)
+            url = _plain_chars(first[0]) if first is not None else None
+            second = _next_arg(toks, first[1]) if first is not None else None
+            if url is not None and plain_url(url) and second is not None:
+                self.links += 1
+                try:
+                    body = self.arg(second[0], "text")
+                finally:
+                    self.links -= 1
+                return _wrap("\\href{" + url + "}{" + body + "}", wrap), second[1]
+        elif kind == "math":
+            arg = _next_arg(toks, i + 1)
+            if arg is not None:
+                return self._math(arg[0], wrap), arg[1]
+        elif name in MATH_COMMANDS and MATH_COMMANDS[name] != "declaration":
+            if name in _MATH_WRAPPERS and (note := self._capped_math(toks, i)) is not None:
+                return (None, i) if unit else (self._as_text(name, note, "text"), i + 1)
+            mark = self._mark()
+            piece, j = self.math_item(toks, i)
+            # A math command in running text: put it in math (what a cap printed as text in it
+            # stays printed there).
+            if all(issue in _CAP_NOTES for issue in self.issues[mark[0] :]):
+                self.fixes.append("\\" + name + " in running text")
+                return _wrap("$" + piece + "$", wrap), j
+            self._rollback(mark)
+        if unit:
+            return None, i
+        return self._printed(name, "text"), i + 1
+
+    # -- math mode
+
+    def _script(self, toks: list, i: int, scripts: str, after_prime: bool):
+        """A superscript, a subscript or a prime at ``toks[i]`` in math: ``(LaTeX, index after
+        it, the scripts its base now carries)``. The argument is always braced (a command right
+        after ^ or _ stops pdflatex: ``x^\\hat{y}``, ``x^\\int``), and a second script of one
+        kind on a base gets an empty base first (``x^2^3`` is a double superscript; primes in
+        a row are one)."""
+        ch = toks[i][1]
+        if ch == "^" and i + 1 < len(toks) and toks[i + 1] == ("c", "^"):
+            # Two carets: printed, never TeX's character-code notation (^^5c is a backslash).
+            return "\\mbox{{\\textasciicircum}{\\textasciicircum}}", i + 2, ""
+        kind = "_" if ch == "_" else "^"
+        lead = ""
+        # Primes in a row, and a superscript right after them, are one superscript to TeX
+        # (x'' and x'^2 compile; x' ' and x^2' are a double superscript).
+        joined = after_prime and ch in "'^"
+        if kind in scripts and not joined:
+            lead, scripts = "{}", ""
+            self.scripts.append(_DOUBLE_SCRIPT)
+        if kind not in scripts:
+            scripts += kind
+        if ch == "'":
+            return lead + "'", i + 1, scripts
+        j = i + 1
+        while j < len(toks) and toks[j][0] == " ":
+            j += 1
+        if j >= len(toks) or (toks[j][0] == "c" and toks[j][1] in "^_"):
+            self.scripts.append(_EMPTY_SCRIPT)
+            return lead + ch + "{}", j, scripts  # a script with nothing to take
+        tok = toks[j]
+        if tok[0] == "g":
+            return lead + ch + "{" + self.math_arg(tok[1]) + "}", j + 1, scripts
+        if not _unbraced_script_ok(tok):
+            self.scripts.append(_UNBRACED_SCRIPT)
+        piece, k = self.math_item(toks, j)
+        return lead + ch + "{" + piece + "}", k, scripts
+
+    def _math_char(self, ch: str) -> str:
+        """A character outside ASCII in math: its math form (the plus-minus sign as ``\\pm``), a
+        letter with accents as accent commands in a box, any other character pdflatex typesets
+        in a box (inputenc writes it as a text command, which math does not take), else the
+        character itself (noted in :attr:`unset`)."""
+        form = _char_to_latex(ch, True)
+        if form != ch:
+            if all(typesettable(c) for c in form):
+                return form
+        elif typesettable(ch):
+            return _box(ch)
+        self.unset.append(ch)
+        return ch
+
+    def math_item(self, toks: list, i: int):
+        tok = toks[i]
+        if tok[0] == "c":
+            ch = tok[1]
+            if ch == "$":
+                return "\\mbox{\\$}", i + 1  # inside a group in math: never a delimiter
+            if ch in "&%#":
+                return "\\" + ch, i + 1
+            if ch.isascii():
+                return (ch if typesettable(ch) else ""), i + 1
+            return self._math_char(ch), i + 1
+        if tok[0] == "s":
+            ch = tok[1]
+            if ch in _MATH_KEPT_SYMBOLS:
+                return "\\" + ch, i + 1
+            if ch in "{}":
+                return "\\lbrace" if ch == "{" else "\\rbrace", i + 1
+            if ch in _TEX_SPACE:
+                return "\\ ", i + 1
+            if ch == "\\":
+                return " ", i + 1
+            if ch in _TEXT_ACCENT_SYMBOLS:
+                piece, j = self._accent(toks, i, ch, False, True)
+                if piece is not None:
+                    self.fixes.append("\\" + ch + " in math")
+                    return _box(piece), j
+            if ch in "-":
+                return "", i + 1
+            return self._printed(ch, "math"), i + 1
+        name = tok[1]
+        kind = MATH_COMMANDS.get(name)
+        if kind in ("zero", "declaration"):
+            return "\\" + name, i + 1
+        if name in _MATH_WRAPPERS and (note := self._capped_math(toks, i)) is not None:
+            return self._as_text(name, note, "math"), i + 1
+        if name == "not":
+            operand = _not_operand(toks, i + 1)
+            if operand is not None:
+                return "\\not{" + operand[0] + "}", operand[1]
+        elif kind == "one":
+            index = self._root_index(toks, i) if name == "sqrt" else None
+            arg = _next_arg(toks, index[1] + 1 if index is not None else i + 1)
+            if arg is not None:
+                saved = self._enter(name)
+                try:
+                    optional = ("[" + self.seq(toks[index[0] : index[1]], "math", top=False) + "]"
+                                if index is not None else "")
+                    body = self.math_arg(arg[0])
+                finally:
+                    self._leave(saved)
+                return "\\" + name + optional + "{" + body + "}", arg[1]
+        elif kind == "two":
+            first = _next_arg(toks, i + 1)
+            second = _next_arg(toks, first[1]) if first is not None else None
+            if second is not None:
+                saved = self._enter(name)
+                try:
+                    pieces = (self.math_arg(first[0]), self.math_arg(second[0]))
+                finally:
+                    self._leave(saved)
+                return "\\" + name + "{" + pieces[0] + "}{" + pieces[1] + "}", second[1]
+        elif kind == "text":
+            arg = _next_arg(toks, i + 1)
+            if arg is not None:
+                return "\\mbox{" + self.arg(arg[0], "text") + "}", arg[1]
+        elif kind == "math":
+            arg = _next_arg(toks, i + 1)
+            if arg is not None:
+                return self.math_arg(arg[0]), arg[1]
+        elif TEXT_COMMANDS.get(name) not in (None, "declaration"):
+            if (note := self._capped_text(name)) is not None:
+                return self._as_text(name, note, "math"), i + 1
+            piece, j = self.text_item(toks, i, top=False, field=False, unit=True)
+            if piece is not None:
+                self.fixes.append("\\" + name + " in math")
+                return _box(piece), j
+        return self._printed(name, "math"), i + 1
+
+
+_SPACE_RUNS_RE = re.compile(r" {2,}")
+
+
+def _allowed_value(
+    value: str, label: bool = False
+) -> tuple[str, list[str], list[str], list[str], list[str]]:
+    """``value`` (one printed field value, LaTeX-safe) written with allow-listed commands only:
+    ``(LaTeX, issues, fixes, unset, scripts)`` -- what was printed as text or was unbalanced,
+    what was moved into the mode its command needs (a math command in running text, a text
+    command in math) or rewritten so it compiles (an accent over an empty group), the
+    characters pdflatex has no form of (kept as they are), and what was rewritten in a script
+    so it compiles (a second script on one base, a script with nothing to take, an argument
+    TeX takes only in braces). White space runs become one space and the ends are trimmed, as
+    BibTeX compresses them. Braces nested more than :data:`_MAX_DEPTH` deep give an empty
+    value. ``label``: a field natbib reads into a citation label (its ``(`` and ``)`` at brace
+    level 0 are braced too). PURE."""
+    tokens, unbalanced, deepest = _tex_tokens(value)
+    if deepest > _MAX_DEPTH:
+        return "", [_TOO_DEEP], [], [], []
+    writer = _Writer(label)
+    writer.excess = _excess_wrappers(tokens)
+    try:
+        written = writer.seq(tokens, "text", top=True, field=True)
+    except RecursionError:  # a stack the depth limit should never let happen
+        return "", [_TOO_DEEP], [], [], []
+    out = _SPACE_RUNS_RE.sub(" ", written).strip(" ")
+    issues = list(dict.fromkeys(writer.issues))
+    if unbalanced:
+        issues.append("a brace TeX reads as unbalanced (an escaped \\{ or \\})")
+    while "^^" in out:  # never TeX's character-code notation, however the pieces met
+        out = out.replace("^^", "^{}\\mbox{{\\textasciicircum}}", 1)
+    return (out, issues, list(dict.fromkeys(writer.fixes)), list(dict.fromkeys(writer.unset)),
+            list(dict.fromkeys(writer.scripts)))
+
+
+def value_issues(value: str) -> tuple[list[str], list[str]]:
+    """``(command_issues(value), script_issues(value))`` from one walk of ``value``. PURE."""
+    _out, issues, fixes, _unset, scripts = _allowed_value(value)
+    return issues + fixes, scripts
+
+
+def command_issues(value: str) -> list[str]:
+    """What ``value`` (one printed field value as written) holds outside the allow-list, each
+    once, in order: a command off :data:`TEXT_COMMANDS` / :data:`MATH_COMMANDS` for its mode
+    (``\\input``, ``\\hspace``, ``\\mathbb`` ...), a math delimiter ``\\(`` / ``\\[`` with no
+    partner, a brace TeX reads as unbalanced, braces nested past :data:`_MAX_DEPTH`, accents
+    nested past :data:`_MAX_ACCENTS`, a link inside a link, math commands with arguments nested
+    past :data:`_MAX_MATH_NESTING` (an arrow accent in an arrow accent, a root with an index in a
+    root) or more than :data:`_MAX_MATH_WRAPPERS` of them, text markup nested past
+    :data:`_MAX_TEXT_NESTING` (the copy prints each as text or writes the value empty), then a
+    command in the wrong mode (``\\alpha in running text``, ``\\textit in math``: the copy moves
+    it, an author's file stops pdflatex there). PURE; the same walk as the copy. TeX's ``^^``
+    notation is named by :func:`caret_notation`."""
+    return value_issues(value)[0]
+
+
+def script_issues(value: str) -> list[str]:
+    """What the copy rewrites in a superscript or subscript of ``value`` (one printed field
+    value as written) so that it compiles, each once: a second script of one kind on one base
+    (``x^2^3``, ``x_1_2``, ``x^2'``, ``x' '``), a script with nothing to take (``x^$``), an
+    argument pdflatex takes only in braces (``x^\\hat{y}``, ``x^\\rm 2``, ``x^\\cdots``, a letter
+    outside ASCII; see :data:`_SCRIPT_UNSAFE`). The canonical copy never has one; an author's
+    bibliography fails on each. PURE; the same walk as the copy."""
+    return value_issues(value)[1]
 
 
 def accented_letters_in_math(value: str) -> list[str]:
@@ -944,11 +1855,25 @@ def url_problems(url: str) -> list[str]:
 # a syntax error BibTeX skips to the next '@'. It prints each @preamble's text into the .bbl,
 # and a @string macro wherever a printed field names it. :func:`bib_commands` reads a .bib the
 # same way, so a check of what it returns sees what BibTeX prints. Measured against BibTeX
-# 0.99e (TeX Live 2026) with \nocite{*}: the same entries and @preamble text, except that
-# BibTeX drops what follows a @comment or a syntax error on the file's last line, which this
-# reads (it checks more, never less).
+# 0.99e (TeX Live 2026) with \nocite{*}: the same entries and @preamble text, except on the
+# file's last line, where BibTeX reads only the first command (a @string, a @comment or an
+# entry followed there by another entry gives no second entry; the same text followed by any
+# other line gives both) and drops what follows a syntax error: this reads all of it, so it
+# reads MORE than BibTeX there, never less, and a check of it sees more. A test diffs the two
+# both ways for files with no syntax error and a last line without a command
+# (tests/test_bib_round7.py) and one way for mutated files (tests/test_bib_round6.py); the
+# canonical copy ends every entry with a line of its own. Two readings after an error follow
+# BibTeX's code: a
+# @string whose name it read defines the macro as that name (lower case) before the value is
+# read, so a definition that fails leaves the macro defined as its own name; and an entry whose
+# key repeats one read before (ASCII case ignored) is "Repeated entry": BibTeX reads none of
+# its fields and looks for the next '@' right after the key (as it does for every entry when
+# \nocite{*} is used, and for a cited key otherwise; an uncited repeat's fields are read but
+# not printed, so stopping after the key reads more, never less). Both are errors, and an
+# author's bibliography that holds one fails verify (bib_syntax_issues).
 
 _BIB_WHITE = frozenset(" \t\n\r")
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 # The characters an identifier (an entry type, a field or macro name) cannot hold.
 _ID_ILLEGAL = frozenset('"#%\'(),={}')
 
@@ -957,8 +1882,11 @@ class BibCommand(NamedTuple):
     """One ``@`` command BibTeX acts on: its name in lower case (``preamble``, ``string`` or an
     entry type), where the ``@`` is, where BibTeX stopped reading it (just past the closing
     delimiter, or where a syntax error stopped it), an entry's key, its fields (a @preamble's
-    value is one field named ``""``, a @string's one field named after the macro), and whether
-    BibTeX read it to its closing delimiter."""
+    value is one field named ``""``, a @string's one field named after the macro), whether
+    BibTeX read it to its closing delimiter, whether the value of its last field stopped on a
+    syntax error (``bad_last``: BibTeX stores no such field; a @string's macro is then defined
+    as its own name), and whether an entry's key repeats an earlier one (``repeated``: BibTeX
+    read nothing after the key)."""
 
     command: str
     start: int
@@ -966,6 +1894,14 @@ class BibCommand(NamedTuple):
     key: str | None
     fields: tuple[_Field, ...]
     complete: bool
+    bad_last: bool = False
+    repeated: bool = False
+
+
+def _ascii_lower(text: str) -> str:
+    """``text`` with A-Z lowered and nothing else, as BibTeX lowers an entry type, a field or
+    macro name and a key (the case of other letters is not ignored). PURE."""
+    return text.translate(_ASCII_LOWER)
 
 
 def _skip_bib_white(bib: str, i: int) -> int:
@@ -1051,15 +1987,16 @@ def _field(name: str, start: int, parts: list[tuple[int, int, bool]], n: int) ->
     return _Field(name, start, min(last_end + (1 if delimited else 0), n), tuple(parts))
 
 
-def _read_command(bib: str, at: int) -> tuple[BibCommand | None, int]:
+def _read_command(bib: str, at: int, seen: set[str]) -> tuple[BibCommand | None, int]:
     """The command BibTeX reads at the ``@`` ``bib[at]`` (None when it reads none), and where it
-    goes on looking for the next ``@``."""
+    goes on looking for the next ``@``. ``seen`` holds the keys read so far (ASCII lower case);
+    an entry's key is added to it."""
     n = len(bib)
     i = _skip_bib_white(bib, at + 1)
     j = _identifier_end(bib, i)
     if j == i or not _adjacent(bib, j, "{("):
         return None, max(j, at + 1)
-    name = bib[i:j].lower()
+    name = _ascii_lower(bib[i:j])
     if name == "comment":
         return None, j
     k = _skip_bib_white(bib, j)
@@ -1073,26 +2010,31 @@ def _read_command(bib: str, at: int) -> tuple[BibCommand | None, int]:
             m = _identifier_end(bib, k)
             if m == k or not _adjacent(bib, m, "="):
                 return None, max(m, k)
-            macro = bib[k:m].lower()
+            # BibTeX defines the macro as its own name here, before it reads the value.
+            macro = _ascii_lower(bib[k:m])
             k = _skip_bib_white(bib, m)
             if k >= n or bib[k] != "=":
-                return None, k
+                field = _Field(macro, field_start, field_start, ())
+                return BibCommand(name, at, k, None, (field,), False, True), k
             k = _skip_bib_white(bib, k + 1)
         parts, k, ok = _read_value(bib, k, close)
         complete = ok and k < n and bib[k] == close
         end = k + 1 if complete else k
         field = _field(macro, field_start, parts, n)
-        return BibCommand(name, at, end, None, (field,), complete), end
+        return BibCommand(name, at, end, None, (field,), complete, not ok), end
     # An entry: the key runs to a comma or white space (or, in braces, a closing brace).
     stops = _BIB_WHITE | ({",", "}"} if close == "}" else {","})
     m = k
     while m < n and bib[m] not in stops:
         m += 1
     key = bib[k:m]
+    if _ascii_lower(key) in seen:  # "Repeated entry": nothing after the key is read
+        return BibCommand(name, at, m, key, (), False, False, True), m
+    seen.add(_ascii_lower(key))
     fields: list[_Field] = []
 
-    def stopped(position: int) -> tuple[BibCommand, int]:
-        return BibCommand(name, at, position, key, tuple(fields), False), position
+    def stopped(position: int, bad_last: bool = False) -> tuple[BibCommand, int]:
+        return BibCommand(name, at, position, key, tuple(fields), False, bad_last), position
 
     k = _skip_bib_white(bib, m)
     if k >= n or bib[k] not in "," + close:
@@ -1109,7 +2051,7 @@ def _read_command(bib: str, at: int) -> tuple[BibCommand | None, int]:
         m = _identifier_end(bib, k)
         if m == k or not _adjacent(bib, m, "="):
             return stopped(max(m, k))
-        field_name = bib[k:m].lower()
+        field_name = _ascii_lower(bib[k:m])
         k = _skip_bib_white(bib, m)
         if k >= n or bib[k] != "=":
             return stopped(min(k, n))
@@ -1117,28 +2059,36 @@ def _read_command(bib: str, at: int) -> tuple[BibCommand | None, int]:
         parts, k, ok = _read_value(bib, k, close)
         fields.append(_field(field_name, field_start, parts, n))
         if not ok or k >= n:
-            return stopped(min(k, n))
+            return stopped(min(k, n), not ok)
     return BibCommand(name, at, k + 1, key, tuple(fields), True), k + 1
 
 
 # @MX:ANCHOR: [AUTO] The one reading of a .bib as BibTeX reads it: the verify bib checks scan
 #   what it returns, and the paper copy drops each @preamble it finds.
-# @MX:REASON: callers: pkgreqs_checks (bib_command_problems, bib_command_advisories,
-#   bib_latex_safety_problems), latex_safe_bib and paper_bib here; a reading that differs from
-#   BibTeX's lets text BibTeX prints go unchecked (a @string, a @preamble, '@ article(...)').
+# @MX:REASON: callers: canonical_bib and entry_values here (the copy render ships), pkgreqs_checks
+#   (bib_keys, bib_subset, bib_form_problems, the _bib_units every bib check scans); a reading
+#   that differs from BibTeX's lets text BibTeX prints go unchecked or out of the copy.
 def bib_commands(bib: str) -> list[BibCommand]:
     """Every ``@`` command BibTeX acts on in ``bib``, in order, read as BibTeX reads it (see the
     note above :data:`_BIB_WHITE`): ``@preamble``, ``@string`` and entries (``@comment`` is not
     a command, and neither is an ``@`` inside a value BibTeX reads). An entry or a @string that a
     syntax error stopped is listed with what BibTeX read of it (``complete`` False); BibTeX then
-    looks for the next ``@`` where it stopped, and so does this. PURE."""
+    looks for the next ``@`` where it stopped, and so does this. An entry repeating an earlier
+    key is listed with no field (``repeated``). PURE (the reading of the last few files is
+    remembered: verify reads one file with several checks)."""
+    return list(_read_commands(bib))
+
+
+@functools.lru_cache(maxsize=8)
+def _read_commands(bib: str) -> tuple[BibCommand, ...]:
     commands: list[BibCommand] = []
+    seen: set[str] = set()
     pos = 0
     while (at := bib.find("@", pos)) >= 0:
-        command, pos = _read_command(bib, at)
+        command, pos = _read_command(bib, at, seen)
         if command is not None:
             commands.append(command)
-    return commands
+    return tuple(commands)
 
 
 def string_macros_used_as_urls(bib: str, commands: list[BibCommand] | None = None) -> set[str]:
@@ -1146,7 +2096,7 @@ def string_macros_used_as_urls(bib: str, commands: list[BibCommand] | None = Non
     (``url = myurl``): their text is printed as a URL. PURE."""
     commands = bib_commands(bib) if commands is None else commands
     return {
-        bib[start:end].lower()
+        _ascii_lower(bib[start:end])
         for command in commands
         if command.command not in ("preamble", "string")
         for field in command.fields
@@ -1179,11 +2129,16 @@ def untypesettable_chars(value: str, *, verbatim: bool = False) -> list[tuple[st
     return found
 
 
-# @MX:NOTE: [AUTO] Writes only the paper/ copy; the literature store keeps the acquired bytes
-# and its keys. Characters with no LaTeX form are kept so verify can name them.
+# @MX:NOTE: [AUTO] The character and markup layer on its own (the canonical copy, paper_bib,
+#   applies it per value); characters with no LaTeX form are kept so verify can name them.
 def latex_safe_bib(bib: str) -> str:
     """``bib`` with every printed field value made LaTeX-safe; everything else untouched except
     a bare month name BibTeX does not define, which becomes its macro. PURE.
+
+    A test-only layer (not in ``__all__``): nothing sci-adk ships is written by it -- render
+    writes :func:`paper_bib`, which applies the same per-value conversion
+    (:func:`_latex_safe_text`) inside the canonical copy. The tests use it to pin the
+    character and markup policy on its own.
 
     In each printed value (not url/doi, not :data:`UNPRINTED_FIELDS`): HTML entities are decoded
     to LaTeX (``&amp;`` -> ``\\&``, ``&lt;`` -> ``\\textless{}``, ``&quot;`` -> ``{"}``; in math
@@ -1241,6 +2196,8 @@ def latex_safe_bib(bib: str) -> str:
 _CASE_FIELDS = frozenset({"title", "booktitle"})
 # Fields holding names, sorted and formatted by BibTeX's name functions.
 _NAME_FIELDS = frozenset({"author", "editor"})
+# The fields natbib can read into a citation label (plainnat's calc.label).
+_LABEL_FIELDS = _NAME_FIELDS | {"key"}
 # Printed beside the DOI and of no use to a reader of the reference list.
 _OMITTED_FIELDS = frozenset({"issn"})
 
@@ -1535,137 +2492,1074 @@ def _repeats_doi(url: str, doi: str | None) -> bool:
     return doi is not None and m is not None and _normalised_doi(m.group(1)) == _normalised_doi(doi)
 
 
-def _present_entry(body: str) -> str:
-    """One entry's fields (the text after ``@type{key,`` up to its closing brace) as the
-    reference list should print them (see :func:`paper_bib`)."""
-    fields = _fields(body)
-    if not fields:
-        return body
-    doi = next(
-        (body[f.parts[0][0] : f.parts[0][1]] for f in fields if f.name == "doi" and f.parts),
-        None,
+# -- the canonical copy ------------------------------------------------------------------------
+#
+# What render writes into paper/: every entry BibTeX reads (bib_commands), as
+# ``@type{key, field = {value}, ...}`` -- one braced value per field, @string macros expanded
+# (the predefined month macros jan..dec as plainnat defines them), '#' parts joined, no
+# @string, @preamble or @comment and no text between entries. A value holds only what the
+# allow-list keeps (_allowed_value); verify passes a shipped bibliography only when
+# paper_bib(text) == text, so the copy and the check judge the same text. Each value is written
+# again until that changes nothing (_settled), so the copy is its own fixed point by
+# construction, whatever its pieces do to one another.
+
+# The month text plainnat's MACRO commands give jan..dec (what a concatenation such as
+# ``jan # "~5"`` prints); a bare month macro is written as the macro, so the style decides.
+_MONTH_TEXT = dict(zip(_MONTH_ABBR, (
+    "January", "February", "March", "April", "May", "June", "July", "August", "September",
+    "October", "November", "December",
+)))
+# The journal macros plain.bst and every natbib style define (MACRO commands, the same text in
+# plainnat, abbrvnat, unsrtnat and apalike; TeX Live 2026): a field naming one prints its text.
+_STYLE_MACRO_TEXT = {
+    **_MONTH_TEXT,
+    "acmcs": "ACM Computing Surveys", "acta": "Acta Informatica",
+    "cacm": "Communications of the ACM", "ibmjrd": "IBM Journal of Research and Development",
+    "ibmsj": "IBM Systems Journal", "ieeese": "IEEE Transactions on Software Engineering",
+    "ieeetc": "IEEE Transactions on Computers",
+    "ieeetcad": "IEEE Transactions on Computer-Aided Design of Integrated Circuits",
+    "ipl": "Information Processing Letters", "jacm": "Journal of the ACM",
+    "jcss": "Journal of Computer and System Sciences", "scp": "Science of Computer Programming",
+    "sicomp": "SIAM Journal on Computing", "tocs": "ACM Transactions on Computer Systems",
+    "tods": "ACM Transactions on Database Systems", "tog": "ACM Transactions on Graphics",
+    "toms": "ACM Transactions on Mathematical Software",
+    "toois": "ACM Transactions on Office Information Systems",
+    "toplas": "ACM Transactions on Programming Languages and Systems",
+    "tcs": "Theoretical Computer Science",
+}
+# A key the copy keeps: what a \cite in the paper may name -- ASCII letters, digits and
+# : _ . ; + / = @ - (paper._KEY, without the comma and white space that separate keys there) --
+# and the letters outside ASCII that pdflatex typesets (inputenc reads them in the .aux too:
+# a \citep of Mueller2019 spelled with u-umlaut compiles under both render preambles; a test
+# pins it).
+_KEY_ASCII = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:_.;+/=@-"
+)
+# The entry types a BibTeX style defines (plainnat: one function each that prints a reference);
+# another type is written misc, which is how a style prints it -- one named like a function of
+# the style (@output, @and, @emphasize) stopped BibTeX.
+_STANDARD_TYPES = frozenset(
+    "article book booklet conference inbook incollection inproceedings manual mastersthesis "
+    "misc phdthesis proceedings techreport unpublished".split()
+)
+_FIELD_NAME_RE_OK = re.compile(r"[a-z][a-z0-9_:.+-]*")
+_STORE = "correct it in the run's literature store (literature/references.bib)"
+# natbib's label is the first two authors' last names and the year in one BibTeX entry string,
+# at most 250 characters by BibTeX's default (500 in TeX Live 2026; a 1000-character name made
+# the label lose its year, and natbib stopped): a last name of at most 100 characters and a year
+# of at most 40 keep it under 250.
+_MAX_NAME = 100
+_MAX_YEAR = 40
+# How many times a value is written again before it is given up as having no stable form.
+_FIXPOINT_ROUNDS = 6
+_TEX_PIECE_RE = re.compile(r"\\(?:[A-Za-z]+|.)|.", re.DOTALL)
+
+
+# The longest key the copy keeps (a key of 100000 characters overflowed TeX's buffer in the
+# .aux; one of 1000 was cited by \citep, \citet, \cite and \citeauthor under both preambles).
+_MAX_KEY = 200
+
+
+def _key_ok(key: str) -> bool:
+    """True iff the copy keeps an entry with ``key`` (see :data:`_KEY_ASCII`): at most
+    :data:`_MAX_KEY` characters, the first one ASCII (a \\cite of a key starting with a letter
+    outside ASCII stopped pdflatex under both preambles: natbib makes a command name of the
+    key, "Missing \\endcsname inserted"; the same letter later in a key compiles). PURE."""
+    return bool(key) and len(key) <= _MAX_KEY and key[0] in _KEY_ASCII and all(
+        c in _KEY_ASCII or (not c.isascii() and c.isalpha() and typesettable(c)) for c in key
     )
 
-    def omitted(field: _Field) -> bool:
-        if field.name in _OMITTED_FIELDS:
-            return True
-        return (
-            field.name == "url"
-            and len(field.parts) == 1
-            and _repeats_doi(body[field.parts[0][0] : field.parts[0][1]], doi)
-        )
 
-    def text(field: _Field) -> str:
-        if field.name not in _CASE_FIELDS | _NAME_FIELDS:
-            return body[field.start : field.end]
-        out, pos = [], field.start
-        for k, (start, end, delimited) in enumerate(field.parts):
-            out.append(body[pos:start])
-            value = body[start:end]
-            if delimited:
-                value = (
-                    _protect_case(value, field_start=k == 0)
-                    if field.name in _CASE_FIELDS
-                    else _tidy_names(value)
-                )
-            out.append(value)
-            pos = end
-        out.append(body[pos : field.end])
-        return "".join(out)
-
-    # Each field keeps the separator written before it; the first field kept follows the
-    # header's own spacing, and what follows the last field (the closing layout) is kept.
-    out = [body[: fields[0].start]]
-    first = True
-    for k, field in enumerate(fields):
-        if omitted(field):
-            continue
-        if not first:
-            out.append(body[fields[k - 1].end : field.start])
-        out.append(text(field))
-        first = False
-    out.append(body[fields[-1].end :])
-    return "".join(out)
+def _ascii_spelling(ch: str) -> str:
+    """An ASCII spelling of the letter ``ch``: its base letters (O with diaeresis -> ``O``, the
+    feminine ordinal -> ``a``), the letters BibTeX reduces its command to (AE ligature ->
+    ``AE``), or ``""``."""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", ch) if c.isascii() and c.isalnum())
+    return folded or _NAME_LETTER_CMD.get(ch, "")
 
 
-def _without_preambles(bib: str) -> str:
-    """``bib`` without the ``@preamble`` commands BibTeX would act on (:func:`bib_commands`),
-    from the ``@`` to where BibTeX stops reading each; repeated until none is left (taking one
-    out could join text into another). PURE."""
-    while preambles := [c for c in bib_commands(bib) if c.command == "preamble"]:
-        out: list[str] = []
-        pos = 0
-        for command in preambles:
-            out.append(bib[pos : command.start])
-            pos = command.end
-        out.append(bib[pos:])
-        bib = "".join(out)
-    return bib
+def _key_problem(key: str) -> str:
+    """Why a citation cannot name ``key`` (one :func:`_key_ok` refuses), as a phrase."""
+    if len(key) > _MAX_KEY:
+        return (f"its key is {len(key)} characters long, more than the {_MAX_KEY} characters a "
+                "key may hold (a key of 100000 characters overflowed TeX's buffer): give it a "
+                "shorter key")
+    if key and not key[0].isascii():
+        spelled = _ascii_spelling(key[0]) + key[1:]
+        example = f", e.g. {spelled!r}" if _key_ok(spelled) else ""
+        return (f"its key starts with {_codepoints(key[0])}, a character outside ASCII, and a "
+                "\\cite of such a key stops pdflatex (natbib makes a command name of the key: "
+                "'Missing \\endcsname inserted'): give it a key that starts with an ASCII "
+                f"letter{example}")
+    return ("a key holds only letters, digits and : _ . ; + / = @ - (what a citation can name; "
+            "LaTeX reads a backslash in one as a command; a letter outside ASCII only after the "
+            "first character, and only when pdflatex typesets it)")
 
 
-# @MX:NOTE: [AUTO] What render writes into paper/ (references.bib and the SI subset); the store
-# keeps the acquired bytes and its keys. Verify's bib check still passes on it.
-def paper_bib(bib: str) -> str:
-    """The bibliography a rendered paper loads: :func:`latex_safe_bib` of ``bib``, written for
-    the reference list plainnat prints. PURE; keys never change; idempotent.
+def _codepoints(chars) -> str:
+    return ", ".join("U+%04X (%s)" % (ord(c), unicodedata.name(c, "unnamed")) for c in chars)
 
-    Every ``@preamble`` is left out: BibTeX writes its text into the reference list as LaTeX
-    (a reference needs none; one can define a macro or read a file).
 
-    In every entry:
+class CanonicalBib(NamedTuple):
+    """The canonical copy of a bibliography (:func:`canonical_bib`): its text, and one line per
+    entry, field or macro it left out or changed in a way a reader would notice (render prints
+    them as warnings)."""
 
-    - ``title`` and ``booktitle`` keep the casing the source gives (:func:`_protect_case`):
-      "(BCF)", "OPERA models", "Connectivity III", "Matula numbers", "log Kow" print as
-      acquired instead of lowercased, and so do an unbraced accented capital (``\\"Osterreich``)
-      and a capitalised command (``\\LaTeX``, which lowercased is undefined);
-    - ``issn`` is omitted, and so is a ``url`` that is the doi.org / dx.doi.org link of the
-      entry's own ``doi`` (any other url stays; doi always stays);
-    - in ``author`` and ``editor``, a full given name loses a stray period ("Mackay, Donald."
-      -> "Mackay, Donald"; initials keep theirs), and a non-ASCII letter becomes LaTeX accent
-      or letter commands, so BibTeX sorts it by its base letter (Šoškić with the S names).
-      Ð Þ Đ Ŋ have no such command and stay raw (Ħ Ŧ fail verify's LaTeX-safety check; Ŀ is
-      written L·); verify advises on a cited entry whose first author still sorts after Z
-      (:func:`raw_sort_letter`).
-    """
-    safe = _without_preambles(latex_safe_bib(bib))
+    text: str
+    notes: tuple[str, ...]
+
+
+def _expanded(bib: str, field: _Field, macros: dict[str, str], notes: list[str], where: str) -> str:
+    """A field's value as BibTeX stores it: its parts joined, each macro replaced by its text
+    (a month or journal macro the styles define by its text there); an undefined macro is
+    nothing, and noted. Joined to at most :data:`MAX_EXPANDED` characters (a chain of macros
+    each doubling the last is never expanded in full); an entry field cut there is noted."""
     out: list[str] = []
-    pos = 0
-    for m in _HEADER_RE.finditer(safe):
-        if m.start() < pos:
-            continue  # a header-shaped text inside an entry already read
-        close = _value_end(safe, safe.index("{", m.start()))
-        out.append(safe[pos : m.end()])
-        out.append(_present_entry(safe[m.end() : close]))
-        pos = close
-    out.append(safe[pos:])
+    size = 0
+    for start, end, delimited in field.parts:
+        raw = bib[start:end]
+        if delimited or raw[:1].isdigit():
+            piece = raw
+        else:
+            name = _ascii_lower(raw)
+            if name in macros:
+                piece = macros[name]
+            elif name in _STYLE_MACRO_TEXT:
+                piece = _STYLE_MACRO_TEXT[name]
+            else:
+                notes.append(f"{where} names the macro '{raw}', which the bibliography does not "
+                             f"define, so BibTeX prints nothing for it; {_STORE}")
+                continue
+        if size + len(piece) > MAX_EXPANDED:
+            out.append(piece[: MAX_EXPANDED - size])
+            if where.startswith("entry"):
+                notes.append(f"{where} is longer than {MAX_EXPANDED} characters as BibTeX joins "
+                             f"its parts and macros (more than BibTeX holds); the rest is left "
+                             f"out; {_STORE}")
+            break
+        out.append(piece)
+        size += len(piece)
     return "".join(out)
+
+
+def _define(bib: str, command: BibCommand, macros: dict[str, str], notes: list[str]) -> None:
+    """Define the macro of the @string ``command`` as BibTeX does: its value, or its own name when
+    the definition has a syntax error."""
+    field = command.fields[0] if command.fields else None
+    if field is None or not field.name:
+        return
+    if command.bad_last:
+        macros[field.name] = field.name
+    else:
+        macros[field.name] = _expanded(bib, field, macros, notes, f"@string '{field.name}'")
+
+
+def entry_values(bib: str) -> list[tuple[BibCommand, list[tuple[str, str]]]]:
+    """Each entry BibTeX reads in ``bib`` with its fields' values as BibTeX prints them:
+    ``(command, [(field name, value), ...])``, ``#`` parts joined and ``@string`` macros
+    expanded in file order (a month macro as plainnat's month name, an undefined macro as
+    nothing, a macro whose definition has a syntax error as its own name). Every field read is
+    listed, also one whose value a syntax error stopped (what was read of it), so a check over
+    these values sees at least what BibTeX prints. PURE (remembered as :func:`bib_commands`)."""
+    return [(command, list(values)) for command, values in _read_entry_values(bib)]
+
+
+@functools.lru_cache(maxsize=8)
+def _read_entry_values(bib: str) -> tuple[tuple[BibCommand, tuple[tuple[str, str], ...]], ...]:
+    macros: dict[str, str] = {}
+    out: list[tuple[BibCommand, tuple[tuple[str, str], ...]]] = []
+    for command in _read_commands(bib):
+        if command.command == "preamble":
+            continue
+        if command.command == "string":
+            _define(bib, command, macros, [])
+            continue
+        out.append(
+            (command, tuple((f.name, _expanded(bib, f, macros, [], "")) for f in command.fields))
+        )
+    return tuple(out)
+
+
+def _undefined_macros(bib: str, field: _Field, defined: set[str], where: str) -> list[str]:
+    if field.name == "month":
+        return []  # a month name BibTeX does not define has its own advisory
+    return [
+        f"{where} names the macro '{bib[start:end]}', which the bibliography does not define "
+        "before it (BibTeX prints nothing for it)"
+        for start, end, delimited in field.parts
+        if not delimited
+        and not bib[start:end][:1].isdigit()
+        and _ascii_lower(bib[start:end]) not in defined
+    ]
+
+
+# @MX:NOTE: [AUTO] The places where BibTeX's reading depends on how it recovers from an error:
+#   an author's bibliography holding one fails verify, so every check of it reads what BibTeX does.
+def bib_syntax_issues(bib: str) -> list[str]:
+    """One phrase per place in ``bib`` where what BibTeX reads depends on how it recovers from an
+    error, in file order: a @string or @preamble with a syntax error (BibTeX defines the macro as
+    its own name), an entry with a syntax error (BibTeX stops reading it and looks for the next
+    ``@`` from there), an entry repeating the key of an earlier one (BibTeX reads nothing after
+    the key), and a macro a field names that no @string defines before it (BibTeX prints nothing;
+    the month and journal macros the styles define are defined). Empty for a bibliography BibTeX
+    reads without an error. PURE."""
+    issues: list[str] = []
+    defined: set[str] = set(_STYLE_MACRO_TEXT)
+    line, counted = 1, 0
+    for command in bib_commands(bib):
+        line += bib.count("\n", counted, command.start)  # the commands are in file order
+        counted = command.start
+        if command.command == "preamble":
+            if not command.complete:
+                issues.append(f"@preamble on line {line} has a syntax error")
+            continue
+        if command.command == "string":
+            field = command.fields[0] if command.fields else None
+            name = field.name if field is not None else ""
+            if field is not None:
+                issues += _undefined_macros(bib, field, defined, f"@string '{name}'")
+            if command.bad_last:
+                issues.append(f"@string '{name}' on line {line} has a syntax error, so BibTeX "
+                              f"defines the macro as its own name ('{name}')")
+            elif not command.complete:
+                issues.append(f"@string '{name}' on line {line} has a syntax error after its "
+                              "value")
+            if name:
+                defined.add(name)
+            continue
+        where = f"entry '{command.key}'"
+        if command.repeated:
+            issues.append(f"{where} on line {line} repeats the key of an earlier entry: BibTeX "
+                          "reads nothing after its key and looks for the next @ from there")
+            continue
+        if not command.complete:
+            issues.append(f"{where} on line {line} has a syntax error: BibTeX stops reading it "
+                          "there and looks for the next @ from that point")
+        for field in command.fields:
+            issues += _undefined_macros(bib, field, defined, f"{where} field '{field.name}'")
+    return issues
+
+
+def _bare_month(bib: str, field: _Field, macros: dict[str, str]) -> str | None:
+    """The month macro a ``month`` field is (``month = jan``, or an undefined month name such as
+    ``June`` or ``sept``, which BibTeX would print as nothing), or None."""
+    if len(field.parts) != 1 or field.parts[0][2]:
+        return None
+    token = _ascii_lower(bib[field.parts[0][0] : field.parts[0][1]])
+    if token in macros:
+        return None
+    return token if token in _MONTH_TEXT else _MONTH_MACRO.get(token)
+
+
+def _canonical_doi(value: str) -> str | None:
+    """A doi value without a ``doi:`` or doi.org prefix when it has the DOI form
+    (``paper.is_doi``), else None."""
+    doi = " ".join(value.split())
+    prefix = _DOI_PREFIX_RE.match(doi)
+    doi = doi[prefix.end() :] if prefix else doi
+    return doi if is_doi(doi) else None
+
+
+def _year_char(ch: str) -> bool:
+    """A character a year keeps: a letter or digit (a Latin letter pdflatex typesets outside
+    ASCII), a space, ``~`` and ``( ) . , / ? : ; ' -`` (each compiled in a natbib label)."""
+    if ch.isascii():
+        return ch.isalnum() or ch in " ~().,/?:;'-"
+    return ch.isalpha() and typesettable(ch)
+
+
+def _name_char(ch: str) -> bool:
+    if ch.isascii():
+        return ch.isalnum() or ch in " .,-'"
+    return ch.isalpha() and typesettable(ch)
+
+
+def _plain_year(text: str, where: str) -> tuple[str, list[str]]:
+    """A year as natbib can read it in its label: plain text only (a command, math or a group
+    there stopped natbib with "Improper alphabetic constant"), at most :data:`_MAX_YEAR`
+    characters; a note when anything but braces was left out."""
+    plain = _plain_text(text, _year_char)
+    notes: list[str] = []
+    if plain != " ".join(text.replace("{", "").replace("}", "").split()):
+        notes.append(f"{where} holds LaTeX natbib cannot read in a citation label ({text!r}); "
+                     f"written as the plain text {plain!r}; {_STORE}")
+    if len(plain) > _MAX_YEAR:
+        plain = plain[:_MAX_YEAR].rstrip()
+        notes.append(f"{where} is longer than {_MAX_YEAR} characters (natbib's label holds it); "
+                     f"cut to {plain!r}; {_STORE}")
+    return plain, notes
+
+
+def _last_name(name: str) -> str:
+    """The part of one name BibTeX's label takes: before the first brace-level-0 comma, else
+    the last word (a name in one pair of braces: what the braces hold)."""
+    parts = _depth0_split(name, _COMMA_RE)
+    if len(parts) > 1:
+        last = parts[0].strip()
+    else:
+        words = [w for w in _depth0_split(name, _SPACES_RE)[::2] if w]
+        last = words[-1] if words else ""
+    if last.startswith("{") and _group_close(last, 0) == len(last) - 1:
+        last = last[1:-1]
+    return last
+
+
+# A name's last comma followed by nothing BibTeX reads as a name part: white space, '-' and '~'
+# separate the tokens of a name, so "Doe, -", "Doe,--" and "Doe, J, ~" end in an empty part
+# (BibTeX: "has a comma at the end", exit 2).
+_EMPTY_NAME_TAIL_RE = re.compile(r",[\s~-]*\Z")
+
+
+def _without_empty_tail(name: str) -> str:
+    """``name`` without each last comma that only white space, '-' or '~' follows."""
+    while (m := _EMPTY_NAME_TAIL_RE.search(name)) is not None:
+        name = name[: m.start()].rstrip()
+    return name
+
+
+def _safe_names(value: str, where: str) -> tuple[str, list[str]]:
+    """An author or editor value with each name BibTeX or natbib would stop on made safe ("Too
+    many commas in name", "has a comma at the end", BibTeX errors): a name ending in a comma,
+    or in a comma followed only by '-', '--' or '~' (BibTeX reads no name part there), is
+    written without it (a store measured under ~/research ends every name so: ``Sterling G.
+    Baird,``), and a name with more than two brace-level-0 commas, or only commas, as one name
+    in braces; a name whose last name is longer than :data:`_MAX_NAME` characters as its first
+    characters, braced. Notes say so."""
+    pieces = _depth0_split(value, _NAME_SEPARATOR_RE)
+    notes: list[str] = []
+    for k in range(0, len(pieces), 2):
+        name = pieces[k].strip()
+        if not name:
+            continue
+        original = name
+        kept = _without_empty_tail(name)
+        if kept != name and kept.strip(" ,~-"):
+            name = kept
+            notes.append(f"{where}: the name {original!r} ends with a comma followed by no name "
+                         "part (BibTeX stops on it: 'has a comma at the end'); written without "
+                         f"it; {_STORE}")
+        if (len(_depth0_split(name, _COMMA_RE)) // 2 > 2
+                or _EMPTY_NAME_TAIL_RE.search(name) is not None):
+            notes.append(f"{where}: the name {name!r} has more commas than a name takes (BibTeX "
+                         f"stops on it); written as one name in braces; {_STORE}")
+            name = "{" + name + "}"
+        if len(_last_name(name)) > _MAX_NAME:
+            short = _plain_text(name, _name_char)[:_MAX_NAME].strip()
+            notes.append(f"{where}: a name whose last name is longer than {_MAX_NAME} characters "
+                         f"(natbib's label holds it) is written as {short!r}; {_STORE}")
+            name = "{" + short + "}"
+        if name != original:
+            pieces[k] = name
+    return "".join(pieces), notes
+
+
+def _break_long_words(text: str) -> tuple[str, bool]:
+    """``text`` with a space put into each run longer than :data:`_MAX_WORD` characters without
+    one (never right after a command, whose following space TeX drops), and whether one was."""
+    if all(len(word) <= _MAX_WORD for word in text.split(" ")):
+        return text, False
+    out: list[str] = []
+    run = 0
+    for m in _TEX_PIECE_RE.finditer(text):
+        piece = m.group(0)
+        if piece == " ":
+            run = 0
+        elif run >= _MAX_WORD and not out[-1].startswith("\\"):
+            out.append(" ")
+            run = 0
+        out.append(piece)
+        run += len(piece)
+    return "".join(out), True
+
+
+def _written_once(name: str, value: str, where: str) -> tuple[str, list[str], list[str]]:
+    """``value`` as the copy writes field ``name`` once: ``(LaTeX, issues, notes)`` -- the
+    issues of :func:`_allowed_value` (what was printed as text), and the notes for what else
+    changed."""
+    text, issues, _fixes, unset, _scripts = _allowed_value(
+        _latex_safe_text(value), label=name in _LABEL_FIELDS
+    )
+    notes: list[str] = []
+    if unset:
+        notes.append(f"{where} holds {_codepoints(unset)}, which pdflatex cannot typeset with "
+                     "the preamble sci-adk emits and which has no LaTeX form: the copy keeps it "
+                     f"(a reference does not silently lose a letter), and verify fails it; {_STORE}")
+    if name in _NAME_FIELDS:
+        text, more = _safe_names(_tidy_names(text), where)
+        notes += more
+    elif name in _CASE_FIELDS:
+        text = _protect_case(text)
+    elif name == "year":
+        text, more = _plain_year(text, where)
+        notes += more
+    elif name == "key" and len(text) > _MAX_NAME:
+        short = _plain_text(text, _name_char)[:_MAX_NAME].strip()
+        notes.append(f"{where} is longer than {_MAX_NAME} characters (natbib's label holds it; "
+                     f"BibTeX cuts a longer one, braces and all); written as {short!r}; {_STORE}")
+        text = short
+    text, broke = _break_long_words(text)
+    if broke:
+        notes.append(f"{where} has a word longer than {_MAX_WORD} characters, broken with a "
+                     "space (TeX reads a line of at most 200000 characters, and BibTeX breaks "
+                     "a line only at a space)")
+    return text, issues, notes
+
+
+def _written(name: str, value: str, where: str) -> tuple[str, list[str], list[str]]:
+    """:func:`_written_once`, with a value written longer than :data:`_MAX_FIELD` characters cut
+    (BibTeX's string pool holds 200000) and noted."""
+    text, issues, notes = _written_once(name, value, where)
+    if len(text) <= _MAX_FIELD:
+        return text, issues, notes
+    cut = len(value)
+    while len(text) > _MAX_FIELD and cut > 1:
+        cut = max(1, cut * _MAX_FIELD // len(text) * 9 // 10)
+        text, issues, notes = _written_once(name, value[:cut], where)
+    notes.append(f"{where} is too long for BibTeX (over {_MAX_FIELD} characters as written); "
+                 f"cut to its first {cut} characters; {_STORE}")
+    return text, issues, notes
+
+
+def _settled(name: str, value: str, where: str) -> tuple[str, list[str], list[str]]:
+    """:func:`_written`, written again until that changes nothing: verify accepts a shipped
+    bibliography only as its own copy, so each value must be a fixed point. The issues and notes
+    are those of the first writing (what the source held)."""
+    text, issues, notes = _written(name, value, where)
+    for _round in range(_FIXPOINT_ROUNDS):
+        again = _written(name, text, where)[0]
+        if again == text:
+            return text, issues, notes
+        text = again
+    return "", issues, notes + [f"{where} is left empty: the copy found no form of it that it "
+                                f"writes the same way twice; {_STORE}"]
+
+
+# -- natbib's citation label ----------------------------------------------------------------------
+#
+# plainnat's calc.label makes an entry's label from the last names of its first author (two
+# authors: both), else (book, inbook, proceedings) of its editor, else from its key field, else
+# (manual, proceedings) from the first three characters of its organization ("The " dropped:
+# "The " #4 organization chop.word #3 text.prefix$), else from the first three bytes of its
+# citation key (cite$ #1 #3 substring$), and writes \bibitem[<label>(<year>)]. natbib reads that
+# back up to the first '(' at brace level 0 as the names and from there to ')' as the year. A
+# field is "empty" for BibTeX when it is missing or white space. Measured (TeX Live 2026, both
+# preambles): a three-character prefix that cuts \& \% \_ \$ or $\alpha$, or a letter outside
+# ASCII in two (BibTeX counts bytes), stopped pdflatex; so did a '_' in a key's first three
+# characters (it reaches \citep as text); so did a '(' in the names followed by a command, a
+# group or a letter outside ASCII ("Improper alphabetic constant").
+_LABEL_ORDER = {
+    "book": ("author", "editor", "key"),
+    "inbook": ("author", "editor", "key"),
+    "proceedings": ("editor", "key", "organization"),
+    "manual": ("author", "key", "organization"),
+}
+_DEFAULT_LABEL_ORDER = ("author", "key")
+# What a three-character label may hold at brace level 0 besides whole special characters
+# ({\...}) and whole letters outside ASCII pdflatex typesets.
+_PREFIX_SAFE = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,-'"
+)
+
+
+def label_source(kind: str, values: dict[str, str]) -> tuple[str, str]:
+    """``(field, value)`` plainnat makes the citation label of an entry of type ``kind`` (lower
+    case) with the field ``values`` from: its first label field that is not empty, or
+    ``("cite", "")`` when it is labelled by its citation key. PURE."""
+    for name in _LABEL_ORDER.get(kind, _DEFAULT_LABEL_ORDER):
+        value = values.get(name, "")
+        if value.strip():
+            return name, value
+    return "cite", ""
+
+
+def _chop_the(text: str) -> str:
+    return text[4:] if text.startswith("The ") else text
+
+
+def _text_prefix(text: str, count: int = 3) -> tuple[str, bool]:
+    """BibTeX's ``text.prefix$`` of ``text`` -- its first ``count`` text characters, a brace
+    group at brace level 0 that starts with a backslash counted as one and any other character
+    as its UTF-8 bytes, as BibTeX counts them -- and whether natbib reads it in a label: ASCII
+    letters, digits, spaces and . , - ' at brace level 0, whole special characters and whole
+    letters outside ASCII pdflatex typesets. PURE."""
+    out: list[str] = []
+    i = n = depth = 0
+    safe = True
+    while i < len(text) and n < count:
+        c = text[i]
+        if c == "{":
+            if depth == 0 and text.startswith("{\\", i):
+                end = _group_close(text, i)
+                out.append(text[i : end + 1])
+                i, n = end + 1, n + 1
+                continue
+            depth += 1
+            safe = False  # BibTeX counts into the group and closes it after the cut
+        elif c == "}":
+            depth = max(0, depth - 1)
+        else:
+            size = len(c.encode("utf-8"))
+            if n + size > count:
+                return "".join(out), False  # a letter cut in two
+            n += size
+            if depth or not (c in _PREFIX_SAFE or (c.isalpha() and typesettable(c))):
+                safe = False
+        out.append(c)
+        i += 1
+    return "".join(out), safe
+
+
+def _key_prefix(key: str) -> tuple[str, bool]:
+    """The first three bytes of a citation key as plainnat writes them into a label, and
+    whether natbib reads them: no letter cut in two and no ``_`` (text mode stops on it). PURE."""
+    raw = key.encode("utf-8")[:3]
+    try:
+        prefix = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", "replace"), False
+    return prefix, "_" not in prefix
+
+
+def _plain_label(text: str) -> str:
+    """The letters, digits and spaces of ``text`` read as TeX, as a key field holds them."""
+    return _plain_text(
+        text, lambda c: c == " " or (c.isalnum() and (c.isascii() or typesettable(c)))
+    )
+
+
+def unsafe_label(kind: str, cite_key: str, values: dict[str, str]) -> tuple[str, str] | None:
+    """``(what, prefix)`` when plainnat labels the entry by the first three characters of its
+    organization or citation key and those are ones natbib cannot read, else None. PURE."""
+    source, value = label_source(kind, values)
+    if source == "organization":
+        prefix, safe = _text_prefix(_chop_the(value))
+        return None if safe else ("organization", prefix)
+    if source == "cite":
+        prefix, safe = _key_prefix(cite_key)
+        return None if safe else ("citation key", prefix)
+    return None
+
+
+def _label_key(kind: str, cite_key: str, values: dict[str, str]) -> tuple[str, str, str] | None:
+    """``(key text, what, prefix)``: the key field the copy writes so the label never comes
+    from an unsafe three-character prefix (:func:`unsafe_label`) -- the first three letters,
+    digits and spaces of the organization (``AT\\&T`` -> ``ATT``), or the first three
+    characters of the citation key as text (``a_b2020`` -> ``a\\_b``) -- or None."""
+    unsafe = unsafe_label(kind, cite_key, values)
+    if unsafe is None:
+        return None
+    what, prefix = unsafe
+    text = ""
+    if what == "organization":
+        text = _plain_label(_chop_the(values.get("organization", "")))[:3].strip()
+    if not text:
+        text = _written_once("key", cite_key[:3], "")[0]
+    return text, what, prefix
+
+
+# The function names of the standard and natbib styles (plain, abbrv, unsrt, alpha, apalike,
+# plainnat, abbrvnat, unsrtnat; TeX Live 2026) that are no entry type: BibTeX runs the function
+# an entry's type names, so @output, @and, @emphasize and @format.names stopped it ("You can't
+# pop an empty literal stack"). The canonical copy writes such a type misc.
+STYLE_FUNCTION_NAMES = frozenset(
+    "and author.editor.full author.editor.key.label author.editor.sort author.full "
+    "author.key.label author.key.organization.label author.organization.sort author.sort "
+    "begin.bib bib.sort.order calc.label calc.short.authors chop.word editor.full "
+    "editor.key.label editor.key.organization.label editor.organization.sort editor.sort "
+    "either.or.check emphasize empty.misc.check end.bib field.or.null fin.entry "
+    "format.article.crossref format.authors format.book.crossref format.btitle format.bvolume "
+    "format.chapter.pages format.crossref.editor format.date format.doi format.edition "
+    "format.editors format.eid format.full.names format.in.ed.booktitle "
+    "format.incoll.inproc.crossref format.isbn format.issn format.key format.lab.names "
+    "format.names format.number.series format.pages format.thesis.type format.title "
+    "format.tr.number format.url format.vol.num.eid format.vol.num.pages forward.pass "
+    "init.seq init.state.consts initialize.et.al.char.used initialize.extra.label.stuff "
+    "initialize.longest.label int.to.fix longest.label.pass make.full.names multi.page.check "
+    "n.dashify new.block new.block.checka new.block.checkb new.sentence new.sentence.checka "
+    "new.sentence.checkb not or output output.bibitem output.check output.nonnull "
+    "output.year.check presort reverse.pass sort.format.names sort.format.title sortify "
+    "tie.or.space.connect".split()
+)
+# The fields a style changes the case of (change.case$ in the TeX Live styles: title, edition,
+# type), and the letter commands whose lower case is their own lower-case letter (\AE -> \ae).
+_CASE_CHANGED_FIELDS = frozenset({"title", "edition", "type"})
+_LETTER_PAIRS = frozenset("AE OE AA O L SS DH TH NG DJ".split())
+
+
+#: How many entries with one citation label plainnat tells apart: a letter after the year, a to
+#: z; the 27th gets '{' and natbib stops ("Paragraph ended before \@lbibitem was complete").
+_MAX_LABEL_LETTERS = 26
+
+
+def _label_name(name: str) -> str:
+    """The von and last names of one name as plainnat's label holds them ("{vv~}{ll}"): before
+    the first brace-level-0 comma, else from the first word after the first that starts with a
+    lower-case letter, else the last word. PURE."""
+    parts = _depth0_split(name, _COMMA_RE)
+    if len(parts) > 1:
+        return " ".join(parts[0].split())
+    words = [w for w in _depth0_split(name, _SPACES_RE)[::2] if w]
+    for k in range(1, len(words) - 1):
+        if _starts_lowercase(words[k]):
+            return " ".join(words[k:])
+    return words[-1] if words else ""
+
+
+def natbib_label(kind: str, cite_key: str, values: dict[str, str]) -> tuple[str, str]:
+    """``(names, year)`` of the citation label plainnat's calc.label makes for an entry of type
+    ``kind`` with key ``cite_key`` (``values``: its fields as BibTeX prints them): the first
+    author's last name, "A and B" for two, "A et~al." for more (or a second name "others"),
+    else the label field :func:`label_source` names; the year is ``""`` when the entry has none
+    or is labelled by its key field. Entries with an equal label are told apart by a letter.
+    An approximation for counting labels (white space between words is normalised). PURE."""
+    source, value = label_source(kind, values)
+    if source in _NAME_FIELDS:
+        names = [n for n in (p.strip() for p in _depth0_split(value, _NAME_SEPARATOR_RE)[::2]) if n]
+        short = _label_name(names[0]) if names else ""
+        if len(names) > 2:
+            short += " et~al."
+        elif len(names) == 2:
+            short += " et~al." if names[1] == "others" else " and " + _label_name(names[1])
+    elif source == "key":
+        short = value.strip()
+    elif source == "organization":
+        short = _text_prefix(_chop_the(value))[0]
+    else:
+        short = _key_prefix(cite_key)[0]
+    year = values.get("year", "").strip()
+    if not year or short == values.get("key", "").strip():
+        year = ""
+    return short, year
+
+
+def crowded_labels(entries) -> dict[str, list[str]]:
+    """The citation labels more than :data:`_MAX_LABEL_LETTERS` of ``entries`` (``(kind, cite
+    key, values)`` each, as :func:`natbib_label` takes them) share, as ``"Names (year)"`` with
+    the keys that have it, in order. PURE."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for kind, key, values in entries:
+        groups.setdefault(natbib_label(kind, key, values), []).append(key)
+    return {
+        (short + (f" ({year})" if year else "")): keys
+        for (short, year), keys in groups.items()
+        if len(keys) > _MAX_LABEL_LETTERS
+    }
+
+
+def _label_part(name: str) -> str:
+    """What of one name natbib's label can hold: before its first brace-level-0 comma (the
+    von and last names), else all of it. PURE."""
+    parts = _depth0_split(name, _COMMA_RE)
+    return parts[0].strip() if len(parts) > 1 else name.strip()
+
+
+def _label_text_issues(field: str, text: str, length: int) -> list[str]:
+    """What natbib cannot read in ``text``, a part of a citation label from field ``field``
+    (``length``: the characters it puts there, measured as the copy measures them)."""
+    issues: list[str] = []
+    depth = 0
+    seen: set[str] = set()
+    for i, c in enumerate(text):
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif depth == 0 and c in "[]" and c not in seen:
+            seen.add(c)
+            issues.append(f"field '{field}' has '{c}' at brace level 0, which ends natbib's "
+                          f"citation label: put it in braces ({{{c}}})")
+        elif depth == 0 and c == "(" and "(" not in seen:
+            j = i + 1
+            while j < len(text) and text[j] in _TEX_SPACE:
+                j += 1
+            after = text[j] if j < len(text) else ""
+            if not (after.isascii() and (after.isalnum() or after == ")")):
+                seen.add("(")
+                what = repr(after) if after else "nothing"
+                issues.append(
+                    f"field '{field}' has a '(' at brace level 0 followed by {what}: natbib "
+                    "reads the citation label up to the first '(' as the names and the rest as "
+                    "the year, and stops ('Improper alphabetic constant'): put the parenthesis "
+                    "in braces ({(})"
+                )
+    if length > _MAX_NAME:
+        issues.append(f"field '{field}' puts {length} characters into natbib's citation label "
+                      "(BibTeX cuts a label at 250, braces and all, and natbib stopped on the "
+                      f"cut): at most {_MAX_NAME}")
+    return issues
+
+
+def label_issues(kind: str, cite_key: str, values: dict[str, str]) -> list[str]:
+    """What natbib cannot read in the citation label plainnat makes of an entry of type
+    ``kind`` with key ``cite_key`` (``values``: its fields as BibTeX prints them, with those it
+    inherits through a crossref), one phrase each: a '(' or a bracket at brace level 0 of the
+    names or key the label holds, a label part longer than :data:`_MAX_NAME` characters, an
+    unsafe three-character prefix (:func:`unsafe_label`), a year that is not plain text. The
+    canonical copy never has one (it braces, shortens, writes a key field and a plain year).
+    PURE."""
+    issues: list[str] = []
+    source, value = label_source(kind, values)
+    if source in _NAME_FIELDS:
+        names = [n for n in (p.strip() for p in _depth0_split(value, _NAME_SEPARATOR_RE)[::2]) if n]
+        for name in names[: 2 if len(names) == 2 else 1]:
+            issues += _label_text_issues(source, _label_part(name), len(_last_name(name)))
+    elif source == "key":
+        issues += _label_text_issues("key", value.strip(), len(value.strip()))
+    label = _label_key(kind, cite_key, values)
+    if label is not None:
+        text, what, prefix = label
+        lacking = " or ".join(_LABEL_ORDER.get(kind, _DEFAULT_LABEL_ORDER))
+        issues.append(
+            f"has no {lacking}, so plainnat labels it by the first three characters of its {what} "
+            f"({prefix!r}), which natbib cannot read in a citation label (they cut an escape, "
+            f"math or a letter in two, or hold '_'): add a key field of plain letters (key = "
+            f"{{{text}}})"
+        )
+    year = values.get("year")
+    if year is not None:
+        plain = _plain_text(year, _year_char)
+        if plain != " ".join(year.replace("{", "").replace("}", "").split()) or len(plain) > _MAX_YEAR:
+            issues.append(
+                f"has the year {year!r}: natbib reads the year into its citation label, as plain "
+                f"text of at most {_MAX_YEAR} characters (a command, math or a group there stopped "
+                "natbib with 'Improper alphabetic constant'): write it as plain text"
+            )
+    return issues
+
+
+def entry_issues(kind: str, key: str) -> list[str]:
+    """What BibTeX or a citation cannot take in an entry's type ``kind`` (lower case) or key, one
+    phrase each: a key a citation cannot name (see :data:`_KEY_ASCII`; a backslash in one is
+    read as TeX in the ``.aux``), a type named like a function of the styles
+    (:data:`STYLE_FUNCTION_NAMES`). PURE."""
+    issues: list[str] = []
+    if not _key_ok(key):
+        issues.append(f"has the key {key[:80]!r}, which a citation cannot name: "
+                      f"{_key_problem(key)}")
+    if kind in STYLE_FUNCTION_NAMES:
+        issues.append(f"has the type @{kind}, the name of a function of the standard BibTeX styles "
+                      "(BibTeX runs that function instead of printing the entry, and stopped): "
+                      "write it @misc")
+    return issues
+
+
+def case_change_issues(name: str, value: str) -> list[str]:
+    """What BibTeX's ``change.case$`` would alter in field ``name`` (one a style changes the case
+    of: title, edition, type) as BibTeX prints it, each once: at brace level 0, a control word
+    holding a capital letter (``\\LaTeX`` -> ``\\latex``, undefined; ``\\S`` -> ``\\s``; the
+    letters ``\\AE`` ``\\O`` ... only lower their own case) and a capital letter in math
+    (``$\\Delta$`` -> ``$\\delta$``, ``$T$`` -> ``$t$``). A brace group is left alone, so the
+    copy, which braces every kept command and its math, never has one. PURE."""
+    if name not in _CASE_CHANGED_FIELDS:
+        return []
+    found: list[str] = []
+    math = False
+    for tok in _tex_tokens(value)[0]:
+        if tok[0] == "c" and tok[1] == "$":
+            math = not math
+        elif tok[0] == "s" and tok[1] in "()[]":
+            math = tok[1] in "(["
+        elif tok[0] == "w" and any(c.isupper() for c in tok[1]):
+            if math or tok[1] not in _LETTER_PAIRS:
+                found.append("\\" + tok[1])
+        elif math and tok[0] == "c" and tok[1].isascii() and tok[1].isupper():
+            found.append(f"the capital {tok[1]!r} in math")
+    return list(dict.fromkeys(found))
+
+
+class _Entry(NamedTuple):
+    """One entry of the canonical copy before it is written out."""
+
+    kind: str
+    key: str
+    lines: list[str]
+    written: dict[str, str]
+
+
+def _entry_text(entry: _Entry) -> str:
+    body = ",\n".join(entry.lines)
+    return f"@{entry.kind}{{{entry.key},\n" + (body + "\n" if body else "") + "}\n"
+
+
+def _with_label_key(entry: _Entry, values: dict[str, str], notes: list[str]) -> _Entry:
+    """``entry`` with a key field when its label would be an unsafe prefix (:func:`_label_key`;
+    ``values``: its fields with those it inherits through a crossref)."""
+    label = _label_key(entry.kind, entry.key, values)
+    if label is None:
+        return entry
+    text, what, prefix = label
+    notes.append(
+        f"entry '{entry.key}': plainnat labels it by the first three characters of its {what} "
+        f"({prefix!r}), which natbib cannot read in a citation label; written with key = "
+        f"{{{text}}}, so the paper cites it as '{text}' (plainnat cites an entry labelled by its "
+        f"key without a year); {_STORE}"
+    )
+    lines = [line for line in entry.lines if not line.startswith("  key = ")]
+    return _Entry(entry.kind, entry.key, lines + [f"  key = {{{text}}}"],
+                  {**entry.written, "key": text})
+
+
+def _canonical_entry(
+    bib: str, command: BibCommand, key: str, macros: dict[str, str], notes: list[str],
+    keys: set[str],
+) -> _Entry:
+    """One entry in canonical form (see :func:`canonical_bib`); ``keys`` are the keys of the
+    entries the copy holds (ASCII lower case), which a crossref must name."""
+    where = f"entry '{key}'"
+    written: dict[str, str] = {}
+    kept: dict[str, _Field] = {}
+    for field in command.fields[:-1] if command.bad_last else command.fields:
+        if field.name and field.name not in kept:
+            kept[field.name] = field  # BibTeX keeps the first of a repeated field
+    doi_field = kept.get("doi")
+    doi_value = (
+        _expanded(bib, doi_field, macros, [], where) if doi_field is not None else None
+    )
+    lines: list[str] = []
+    printed: list[str] = []
+    for name, field in kept.items():
+        if not _FIELD_NAME_RE_OK.fullmatch(name) or not printed_field(name):
+            continue
+        if name in _OMITTED_FIELDS:
+            continue
+        if name == "month" and (macro := _bare_month(bib, field, macros)) is not None:
+            lines.append(f"  month = {macro}")
+            continue
+        value = _expanded(bib, field, macros, notes, f"{where} field '{name}'")
+        if name == "crossref":
+            target = value.strip()
+            if _key_ok(target) and _ascii_lower(target) in keys:
+                lines.append(f"  crossref = {{{target}}}")
+                written[name] = target
+            else:
+                notes.append(f"{where}: its crossref {target!r} is left out -- no entry of the "
+                             "bibliography has that key, and BibTeX stops on a cross reference "
+                             f"to none; {_STORE}")
+            continue
+        if name == "doi":
+            doi = _canonical_doi(value)
+            if doi is not None:
+                lines.append(f"  doi = {{{doi}}}")
+            else:
+                notes.append(
+                    f"{where}: its doi {' '.join(value.split())!r} is left out of the paper's "
+                    "bibliography -- a doi there is 10.<registrant>/<suffix of printable ASCII "
+                    f"without white space, braces, backslash, % # or ^>; {_STORE}"
+                )
+            continue
+        if name == "url":
+            url = " ".join(value.split())
+            if _repeats_doi(url, doi_value):
+                continue  # the entry's own doi.org link: the doi is printed already
+            if plain_url(url):
+                lines.append(f"  url = {{{url}}}")
+            else:
+                notes.append(
+                    f"{where}: its url {url[:200]!r} is left out of the paper's bibliography -- a "
+                    f"url there is http, https or ftp, at most {_MAX_URL} characters, with no white "
+                    f"space, backslash, brace, % # or ^ (hyperref reads a URL as TeX); {_STORE}"
+                )
+            continue
+        text, issues, field_notes = _settled(name, value, f"{where} field '{name}'")
+        printed.extend(issue for issue in issues if issue.startswith("\\"))
+        notes.extend(f"{where} field '{name}': {issue}; {_STORE}"
+                     for issue in issues if not issue.startswith("\\"))
+        notes.extend(field_notes)
+        lines.append(f"  {name} = {{{text}}}")
+        written[name] = text
+    if printed:
+        notes.append(
+            f"{where}: {', '.join(dict.fromkeys(printed))} printed as text in the paper's "
+            "bibliography -- outside the commands a reference list may hold (accents, letters, "
+            f"text symbols, simple markup, math without amsmath); {_STORE}"
+        )
+    kind = command.command if command.command in _STANDARD_TYPES else "misc"
+    return _Entry(kind, key, lines, written)
+
+
+# @MX:ANCHOR: [AUTO] The one writer of a bibliography sci-adk ships, and the form verify demands.
+# @MX:REASON: callers: paper_bib (render's paper/references.bib, the SI subset, the deposit and
+#   the package SI copies), pkgreqs_checks.bib_form_problems (verify: text == paper_bib(text)),
+#   compiler (its notes become render warnings); a change re-forms every shipped bibliography
+#   and fails verify on each one rendered before it, until re-rendered.
+def canonical_bib(bib: str) -> CanonicalBib:
+    """``bib`` as the paper's bibliography: every entry BibTeX reads, in order, as
+    ``@type{key,\\n  field = {value},\\n  ...\\n}``, entries one blank line apart. PURE;
+    idempotent (``canonical_bib(text).text == text`` for its own output; each value is written
+    again until it is, :func:`_settled`).
+
+    Read as BibTeX reads it (:func:`bib_commands`): a parenthesised entry, ``@ article``, a
+    syntax error (what BibTeX read before it is kept, and noted; a field whose value failed is
+    not), a @string whose definition failed (the macro is its own name), a repeated field (the
+    first is kept) or key (the first entry is kept, ASCII case ignored). ``@string`` macros are
+    expanded, ``#`` parts joined, ``@preamble``, ``@comment`` and the text between entries left
+    out; the entry type is lower case (``misc`` when it is not one of :data:`_STANDARD_TYPES`),
+    field names too.
+
+    Fields: no style prints the :data:`UNPRINTED_FIELDS` and the ISSN beside the DOI, so they
+    are left out, and so is a url that is the doi.org link of the entry's doi. A bare month
+    macro stays a macro (``month = jan``; an undefined month name becomes one). ``url`` and
+    ``doi`` are kept only when plain (:func:`plain_url`, ``paper.is_doi``; a doi.org prefix is
+    dropped from a doi), ``crossref`` only when it names an entry of the copy. Every other value
+    is made LaTeX-safe (:func:`latex_safe_bib`'s character and markup policy), then written with
+    the allow-listed commands only (:data:`TEXT_COMMANDS`, :data:`MATH_COMMANDS`): each kept
+    command and its arguments in a brace group BibTeX treats as one special character, so its
+    case change cannot alter it; math as ``{$...$}`` (``\\(...\\)`` and ``\\[...\\]`` too; empty
+    math is left out), every script argument braced and a second script on one base given an
+    empty base; a math command in running text in math; a text command in math in an
+    ``\\mbox``; ``[`` and ``]`` at brace level 0 in braces (natbib reads a label up to the first
+    ``]``); any other command printed as text (``{\\textbackslash}name``, boxed in math). Titles
+    keep the case the source gives (:func:`_protect_case`); names are tidied, sort by their base
+    letters (:func:`_tidy_names`) and are kept to what BibTeX and natbib read
+    (:func:`_safe_names`); a year is plain text (:func:`_plain_year`). Limits keep a value within
+    TeX and BibTeX (braces 50 deep, 3 nested accents, a word of 10000 and a value of 100000
+    characters) and pdflatex's time bounded: no link inside a link, math commands with
+    arguments at most 4 deep (no arrow accent inside one, no root with an index inside a root)
+    and at most 32 in a value, text markup at most 8 deep; past a limit a command is printed as
+    text.
+
+    An entry whose key is not one a ``\\cite`` can name (one starting with a character outside
+    ASCII or longer than 200 characters too) is left out. Each entry, field or macro left out
+    or changed, each command printed as text, and each citation label more than 26 entries
+    share (natbib stops on the 27th cited; not rewritten) is named in
+    :attr:`CanonicalBib.notes`.
+    """
+    commands = bib_commands(bib)
+    keys = {
+        _ascii_lower(c.key) for c in commands
+        if c.command not in ("string", "preamble") and not c.repeated and _key_ok(c.key or "")
+    }
+    macros: dict[str, str] = {}
+    notes: list[str] = []
+    entries: list[str] = []
+    line, counted = 1, 0  # the line a command ends on, counted on as the commands come
+    for command in commands:
+        if command.command == "preamble":
+            continue
+        if command.command == "string":
+            _define(bib, command, macros, notes)
+            if command.bad_last and command.fields and command.fields[0].name:
+                name = command.fields[0].name
+                notes.append(f"@string '{name}' has a syntax error, so BibTeX defines the macro "
+                             f"as its own name: a field naming it prints '{name}'; {_STORE}")
+            continue
+        key = command.key or ""
+        if command.repeated:
+            notes.append(
+                f"entry '{key}' is left out of the paper's bibliography: it repeats the key of an "
+                f"earlier entry, and BibTeX keeps the first (it reads nothing after this one's "
+                f"key); {_STORE}"
+            )
+            continue
+        if not _key_ok(key):
+            notes.append(
+                f"entry {key!r} is left out of the paper's bibliography: {_key_problem(key)}; "
+                f"{_STORE}"
+            )
+            continue
+        if not command.complete:
+            fields = command.fields[:-1] if command.bad_last else command.fields
+            read = len([f for f in fields if f.name])
+            line += bib.count("\n", counted, command.end)
+            counted = command.end
+            notes.append(
+                f"entry '{key}' has a BibTeX syntax error near line {line}: BibTeX stops reading "
+                "it there, so the copy keeps "
+                + (f"the {read} field(s) read before it" if read else "none of its fields")
+                + f"; {_STORE}"
+            )
+        entries.append(_canonical_entry(bib, command, key, macros, notes, keys))
+    entries = _labelled(entries, notes)
+    notes.extend(_crowded_label_notes(entries))
+    return CanonicalBib("\n".join(_entry_text(e) for e in entries), tuple(dict.fromkeys(notes)))
+
+
+def _crowded_label_notes(entries: list[_Entry]) -> list[str]:
+    """One note per citation label more than :data:`_MAX_LABEL_LETTERS` entries share
+    (:func:`crowded_labels`; a crossref child judged with what it inherits)."""
+    by_key = {_ascii_lower(e.key): e.written for e in entries}
+    rows = []
+    for e in entries:
+        values = e.written
+        if "crossref" in values:
+            values = {**by_key.get(_ascii_lower(values["crossref"]), {}), **values}
+        rows.append((e.kind, e.key, values))
+    notes = []
+    for label, keys in crowded_labels(rows).items():
+        shown = ", ".join(keys[:5]) + (", ..." if len(keys) > 5 else "")
+        notes.append(
+            f"{len(keys)} entries share the citation label {label!r} ({shown}): plainnat tells "
+            "entries with one label apart by a letter after the year, a to z, and natbib stops "
+            f"when more than {_MAX_LABEL_LETTERS} of them are cited ('Paragraph ended before "
+            "\\@lbibitem was complete'); the copy leaves them as they are -- cite at most "
+            f"{_MAX_LABEL_LETTERS} of them, or tell them apart by author or year; {_STORE}"
+        )
+    return notes
+
+
+def _labelled(entries: list[_Entry], notes: list[str]) -> list[_Entry]:
+    """``entries`` with a key field where plainnat's label would be an unsafe prefix. An entry
+    with a crossref is judged with the fields it inherits (BibTeX copies each field the entry
+    lacks from the entry it names), after that entry got its own key."""
+    out = [e if "crossref" in e.written else _with_label_key(e, e.written, notes)
+           for e in entries]
+    by_key = {_ascii_lower(e.key): e.written for e in out}
+    for k, e in enumerate(out):
+        if "crossref" in e.written:
+            parent = by_key.get(_ascii_lower(e.written["crossref"]), {})
+            out[k] = _with_label_key(e, {**parent, **e.written}, notes)
+    return out
+
+
+# @MX:NOTE: [AUTO] What render writes into paper/ (references.bib, the SI subset, the deposit copy)
+# and the package's SI cut; the store keeps the acquired bytes and its keys.
+def paper_bib(bib: str) -> str:
+    """The bibliography a rendered paper loads: :func:`canonical_bib` of ``bib``, its text.
+    PURE; keys never change (an entry is kept with its key, or left out); idempotent."""
+    return canonical_bib(bib).text
 
 
 __all__ = [
     "BibCommand",
-    "MATH_ONLY_COMMANDS",
+    "CanonicalBib",
     "HTML_ENTITY_RE",
     "HTML_TAG_RE",
+    "MATH_COMMANDS",
+    "MAX_EXPANDED",
+    "STYLE_FUNCTION_NAMES",
     "T1_ONLY_CHARS",
+    "TEXT_COMMANDS",
     "UNPRINTED_FIELDS",
     "VERBATIM_FIELDS",
     "accented_letters_in_math",
     "bare_specials",
     "bib_commands",
+    "bib_syntax_issues",
+    "canonical_bib",
+    "caret_notation",
+    "case_change_issues",
+    "command_issues",
+    "crowded_labels",
+    "entry_issues",
     "field_value_spans",
     "field_values",
     "html_tags",
-    "latex_safe_bib",
-    "math_commands_in_text",
+    "label_issues",
+    "label_source",
+    "natbib_label",
     "paper_bib",
+    "plain_url",
     "printed_field",
     "raw_sort_letter",
+    "script_issues",
     "sort_letter_command",
     "stray_math_dollar",
     "string_macros_used_as_urls",
     "typesettable",
     "undefined_month_tokens",
+    "unsafe_label",
     "untypesettable_chars",
     "url_arguments",
     "url_problems",
+    "value_issues",
 ]

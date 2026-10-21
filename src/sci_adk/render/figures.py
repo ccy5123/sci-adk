@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import math
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, List, Literal, Sequence, Tuple, Union
 
 from pydantic import BaseModel, Discriminator, Field, Tag, field_validator
@@ -576,6 +576,37 @@ def image_figure_filename(spec: ImageFigureSpec, number: int) -> str:
     return f"fig{number}{ext}"
 
 
+# The first bytes of each graphic format pdfLaTeX loads, by extension: the start of PNG's
+# signature, JPEG's start-of-image marker, a PDF header, a PostScript header or the DOS EPS
+# binary header.
+_IMAGE_SIGNATURES = {
+    ".png": ("PNG", (b"\x89PNG",)),
+    ".jpg": ("JPEG", (b"\xff\xd8\xff",)),
+    ".jpeg": ("JPEG", (b"\xff\xd8\xff",)),
+    ".pdf": ("PDF", (b"%PDF-",)),
+    ".eps": ("EPS", (b"%!PS", b"\xc5\xd0\xd3\xc6")),
+}
+
+
+def image_format_problem(name: str, head: bytes) -> str | None:
+    """Why a graphic named ``name`` whose first bytes are ``head`` cannot be the format its
+    extension names, or None when it is (PNG, JPEG, PDF or EPS by their signatures). pdfLaTeX
+    picks the graphics driver by the extension, so a JPEG named ``.png`` stops the compile.
+    PURE."""
+    ext = PurePosixPath(name.replace("\\", "/")).suffix.lower()
+    expected = _IMAGE_SIGNATURES.get(ext)
+    if expected is None:
+        return None  # an extension the figure spec refuses already
+    label, signatures = expected
+    if any(head.startswith(signature) for signature in signatures):
+        return None
+    return (
+        f"the file is not a {label} file, as its extension {ext} says (its first bytes are "
+        f"{head[:8]!r}) -- pdfLaTeX picks the graphics driver by the extension; convert the "
+        f"file or give it the extension of its format"
+    )
+
+
 def render_figure(spec: AnyFigure, evidence: Sequence[EvidenceItem], number: int) -> str:
     """Render any :data:`AnyFigure` to a LaTeX ``figure`` env, routing by ``spec.kind``.
 
@@ -728,6 +759,7 @@ __all__ = [
     "render_native_figure",
     "render_image_figure",
     "image_figure_filename",
+    "image_format_problem",
     "render_figure",
     "figure_labels",
     "order_figures_by_reference",

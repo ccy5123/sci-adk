@@ -31,6 +31,11 @@ Inputs that still stopped pdflatex or made it read a file after the third harden
   8. Bib content that cannot compile and passed verify: a math command in running text
      (``\\alpha``, ``\\frac``) is named, an accented letter inside bib math is boxed by the copy
      and named in a package bib, ``\\bibitem`` fails, and ``\\hbox`` is an unknown command.
+
+Sections 2 and 8 changed after this pass (tests/test_bib_allowlist.py): the paper's
+bibliography is a canonical copy holding only allow-listed commands, so the copy of each bypass
+holds none of it, and a command off the allow-list (or in the wrong mode, in an author's
+bibliography) fails rather than being advised on.
 """
 
 from __future__ import annotations
@@ -572,13 +577,13 @@ def test_the_command_check_fails_each_bypass(bib):
 
 
 @pytest.mark.parametrize("bib", list(_BYPASSES.values()), ids=list(_BYPASSES))
-def test_the_paper_copy_of_each_bypass_is_failed_or_holds_no_preamble(bib):
+def test_the_paper_copy_of_each_bypass_passes_verify_and_holds_no_preamble(bib):
     from sci_adk.render.bib_latex import paper_bib
-    from sci_adk.render.pkgreqs_checks import bib_command_problems
+    from sci_adk.render.pkgreqs_checks import bib_command_problems, bib_form_problems
 
     copy = paper_bib(bib)
-    assert "@preamble" not in copy.lower()
-    assert bib_command_problems(copy) or "preamble" in bib.lower()
+    assert "@preamble" not in copy.lower() and "@string" not in copy.lower()
+    assert bib_command_problems(copy) == [] and bib_form_problems(copy) == []
 
 
 def test_the_paper_copy_drops_every_preamble_and_keeps_the_entries():
@@ -593,7 +598,7 @@ def test_the_paper_copy_drops_every_preamble_and_keeps_the_entries():
     copy = paper_bib(bib)
     assert "preamble" not in copy.lower() and "noopsort" not in copy
     assert bib_keys(copy) == ["A2020", "B2021"]
-    assert '@string{jpc = "J. Phys. Chem."}' in copy
+    assert "journal = {J. Phys. Chem.}" in copy  # the macro, expanded
     assert paper_bib(copy) == copy
 
 
@@ -620,12 +625,14 @@ def test_a_copy_the_check_passes_reads_no_file(tmp_path, case):
     assert not _read_marker(tmp_path, "t")
 
 
-def test_a_string_macro_is_checked_whatever_its_name_and_once():
+def test_a_string_macro_is_checked_whatever_its_name_and_where_it_is_printed():
     from sci_adk.render.pkgreqs_checks import bib_command_problems
 
     bib = '@string{abstract = "x ' + BS + 'def' + BS + 'y{}"}\n@article{K1, title=abstract}\n'
     lines = bib_command_problems(bib, source="references.bib")
-    assert len(lines) == 1 and "@string 'abstract'" in lines[0] and BS + "def" in lines[0], lines
+    assert len(lines) == 2, lines  # the macro, and the entry that prints it (expanded)
+    assert any("@string 'abstract'" in line and BS + "def" in line for line in lines), lines
+    assert any("entry 'K1'" in line and BS + "def" in line for line in lines), lines
 
 
 def test_a_preamble_is_named_as_a_preamble():
@@ -636,12 +643,17 @@ def test_a_preamble_is_named_as_a_preamble():
 
 
 def test_a_plain_url_and_doi_pass():
-    from sci_adk.render.pkgreqs_checks import bib_command_advisories, bib_command_problems
+    from sci_adk.render.bib_latex import paper_bib
+    from sci_adk.render.pkgreqs_checks import bib_command_problems
 
-    bib = ("@article{K1, title={T " + BS + "url{https://example.org/a_b?c=1&d=2#x}}, "
+    bib = ("@article{K1, title={T " + BS + "url{https://example.org/a_b?c=1&d=2}}, "
            "url={https://example.org/a%20b~c#frag}, doi={10.1002/(SICI)1097-4636(199601)30:1<1::AID-JBM1>3.0.CO;2-6}, "
            "year={2020}}\n")
-    assert bib_command_problems(bib) == [] and bib_command_advisories(bib) == []
+    assert bib_command_problems(bib) == []
+    # The copy keeps a url only when it is plain: % and # are TeX's comment and parameter
+    # characters, so that url is left out of it (and named in a render warning).
+    copy = paper_bib(bib)
+    assert "url = {" not in copy and BS + "url{https://example.org/a_b?c=1&d=2}" in copy
 
 
 def test_verify_fails_a_string_macro_bypass_in_the_rendered_bibliography(tmp_path):
@@ -679,14 +691,14 @@ _MATH_IN_TEXT = ["Decay of " + BS + "alpha particles", BS + "frac{1}{2} of it",
 
 
 @pytest.mark.parametrize("title", _MATH_IN_TEXT)
-def test_a_math_command_in_running_text_is_named(title):
-    from sci_adk.render.pkgreqs_checks import bib_command_advisories, bib_latex_safety_problems
+def test_a_math_command_in_running_text_fails_and_the_copy_puts_it_in_math(title):
+    from sci_adk.render.bib_latex import paper_bib
+    from sci_adk.render.pkgreqs_checks import bib_command_problems
 
-    # Advisory, as any other command that stops pdflatex without running anything.
     bib = "@article{K1, title={" + title + "}, year={2020}}\n"
-    notes = bib_command_advisories(bib)
-    assert len(notes) == 1 and "math" in notes[0] and "'K1'" in notes[0], notes
-    assert not any("math" in p for p in bib_latex_safety_problems(bib))
+    lines = bib_command_problems(bib)
+    assert len(lines) == 1 and "running text" in lines[0] and "'K1'" in lines[0], lines
+    assert bib_command_problems(paper_bib(bib)) == []
 
 
 @pytest.mark.parametrize(
@@ -695,10 +707,10 @@ def test_a_math_command_in_running_text_is_named(title):
      BS + "ldots and " + BS + "S 3 and " + BS + "textit{x}", "$" + BS + "frac{1}{2}$"],
 )
 def test_a_math_command_in_math_is_not_named(title):
-    from sci_adk.render.pkgreqs_checks import bib_command_advisories, bib_latex_safety_problems
+    from sci_adk.render.pkgreqs_checks import bib_command_problems, bib_latex_safety_problems
 
     bib = "@article{K1, title={" + title + "}, year={2020}}\n"
-    assert not any("math" in n for n in bib_command_advisories(bib))
+    assert bib_command_problems(bib) == []
     assert not any("math" in p for p in bib_latex_safety_problems(bib))
 
 
@@ -741,15 +753,15 @@ def test_the_copy_of_accented_letters_in_math_compiles(tmp_path, figure_bearing)
      BS + "setcounter{page}{99999999999}", "$" + BS + "upmu$"],
     ids=["hbox", "hspace", "rule", "setcounter", "upmu"],
 )
-def test_a_command_whose_argument_can_stop_pdflatex_is_named(title):
-    from sci_adk.render.pkgreqs_checks import bib_command_advisories
+def test_a_command_whose_argument_can_stop_pdflatex_fails(title):
+    from sci_adk.render.pkgreqs_checks import bib_command_problems
 
-    notes = bib_command_advisories("@article{K1, title={" + title + "}, year={2020}}\n")
-    assert len(notes) == 1 and "'K1'" in notes[0], notes
+    lines = bib_command_problems("@article{K1, title={" + title + "}, year={2020}}\n")
+    assert len(lines) == 1 and "'K1'" in lines[0], lines
 
 
-def test_bibitem_is_on_the_deny_list():
-    from sci_adk.render.bib_latex import DANGEROUS_COMMANDS, SAFE_COMMANDS
+def test_bibitem_hbox_and_upmu_are_off_the_allow_list():
+    from sci_adk.render.bib_latex import MATH_COMMANDS, TEXT_COMMANDS
 
-    assert "bibitem" in DANGEROUS_COMMANDS and "hbox" not in SAFE_COMMANDS
-    assert "upmu" not in SAFE_COMMANDS
+    for name in ("bibitem", "hbox", "upmu", "hspace", "setcounter", "rule"):
+        assert name not in TEXT_COMMANDS and name not in MATH_COMMANDS, name

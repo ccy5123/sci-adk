@@ -22,6 +22,15 @@ Decisions taken (user, 2026-06-26):
 
 ## 1. The CLI is the primary public contract
 
+> Addendum (2026-10-21): the CLI has grown since this analysis. Measured on 2026-10-21 it has
+> 21 public top-level verbs. Not in the tables below: `add-literature`, `inquiry`, `numbers`
+> and `scan-literature`. The tables below are not updated.
+>
+> `check-ascii` is an internal hook helper outside the frozen surface (user decision
+> 2026-10-21): the research-workspace PreToolUse hook runs it (it reads a Claude Code hook
+> input on stdin and exits 3 when it refuses the call). `sci-adk --help` and the verb list
+> leave it out (`cli.INTERNAL_VERBS`); it may change or go without notice.
+
 Entry point: `pyproject.toml:51` `sci-adk = "sci_adk.cli:main"` → `src/sci_adk/cli.py`
 (1845 LOC). Measured surface: **17 top-level verbs, 83 `add_argument` flags.**
 This is how sci-adk is actually consumed — IEAM-P8 (the 2nd-domain validation,

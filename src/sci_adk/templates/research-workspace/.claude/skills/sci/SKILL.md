@@ -181,6 +181,10 @@ Load `Skill("science-workflow-experiment")`. SEQUENTIAL (3b reads 3a's Evidence)
    non-numeric checkpoint; loop `sci-adk resolve` until checkpoints clear.
 3. Optionally `Agent(subagent_type: "evaluator-rigor")` (agent form, advisory).
 
+Every script a worker writes is ASCII-only: English comments, docstrings and messages, and a
+character the data needs written as an escape (Python or R `"\u00b5"`). The PreToolUse hook
+blocks a write that breaks this, and `sci-adk append-evidence` refuses to record such a script.
+
 ### publish — Deposit the record, then write the paper in a SEPARATE session
 
 Load `Skill("science-workflow-publish")`.

@@ -76,6 +76,10 @@ checkpoints, unresolved claims, pending halts) into context. This re-delivers th
 turn rather than relying on the model to remember it — the direct antidote to compaction drift.
 (Requires a read-only state read; see Open Question O1.)
 
+A third hook (2026-10-20), `PreToolUse` on Write/Edit/MultiEdit/NotebookEdit, blocks a call that
+puts a non-ASCII character into a script, so the record can typeset every recorded script; see
+`design/english-only-scripts.md`.
+
 ### Layer 3 — Persona: a `researcher` output style
 An always-on output style encoding the contract: *record vs belief*, *referee not player*, *null
 results are results*, *no conclusion outside the engine*. Mirrors `outputStyle: "MoAI"`. Soft, but

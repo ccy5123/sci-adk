@@ -80,27 +80,33 @@ from sci_adk.render.deposit import (
 )
 from sci_adk.render.bib_latex import (
     HTML_ENTITY_RE,
+    MAX_EXPANDED,
     T1_ONLY_CHARS,
     VERBATIM_FIELDS,
     accented_letters_in_math,
     bare_specials,
     bib_commands,
+    bib_syntax_issues,
     caret_notation,
-    dangerous_commands,
+    case_change_issues,
+    crowded_labels,
+    entry_issues,
+    entry_values,
     field_value_spans,
     field_values,
     html_tags,
-    math_commands_in_text,
+    label_issues,
+    paper_bib,
     printed_field,
     raw_sort_letter,
     sort_letter_command,
     string_macros_used_as_urls,
     stray_math_dollar,
     undefined_month_tokens,
-    unknown_commands,
     untypesettable_chars,
     url_arguments,
     url_problems,
+    value_issues,
 )
 from sci_adk.render.pubreqs_checks import word_count
 
@@ -130,6 +136,27 @@ _ROOT_FILES: tuple[str, ...] = ("MANIFEST.md", "README.md")
 # package tool-vocab gate BY CONSTRUCTION (the gate reads only 01_manuscript/, REQ-SA-507).
 PACKAGE_RECORD_NAME: str = "record.tex"
 _PACKAGE_RECORD_FOLDER: str = "06_provenance"
+
+
+# @MX:NOTE: [AUTO] The one marker of an SI bibliography the assembler wrote: only that file is
+#   held to the canonical form (an author may write 01_manuscript/references_SI.bib in place).
+# The line MANIFEST.md carries for 01_manuscript/references_SI.bib when the assembler cut it from
+# 01_manuscript/references.bib (render/package.py writes it, verify reads it).
+SI_BIB_CUT_LINE: str = (
+    "- `01_manuscript/references_SI.bib` -- cut by the assembler from "
+    "`01_manuscript/references.bib` (the entries si.tex cites)"
+)
+
+
+def si_bib_cut_by_assembler(package_dir: Path) -> bool:
+    """True iff the package's MANIFEST.md says the assembler cut
+    ``01_manuscript/references_SI.bib`` (:data:`SI_BIB_CUT_LINE`) -- the one SI bibliography
+    of a package that is a file sci-adk wrote. READ-ONLY."""
+    try:
+        text = (package_dir / "MANIFEST.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return SI_BIB_CUT_LINE in text.splitlines()
 
 
 def package_record_path(package_dir: Path) -> Path:
@@ -164,8 +191,6 @@ def layout_problems(package_dir: Path) -> List[str]:
 # A \cite / \citep / \citet / \citeauthor / ... key group: capture the braces argument, then
 # split on commas (a \cite{a,b,c} is three keys). Matches any \cite-family command.
 _CITE_RE = re.compile(r"\\cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^{}]+)\}")
-# A bib entry key: @article{KEY, / @book{ KEY , -- the token after the entry-type brace.
-_BIB_ENTRY_RE = re.compile(r"@\w+\{\s*([^,\s}]+)\s*,")
 
 
 def cited_keys(tex: str) -> List[str]:
@@ -180,8 +205,13 @@ def cited_keys(tex: str) -> List[str]:
 
 
 def bib_keys(bib: str) -> List[str]:
-    """Every distinct entry key defined in a BibTeX ``bib`` string (sorted). PURE."""
-    return sorted({k.strip() for k in _BIB_ENTRY_RE.findall(bib)})
+    """Every distinct entry key defined in a BibTeX ``bib`` string (sorted), read as BibTeX
+    reads it (``bib_latex.bib_commands``: a parenthesised entry or ``@ article{`` is an entry, a
+    ``@word{x,`` inside a value is not). PURE."""
+    return sorted({
+        c.key.strip() for c in bib_commands(bib)
+        if c.command not in ("string", "preamble") and c.key and c.key.strip()
+    })
 
 
 def _entry_close_index(bib: str, open_brace: int) -> int:
@@ -210,30 +240,48 @@ def _entry_close_index(bib: str, open_brace: int) -> int:
 def bib_subset(bib: str, keep: Sequence[str]) -> str:
     """The ``bib`` entries whose key is in ``keep``, in source order (SI subset, M6).
 
-    PURE + deterministic, no ``bibtexparser`` -- regex/line-based, house style (see
-    ``citation_keys.py``). For each entry header (``@type{KEY,``, via ``_BIB_ENTRY_RE``) whose
-    key is in ``keep``, the entry spans from its ``@`` to the TRUE matching close brace, found
-    by BRACE-DEPTH-AWARE scanning (:func:`_entry_close_index`) -- NOT the naive "next header =
-    entry end", which truncated an entry whose field value embeds a ``@word{...}``-shaped token
-    (e.g. ``note = {... @inbook{X, y} ...}``). Kept entries are re-joined in their original
-    order. Text before the first ``@entry`` (comments / preamble) is dropped -- the result is
+    PURE + deterministic, no ``bibtexparser``. The entries are read as BibTeX reads them
+    (``bib_latex.bib_commands``): each entry whose key is in ``keep`` spans from its ``@`` to
+    where BibTeX stops reading it, so a field value holding a ``@word{...}``-shaped token
+    (``note = {... @inbook{X, y} ...}``) neither ends the entry nor starts another. Kept entries
+    are joined in their original order one blank line apart, as the canonical copy
+    (``bib_latex.paper_bib``) writes them, so the subset of a canonical copy is canonical. Text
+    outside the kept entries (comments, ``@string``, ``@preamble``) is dropped -- the result is
     the concatenation of the kept entries only, so ``bib_keys(bib_subset(bib, keep)) ==
-    sorted(set(keep) & set(bib_keys(bib)))``, and an empty result -> ``""``. Used to build the
-    cited-only ``references_SI.bib`` from the run's ONE literature pool (REQ-SA-604/605): no
-    LLM, no network, a pure set filter over the already-acquired pool.
+    sorted(set(keep) & set(bib_keys(bib)))`` for a bibliography without macros, and an empty
+    result -> ``""``. Used to build the cited-only ``references_SI.bib`` from the canonical copy
+    of the run's ONE literature pool (REQ-SA-604/605): no LLM, no network, a pure set filter.
+
+    An entry a kept entry names in its ``crossref`` field is kept too (and those its own
+    crossref names): BibTeX stops on a cross reference to an entry the file lacks, and the
+    canonical copy keeps a crossref only when its target is there.
     """
     wanted = set(keep)
-    kept: List[str] = []
-    for m in _BIB_ENTRY_RE.finditer(bib):
-        key = m.group(1).strip()
-        if key not in wanted:
-            continue
-        # m spans "@type{KEY," -- the entry-open brace is the "{" the header matched. Locate it
-        # from the match start so the depth scan begins at the right brace.
-        open_brace = bib.index("{", m.start())
-        end = _entry_close_index(bib, open_brace)
-        kept.append(bib[m.start() : end].rstrip())
-    return ("\n".join(kept) + "\n") if kept else ""
+    entries = [
+        c for c in bib_commands(bib)
+        if c.command not in ("string", "preamble") and c.key is not None and not c.repeated
+    ]
+    by_key = {}
+    for c in entries:
+        by_key.setdefault(_ascii_key(c.key.strip()), c)
+    chosen = {id(c) for c in entries if c.key.strip() in wanted}
+    queue = [c for c in entries if id(c) in chosen]
+    while queue:
+        for field in queue.pop().fields:
+            if field.name != "crossref" or len(field.parts) != 1:
+                continue
+            start, end, _delimited = field.parts[0]
+            target = by_key.get(_ascii_key(bib[start:end].strip()))
+            if target is not None and id(target) not in chosen:
+                chosen.add(id(target))
+                queue.append(target)
+    kept: List[str] = [bib[c.start : c.end].rstrip() for c in entries if id(c) in chosen]
+    return ("\n\n".join(kept) + "\n") if kept else ""
+
+
+def _ascii_key(key: str) -> str:
+    """A key with A-Z lowered, as BibTeX compares keys."""
+    return key.translate(str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"))
 
 
 def cite_resolution_problems(tex: str, bib: str) -> List[str]:
@@ -454,8 +502,24 @@ def _character_problems(
 # The label a unit read from a .bib carries in a problem line, for a @preamble.
 _PREAMBLE = "@preamble"
 
+#: The most @ commands (entries, @string, @preamble) the bibliography checks read in one file. A
+#: paper's bibliography holds far fewer; a file past it fails on its size (bib_command_problems)
+#: and only its first ones are checked, so verify stays quick on any file (100000 @string
+#: macros, 50000 repeated keys and a 3 MB copy each took 30 s to minutes before).
+MAX_BIB_UNITS = 5000
 
-def _bib_units(bib: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
+
+def _checked_part(bib: str) -> Tuple[str, int]:
+    """The part of ``bib`` the checks read -- up to the ``@`` of its command number
+    :data:`MAX_BIB_UNITS` + 1, as BibTeX reads it -- and how many commands it holds in all.
+    PURE."""
+    commands = bib_commands(bib)
+    if len(commands) <= MAX_BIB_UNITS:
+        return bib, len(commands)
+    return bib[: commands[MAX_BIB_UNITS].start], len(commands)
+
+
+def _bib_units(bib: str, every_field: bool = False) -> List[Tuple[str, List[Tuple[str, str]]]]:
     """``(what, [(field name, value), ...])`` for each piece of ``bib`` BibTeX prints, read as
     BibTeX reads it (``bib_latex.bib_commands``: a parenthesised entry, white space after the
     ``@``, an ``@`` inside a value and ``%`` are taken as BibTeX takes them):
@@ -466,10 +530,14 @@ def _bib_units(bib: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
       macro, whatever the macro is called (``title = abstract``); named ``url`` when a url or
       doi field names the macro, so it is read as a URL, else ``string``;
     - each entry (``"entry 'KEY'"``): the values of its printed fields
-      (``bib_latex.printed_field``), braced or quoted, ``#``-joined parts each their own value.
+      (``bib_latex.printed_field``) as BibTeX prints them (``bib_latex.entry_values``: ``#``
+      parts joined, ``@string`` macros expanded), so a command split across parts or macros is
+      seen whole. With ``every_field`` (an author's bibliography: its style may print a field
+      plainnat does not, babplain prints annote) every field is listed.
     PURE."""
     commands = bib_commands(bib)
     url_macros = string_macros_used_as_urls(bib, commands)
+    printed_values = {command.start: values for command, values in entry_values(bib)}
     units: List[Tuple[str, List[Tuple[str, str]]]] = []
     for command in commands:
         if command.command == "preamble":
@@ -487,25 +555,27 @@ def _bib_units(bib: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
                 units.append((f"@string '{field.name}'", values))
         else:
             values = [
-                (field.name, bib[start:end])
-                for field in command.fields
-                if printed_field(field.name)
-                for start, end, delimited in field.parts
-                if delimited
+                (name, value) for name, value in printed_values.get(command.start, [])
+                if every_field or printed_field(name)
             ]
             units.append((f"entry '{command.key}'", values))
     return units
 
 
 def _unit_command_problems(
-    where: str, printed: List[Tuple[str, str]], package_source: Optional[str], *, preamble: bool
+    where: str, printed: List[Tuple[str, str]], package_source: Optional[str], *, preamble: bool,
+    script_where: str = "",
 ) -> List[str]:
-    """The FAIL lines for one unit of :func:`_bib_units`: a @preamble; a command on
-    ``bib_latex.DANGEROUS_COMMANDS``; ``^^`` notation; and a URL (a url or doi value, a macro
-    one names, or the URL argument of ``\\url``/``\\href`` in a value) holding a backslash,
-    ``^^``, a brace or a scheme that launches a program or opens a file
-    (``bib_latex.url_problems``). Shared by :func:`bib_latex_safety_problems` and
-    :func:`bib_command_problems`, so both write the same line for the same unit."""
+    """The FAIL lines for one unit of :func:`_bib_units`: a @preamble; anything outside the
+    allow-list (``bib_latex.command_issues``: a command not on ``bib_latex.TEXT_COMMANDS`` /
+    ``MATH_COMMANDS`` for its mode, a math delimiter with no partner, a brace TeX reads as
+    unbalanced, a cap on nesting or count passed); a script the copy rewrites so that it
+    compiles (``bib_latex.script_issues``, a ``script_where`` line: the copy never has one);
+    ``^^`` notation; and a URL (a url or doi value, a macro one names, or the URL argument of
+    ``\\url``/``\\href`` in a value) holding a backslash, ``^^``, a brace or a scheme that
+    launches a program or opens a file (``bib_latex.url_problems``). Shared by
+    :func:`bib_latex_safety_problems` and :func:`bib_command_problems`, so both write the same
+    line for the same unit."""
     fix = package_source or _PER_RUN_STORE
     values = [v for name, v in printed if name not in VERBATIM_FIELDS]
     urls = [v for name, v in printed if name in VERBATIM_FIELDS]
@@ -517,12 +587,28 @@ def _unit_command_problems(
             "which pdflatex runs (a definition, a file read); a reference needs none: remove "
             f"it from {fix}"
         )
-    commands = list(dict.fromkeys(c for v in values for c in dangerous_commands(v)))
-    if commands:
+    if any(len(v) >= MAX_EXPANDED for _name, v in printed):
         lines.append(
-            f"{where} contains the command(s) {', '.join(commands)} -- a command that can "
-            "read or write a file, define a macro, change how TeX reads its input or end the "
-            f"document, which pdflatex would run from the reference list; remove it from {fix}"
+            f"{where} has a value of at least {MAX_EXPANDED} characters as BibTeX joins its parts "
+            "and macros (a chain of @string macros can double it each time) -- longer than "
+            f"BibTeX holds, and longer than this check reads: shorten it in {fix}"
+        )
+    judged = [] if preamble else [value_issues(v) for v in values]
+    issues = list(dict.fromkeys(i for found, _scripts in judged for i in found))
+    scripts = list(dict.fromkeys(s for _found, found in judged for s in found))
+    if issues:
+        lines.append(
+            f"{where} holds {', '.join(issues)} -- outside the commands a reference list may "
+            "hold (accents, letters, text symbols, simple markup and math defined without "
+            "amsmath, bib_latex.TEXT_COMMANDS and MATH_COMMANDS): BibTeX writes the value into "
+            "the reference list as LaTeX, so pdflatex would run it or stop on it; remove it "
+            f"from {fix}"
+        )
+    if scripts:
+        lines.append(
+            f"{script_where or where} has {'; '.join(scripts)} -- pdflatex stops on each in math: "
+            "write every superscript and subscript argument in braces (x^{2}) and give a second "
+            f"one on a base an empty base (x^{{2}}{{}}^{{3}}), in {fix}"
         )
     if any(caret_notation(v) for v in values):
         lines.append(
@@ -545,65 +631,279 @@ def _unit_command_problems(
 def bib_command_problems(
     bib: str, source: str = "references.bib", package_source: Optional[str] = None
 ) -> List[str]:
-    """Every ``.bib`` entry whose printed field values carry a command that can read or write a
-    file, define a macro, change how TeX reads its input or end the document
-    (``bib_latex.DANGEROUS_COMMANDS``: ``\\input``, ``\\def``, ``\\catcode``, ``\\end`` ...),
-    or TeX's ``^^`` notation. PURE.
+    """Every ``.bib`` entry or macro whose printed field values hold anything outside the
+    allow-list (``bib_latex.command_issues``: a command not on ``bib_latex.TEXT_COMMANDS`` /
+    ``MATH_COMMANDS`` for its mode -- ``\\input``, ``\\hspace``, ``\\mathbb`` --, a math
+    delimiter with no partner, a brace TeX reads as unbalanced), or TeX's ``^^`` notation.
+    PURE.
 
-    Read as BibTeX reads the file (:func:`_bib_units`): every entry, every ``@string`` macro
-    (whatever its name) and every ``@preamble``, which fails as such (BibTeX writes its text into
-    the reference list as LaTeX). A url or doi value, a macro one names and the URL argument of
-    ``\\url``/``\\href`` in a value fail on a backslash, ``^^``, a brace or a ``run:``/``file:``
-    scheme (hyperref reads a URL as TeX).
+    Read as BibTeX reads the file (:func:`_bib_units`): every entry, its values as BibTeX
+    prints them (``#`` parts joined, ``@string`` macros expanded: a command split across parts
+    or macros is judged whole), every ``@string`` macro (whatever its name) and every
+    ``@preamble``, which fails as such (BibTeX writes its text into the reference list as
+    LaTeX). A url or doi value, a macro one names and the URL argument of ``\\url``/``\\href``
+    in a value fail on a backslash, ``^^``, a brace or a ``run:``/``file:`` scheme (hyperref
+    reads a URL as TeX).
 
     The same lines :func:`bib_latex_safety_problems` writes for them, so a caller running both
-    can drop the repeats. ``source`` / ``package_source`` as there. Returns sorted lines (empty =
+    can drop the repeats. ``source`` / ``package_source`` as there; with ``package_source`` (an
+    author's bibliography) every field is checked, the ones plainnat does not print too (the
+    author's style may print them). A file of more than :data:`MAX_BIB_UNITS` commands fails on
+    its size (``bib size:``) and only its first ones are checked. Returns sorted lines (empty =
     clean)."""
     problems: List[str] = []
-    for what, printed in _bib_units(bib):
+    bib, total = _checked_part(bib)
+    if total > MAX_BIB_UNITS:
+        problems.append(
+            f"bib size: {source} holds {total} entries, @string and @preamble commands -- more "
+            f"than the {MAX_BIB_UNITS} the bibliography checks read (the first {MAX_BIB_UNITS} "
+            "were checked); a paper's bibliography holds far fewer: keep the entries the paper "
+            f"cites, in {package_source or _PER_RUN_STORE}"
+        )
+    for what, printed in _bib_units(bib, every_field=package_source is not None):
         problems.extend(
             _unit_command_problems(
                 f"bib LaTeX-safety: {source} {what}", printed, package_source,
-                preamble=what == _PREAMBLE,
+                preamble=what == _PREAMBLE, script_where=f"bib script: {source} {what}",
             )
         )
     return sorted(problems)
 
 
-def bib_command_advisories(
+def bib_syntax_problems(
     bib: str, source: str = "references.bib", package_source: Optional[str] = None
 ) -> List[str]:
-    """One advisory per ``.bib`` entry or ``@string`` macro (:func:`_bib_units`) whose printed
-    values carry a command verify does not know (``bib_latex.unknown_commands``: neither one a
-    reference needs, ``bib_latex.SAFE_COMMANDS``, nor a dangerous one): publisher metadata holds
-    harmless ones (``\\texttimes``, ``\\MakeUppercase``), but pdflatex stops on a command the
-    preamble does not define, or on an argument it cannot use (``\\hspace{20000pt}``). And one
-    per entry or macro that uses a math command in running text
-    (``bib_latex.math_commands_in_text``: ``Decay of \\alpha particles``), where pdflatex stops
-    with "Missing $ inserted". NON-BLOCKING. PURE."""
+    """FAIL lines for an author's bibliography BibTeX reads only by recovering from an error
+    (``bib_latex.bib_syntax_issues``: a @string or entry with a syntax error, a repeated key, a
+    macro no @string defines). After such an error what BibTeX prints depends on how it
+    recovers (a failed @string defines its macro as its own name; a repeated key ends the entry
+    at the key), so the file must have none for the other checks to see what BibTeX prints.
+    The canonical copy render writes never has one. PURE."""
     fix = package_source or _PER_RUN_STORE
-    notes: List[str] = []
-    for what, printed in _bib_units(bib):
-        if what == _PREAMBLE:
-            continue  # it fails as a whole (bib_command_problems)
-        values = [v for name, v in printed if name not in VERBATIM_FIELDS]
-        commands = list(dict.fromkeys(c for v in values for c in unknown_commands(v)))
-        if commands:
-            notes.append(
-                f"bib commands: {source} {what} contains {', '.join(commands)}, which verify "
-                "does not know: not a command that can read or write a file, define a macro or "
-                "end the document, but pdflatex stops on a command the preamble does not define "
-                "or on an argument it cannot use (a length over 16383pt) -- check that the "
-                f"reference list compiles, or replace it in {fix}"
+    return [
+        f"bib syntax: {source} {issue} -- after a syntax error BibTeX reads the rest of the file "
+        f"in ways a check of it cannot follow, so the file must have none: fix it in {fix}"
+        for issue in bib_syntax_issues(_checked_part(bib)[0])
+    ]
+
+
+def _merged_entries(bib: str) -> List[Tuple[object, Dict[str, str], Dict[str, str]]]:
+    """``(command, its fields, its fields with those it inherits through a crossref)`` for each
+    entry BibTeX reads in ``bib`` that does not repeat a key, the values as BibTeX prints them
+    (the first of a repeated field). PURE."""
+    fields_of: Dict[str, Dict[str, str]] = {}
+    rows: List[Tuple[object, Dict[str, str]]] = []
+    for command, values in entry_values(bib):
+        if command.repeated:
+            continue
+        fields: Dict[str, str] = {}
+        for name, value in values:
+            fields.setdefault(name, value)
+        fields_of.setdefault(_ascii_key(command.key or ""), fields)
+        rows.append((command, fields))
+    merged = []
+    for command, fields in rows:
+        parent = fields_of.get(_ascii_key(fields.get("crossref", "").strip()))
+        merged.append((command, fields, {**parent, **fields} if parent else fields))
+    return merged
+
+
+_NOCITE_ALL_RE = re.compile(r"\\nocite\s*\{\s*\*\s*\}")
+
+
+def bib_label_count_lines(
+    bib: str, tex: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> Tuple[List[str], List[str]]:
+    """``(FAIL lines, advisory lines)`` for each citation label more than 26 entries of ``bib``
+    share (``bib_latex.crowded_labels``: plainnat tells entries with one label apart by a
+    letter after the year, a to z, and natbib stops on the 27th). A FAIL when ``tex`` cites
+    more than 26 of them (``\\nocite{*}`` cites all), an advisory when it cites fewer (the build
+    stops once it cites more). The copy is not rewritten. PURE."""
+    bib = _checked_part(bib)[0]
+    crowded = crowded_labels(
+        (command.command, command.key or "", merged)
+        for command, _fields, merged in _merged_entries(bib)
+    )
+    if not crowded:
+        return [], []
+    everything = _NOCITE_ALL_RE.search(tex) is not None
+    cited = set(cited_keys(tex))
+    fix = package_source or _PER_RUN_STORE
+    problems: List[str] = []
+    advisories: List[str] = []
+    for label, keys in crowded.items():
+        count = len(keys) if everything else sum(1 for key in keys if key in cited)
+        shown = ", ".join(keys[:5]) + (", ..." if len(keys) > 5 else "")
+        head = f"bib label: {source} has {len(keys)} entries labelled '{label}' ({shown})"
+        if count > 26:
+            problems.append(
+                f"{head}, and the paper cites {count} of them -- plainnat tells entries with one "
+                "label apart by a letter after the year, a to z, so natbib stops on the 27th "
+                "('Paragraph ended before \\@lbibitem was complete'): cite at most 26 of them, or "
+                f"tell them apart by author or year, in {fix}"
             )
-        in_text = list(dict.fromkeys(c for v in values for c in math_commands_in_text(v)))
-        if in_text:
-            notes.append(
-                f"bib commands: {source} {what} uses the math command(s) {', '.join(in_text)} "
-                "in running text, where pdflatex stops on it (\"Missing $ inserted\") -- put it "
-                f"in math, $...$, in {fix}"
+        else:
+            advisories.append(
+                f"{head}; the paper cites {count} of them -- natbib stops when it cites more "
+                "than 26 (plainnat tells entries with one label apart by a letter after the "
+                "year, a to z)"
             )
-    return sorted(notes)
+    return problems, advisories
+
+
+def bib_label_problems(
+    bib: str, source: str = "references.bib", package_source: Optional[str] = None
+) -> List[str]:
+    """FAIL lines for an author's bibliography whose entries BibTeX and natbib read in a way
+    that stops pdflatex though every command in it is allow-listed. PURE. Per entry, on its
+    values as BibTeX prints them (with what it inherits through a crossref):
+
+    - ``bib label:`` what natbib cannot read in the citation label plainnat makes of it
+      (``bib_latex.label_issues``: an unbraced '(' or bracket in the names or key, a label too
+      long for BibTeX, an organization or citation key whose first three characters cut an
+      escape, math or a letter, a year that is not plain text);
+    - ``bib case:`` a title, edition or type holding at brace level 0 a command with a capital
+      letter or a capital in math, which BibTeX's case change lowercases
+      (``bib_latex.case_change_issues``);
+    - ``bib entry:`` a key a citation cannot name, a type named like a style's function
+      (``bib_latex.entry_issues``).
+
+    The canonical copy render writes never has one. An entry that repeats a key is left to
+    :func:`bib_syntax_problems`."""
+    fix = package_source or _PER_RUN_STORE
+    problems: List[str] = []
+    for command, fields, merged in _merged_entries(_checked_part(bib)[0]):
+        key = command.key or ""
+        for issue in label_issues(command.command, key, merged):
+            problems.append(f"bib label: {source} entry '{key}' {issue}; fix it in {fix}")
+        for name, value in fields.items():
+            found = case_change_issues(name, value)
+            if found:
+                problems.append(
+                    f"bib case: {source} entry '{key}' field '{name}' holds {', '.join(found)} "
+                    "at brace level 0 -- BibTeX's change.case$ lowercases it there (\\LaTeX "
+                    "becomes \\latex, which is undefined; $\\Delta$ becomes $\\delta$): put each "
+                    f"in braces ({{\\LaTeX}}, {{$\\Delta$}}); fix it in {fix}"
+                )
+        for issue in entry_issues(command.command, key):
+            problems.append(f"bib entry: {source} entry {key!r} {issue}; fix it in {fix}")
+    return sorted(problems)
+
+
+def bib_character_problems(bib: str, source: str = "references.bib") -> List[str]:
+    """The lines for characters pdflatex cannot typeset in what BibTeX prints from ``bib``
+    (the character part of :func:`bib_latex_safety_problems`), for the always-on check of the
+    bibliographies render writes: the copy keeps such a character (a reference does not
+    silently lose a letter), so verify names it. PURE."""
+    problems: List[str] = []
+    for what, printed in _bib_units(_checked_part(bib)[0]):
+        if what != _PREAMBLE:
+            problems.extend(
+                _character_problems(f"bib LaTeX-safety: {source} {what}", printed, None)
+            )
+    return sorted(problems)
+
+
+def _field_texts(text: str) -> Tuple[str, Dict[str, str]]:
+    """``(entry type, {field name: value as written})`` of the one entry ``text`` holds."""
+    commands = [c for c in bib_commands(text) if c.command not in ("string", "preamble")]
+    if not commands:
+        return "", {}
+    command = commands[0]
+    values: Dict[str, str] = {}
+    for field in command.fields:
+        values.setdefault(
+            field.name, " # ".join(text[start:end] for start, end, _ in field.parts)
+        )
+    return command.command, values
+
+
+def _entry_difference(written: str, canonical: str) -> str:
+    """What differs between an entry as a file holds it and as render writes it."""
+    kind, mine = _field_texts(written)
+    canon_kind, theirs = _field_texts(canonical)
+    parts: List[str] = []
+    if kind != canon_kind:
+        parts.append(f"its type is @{kind}, render writes @{canon_kind}")
+    extra = [n for n in mine if n not in theirs]
+    missing = [n for n in theirs if n not in mine]
+    changed = [n for n in mine if n in theirs and mine[n] != theirs[n]]
+    if changed:
+        parts.append(f"field(s) {', '.join(changed)} differ from what render writes")
+    if extra:
+        parts.append(f"field(s) {', '.join(extra)} are ones render leaves out")
+    if missing:
+        parts.append(f"field(s) {', '.join(missing)} are missing")
+    return "; ".join(parts) or "its layout differs from what render writes"
+
+
+# @MX:NOTE: [AUTO] verify's half of "judge and emit on the same text": a bibliography sci-adk
+#   ships is accepted only as the canonical copy itself, so nothing outside the copy's rules can
+#   ride along in a file render wrote (a hand edit, a file an older render wrote).
+# The remedy a per-run copy's form line names: a bare render replaces the draft with a skeleton,
+# so the run is rendered again with the inputs it was rendered with.
+_RERENDER = (
+    "render writes this file, and verify reads it as written: render the run again with the "
+    "inputs of its last render (sci-adk render <run_dir> --prose <file> --si <file> --si-prose "
+    "<file> --figures <file>, each that the run used; the deposit declaration is kept from the "
+    "last render, and a bare 'sci-adk render <run_dir>' writes a skeleton draft). A hand edit, "
+    "or a copy an earlier sci-adk wrote, fails until then"
+)
+# The remedy for the SI bibliography the package assembler cut.
+PACKAGE_SI_BIB_FIX = (
+    "the package assembler cut this file from 01_manuscript/references.bib: re-assemble the "
+    "package (sci-adk package <workspace>), or put your own file at "
+    "package_src/references_SI.bib (the package then copies it unchanged and checks it against "
+    "the allow-list only)"
+)
+
+
+def bib_form_problems(
+    bib: str, source: str = "references.bib", fix: Optional[str] = None
+) -> List[str]:
+    """FAIL lines unless ``bib`` is in the form render writes, ``bib_latex.paper_bib(bib) ==
+    bib`` (the bibliographies sci-adk ships: ``paper/references.bib``, ``references_SI.bib``,
+    the ``paper/deposit/`` copy, the package's SI cut). PURE.
+
+    One line per ``@preamble`` and ``@string`` (the copy holds neither), per entry the copy
+    leaves out (a key no citation can name, a repeated key) and per entry not written as the copy
+    writes it, naming its key and the fields that differ; one line for any other difference
+    (text between entries, spacing, order); then one line with ``fix`` (default: render the run
+    again with the inputs of its last render), once for the file however many entries differ.
+    Empty when the file is canonical, and for a file past :data:`MAX_BIB_UNITS` commands (it
+    fails on its size in :func:`bib_command_problems`, which runs beside this check)."""
+    if _checked_part(bib)[1] > MAX_BIB_UNITS:
+        return []
+    canonical = paper_bib(bib)
+    if canonical == bib:
+        return []
+    where = f"bib form: {source}"
+    fix = fix or _RERENDER
+    mine = {c.key: canonical[c.start : c.end] for c in bib_commands(canonical) if c.key}
+    lines: List[str] = []
+    seen: Set[str] = set()
+    for command in bib_commands(bib):
+        if command.command == "preamble":
+            lines.append(f"{where} holds a @preamble, which the copy render writes never holds")
+            continue
+        if command.command == "string":
+            name = command.fields[0].name if command.fields else ""
+            lines.append(f"{where} holds @string '{name}': the copy render writes expands "
+                         "every macro")
+            continue
+        repeated = (command.key or "").casefold() in seen
+        seen.add((command.key or "").casefold())
+        if repeated or command.key not in mine:
+            lines.append(f"{where} entry '{command.key}' is one the copy leaves out (a key no "
+                         "citation can name, or a repeated one)")
+        elif bib[command.start : command.end] != mine[command.key]:
+            difference = _entry_difference(bib[command.start : command.end], mine[command.key])
+            lines.append(f"{where} entry '{command.key}' is not as render writes it: "
+                         f"{difference}")
+    if not lines:
+        lines.append(f"{where} is laid out differently from the file render writes (text "
+                     "between entries, spacing or entry order)")
+    return list(dict.fromkeys(lines)) + [f"{where} -- {fix}"]
 
 
 def bib_latex_safety_problems(
@@ -613,8 +913,8 @@ def bib_latex_safety_problems(
 
     The cite/key gates validate that citations RESOLVE and are SHAPED right; this gate validates
     that the bib actually COMPILES. Render writes a LaTeX-safe copy of the run's literature pool
-    into ``paper/`` (``bib_latex.latex_safe_bib``), and paperforge's ``latex_safety.sanitize``
-    cleans what it acquires; this is the verify-side net for whatever is still unsafe -- a
+    into ``paper/`` (``bib_latex.paper_bib``, the canonical copy), and paperforge's
+    ``latex_safety.sanitize`` cleans what it acquires; this is the verify-side net for whatever is still unsafe -- a
     character the copy has no LaTeX form for, a hand-edited copy, an author-supplied package bib.
 
     Only fields a BibTeX style prints are checked (``bib_latex.UNPRINTED_FIELDS`` lists the
@@ -622,11 +922,9 @@ def bib_latex_safety_problems(
     naming what was found: HTML entities (``&amp;`` ...), markup tags (``<i>``,
     ``<span class="...">``; read in running text only, so ``$x<y$`` is not a tag), a bare ``&``
     (the LaTeX column separator), ``%`` or ``#``, a bare ``_`` or ``^`` outside math, a ``$``
-    nested inside math or left open, a command that can read or write a file, define a macro,
-    change how TeX reads its input or end the document (``\\input``, ``\\def``, ``\\end``:
-    ``bib_latex.DANGEROUS_COMMANDS``; any other unknown command is advisory,
-    :func:`bib_command_advisories`), ``^^`` notation, non-standard Unicode spaces (U+2005
-    four-per-em etc.), and
+    nested inside math or left open, anything outside the allow-list (a command not on
+    ``bib_latex.TEXT_COMMANDS`` / ``MATH_COMMANDS`` for its mode, :func:`bib_command_problems`),
+    ``^^`` notation, non-standard Unicode spaces (U+2005 four-per-em etc.), and
     characters pdflatex cannot typeset with the preamble sci-adk emits (U+2212 MINUS SIGN ...;
     see ``bib_latex.typesettable``) -- with the LaTeX form the copy writes for each, or, where
     there is none, the instruction to replace the character at its source. Does NOT flag the
@@ -644,7 +942,7 @@ def bib_latex_safety_problems(
     """
     tail = f"; fix it in {package_source}" if package_source else ""
     problems: List[str] = []
-    for what, printed in _bib_units(bib):
+    for what, printed in _bib_units(_checked_part(bib)[0]):
         if what == _PREAMBLE:
             continue  # it fails as a whole (bib_command_problems, below)
         where = f"bib LaTeX-safety: {source} {what}"
@@ -692,6 +990,9 @@ def bib_latex_safety_problems(
             )
         problems.extend(_character_problems(where, printed, package_source))
     problems.extend(bib_command_problems(bib, source=source, package_source=package_source))
+    if package_source:
+        problems.extend(bib_syntax_problems(bib, source=source, package_source=package_source))
+        problems.extend(bib_label_problems(bib, source=source, package_source=package_source))
     return sorted(problems)
 
 
@@ -1495,16 +1796,22 @@ def _artifact_copies(package_dir: Path, rid: str, data: DataPlan) -> List[str]:
 __all__ = [
     "PACKAGE_FOLDERS",
     "PACKAGE_RECORD_NAME",
+    "PACKAGE_SI_BIB_FIX",
+    "SI_BIB_CUT_LINE",
     "package_record_path",
+    "si_bib_cut_by_assembler",
     "layout_problems",
     "cited_keys",
     "bib_keys",
     "bib_article_number_advisories",
-    "bib_command_advisories",
+    "bib_character_problems",
     "bib_command_problems",
+    "bib_form_problems",
+    "bib_label_problems",
     "bib_latex_safety_problems",
     "bib_month_advisories",
     "bib_sort_advisories",
+    "bib_syntax_problems",
     "bibliography_stems",
     "font_encoding_problems",
     "cite_resolution_problems",

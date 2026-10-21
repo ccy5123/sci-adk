@@ -77,6 +77,12 @@ go in the result's finding, not in `code_ref`. Anything the bundle cannot resolv
 file is kept as a pointer, and a file whose sha256 no longer matches the recorded one is
 not shipped as the recorded code.
 
+Every script you write is ASCII-only: comments, docstrings, messages and names in English,
+and a character the data needs (a column name, a unit sign) written as an escape (Python or
+R `"\u00b5"`, shell `printf '\302\265'`), so the record can typeset it. The workspace
+hook blocks a non-ASCII write into a script, and `append-evidence` refuses a `code_ref` that
+names such a script (exit 2, nothing recorded). Lean proofs (`.lean`) are exempt.
+
 ## Recording Output Tables In `provenance.data_ref`
 
 For every output table the analysis writes that a paper may offer its readers (a filtered

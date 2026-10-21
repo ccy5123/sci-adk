@@ -167,8 +167,11 @@ def test_compile_copies_references_bib_into_paper_dir(tmp_path):
     co_located = paper_dir / "references.bib"
     # The .bib is co-located next to draft.tex ...
     assert co_located.exists(), "references.bib must be copied into paper/ for Overleaf"
-    # ... with identical content (a faithful copy, not a regeneration) ...
-    assert co_located.read_text(encoding="utf-8") == bib_content
+    # ... as the canonical copy of the store (every entry and key kept, one braced value
+    # per field; tests/test_bib_allowlist.py) ...
+    assert co_located.read_text(encoding="utf-8") == (
+        "@article{morgan1965,\n  doi = {10.1021/c160017a018},\n  title = {Algorithm}\n}\n"
+    )
     # ... and the stem the .tex references is 'references' (resolves in paper/).
     tex = (paper_dir / "draft.tex").read_text(encoding="utf-8")
     assert r"\bibliography{references}" in tex

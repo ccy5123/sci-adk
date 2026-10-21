@@ -249,6 +249,50 @@ def listing_inlinable(text: str) -> bool:
     )
 
 
+def listing_obstacle(text: Optional[str]) -> Optional[str]:
+    """Why a script body cannot be typeset verbatim in the record (``None`` when it can, see
+    :func:`listing_inlinable`): not UTF-8 text, the closing ``\\end{lstlisting}``, non-ASCII
+    characters, control characters, or a line too long. PURE."""
+    if text is None:
+        return "it is not UTF-8 text"
+    if _LSTLISTING_END in text:
+        return "it holds the text " + _LSTLISTING_END
+    if not text.isascii():
+        return "non-ASCII characters"
+    if _LISTING_CHARS_RE.fullmatch(text) is None:
+        return "control characters"
+    if any(len(line.expandtabs(8)) > _LISTING_MAX_COLUMNS for line in text.split("\n")):
+        return f"a line too long (over {_LISTING_MAX_COLUMNS} columns)"
+    return None
+
+
+def names_only_notice(
+    listings: Optional[Sequence[ReproListing]], *, record_only: bool = False
+) -> Optional[str]:
+    """One line naming the scripts the record shows by name only (each with why), or ``None``
+    when it typesets every one. Render prints it once. ``record_only``: the render wrote the
+    record alone (``render --record-only``), so nothing is shipped under ``paper/`` yet. PURE."""
+    shown = [
+        f"paper/code/{script.filename} ({listing_obstacle(script.text)})"
+        for script in bundle_scripts(listings)
+        if not _typeset(script)
+    ]
+    if not shown:
+        return None
+    where = (
+        "a full render ships each under paper/code/ byte for byte (this record-only render "
+        "writes nothing under paper/), and the record holds its SHA-256"
+        if record_only
+        else "each is shipped byte for byte under paper/code/ with its SHA-256 in the record"
+    )
+    return (
+        f"the record shows {len(shown)} script(s) by name only, not typeset: "
+        + ", ".join(shown)
+        + " -- the record typesets printable ASCII with lines of at most "
+        f"{_LISTING_MAX_COLUMNS} columns; {where}"
+    )
+
+
 def _typeset(script: ReproScript) -> bool:
     return script.text is not None and listing_inlinable(script.text)
 
@@ -638,9 +682,11 @@ def render_reproduction_section(
                     lines.append(script.text or "")
                     lines.append(r"\end{lstlisting}")
                 else:
+                    # One line: why, where it is in the bundle, and its SHA-256 (the caption).
+                    reason = _latex_sanitize(listing_obstacle(script.text) or "")
                     lines.append(
                         r"\noindent\textbf{Script:} " + caption
-                        + r" (shipped; its body is not typeset here). \\"
+                        + r" (shipped; its body is not typeset here: " + reason + r"). \\"
                     )
                 lines.append("")
         else:
@@ -961,6 +1007,8 @@ __all__ = [
     "listed_code_files",
     "listed_scripts",
     "listing_inlinable",
+    "listing_obstacle",
+    "names_only_notice",
     "reader_summary",
     "reader_text",
     "reproduction_uses_listings",

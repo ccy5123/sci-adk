@@ -56,6 +56,7 @@ from sci_adk.core.evidence import EvidenceItem, EvidenceKind
 from sci_adk.core.spec import Spec
 from sci_adk.render.bib_latex import typesettable
 from sci_adk.render.factref import substitute_factrefs
+from sci_adk.render.latex_lint import lint_commands
 from sci_adk.render.figures import (
     AnyFigure,
     figure_labels,
@@ -74,6 +75,7 @@ from sci_adk.render.paper import (
     _clean_text,
     _latex_sanitize,
     _one_line,
+    break_long_lines,
     text_font_lines,
 )
 from sci_adk.render.prose import AuthoredSI
@@ -167,6 +169,27 @@ def authored_si_warnings(si: Optional[AuthoredSI]) -> List[str]:
             f"authored SI section '{_one_line(section.title)}': {shown}{rest} cannot be typeset"
         )
     return lines + [AUTHORED_SI_RULE] if lines else []
+
+
+def authored_si_lint_warnings(si: Optional[AuthoredSI]) -> List[str]:
+    """One line per authored SI section whose body uses a command that reads or writes a file
+    or runs code (``latex_lint.lint_commands``: ``\\input``, ``\\write18``, expl3, a pdfTeX
+    primitive ...). The body is author-written LaTeX, outside sci-adk's execution and compile
+    guarantee: render names such a command and writes the body anyway. The text read is the
+    text render writes (``paper._clean_text``). An absent SI, or one without such a command,
+    gives ``[]``. PURE."""
+    if si is None:
+        return []
+    lines: List[str] = []
+    for section in si.sections:
+        commands = lint_commands(_clean_text(section.body or ""))
+        if commands:
+            lines.append(
+                f"authored SI section '{_one_line(section.title)}' uses {', '.join(commands)} "
+                "-- commands that read or write files or run code; the SI body is author-written "
+                "LaTeX, which sci-adk writes as is and does not check (verify names it too)"
+            )
+    return lines
 
 
 def si_figure_labels(si: AuthoredSI) -> List[str]:
@@ -359,7 +382,13 @@ def render_authored_si_latex(
         lines.append(f"\\bibliography{{{stem}}}")
 
     lines.append(r"\end{document}")
-    return "\n".join(lines)
+    return break_long_lines("\n".join(lines))
 
 
-__all__ = ["AUTHORED_SI_RULE", "authored_si_warnings", "render_authored_si_latex", "si_figure_labels"]
+__all__ = [
+    "AUTHORED_SI_RULE",
+    "authored_si_lint_warnings",
+    "authored_si_warnings",
+    "render_authored_si_latex",
+    "si_figure_labels",
+]
